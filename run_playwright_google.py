@@ -3,9 +3,15 @@ import time
 import pyotp
 import re
 import os
+import sys
 from playwright.async_api import async_playwright, Playwright
 from bit_api import openBrowser, closeBrowser
 from create_window import get_browser_list, get_browser_info
+
+def get_base_path():
+    if getattr(sys, 'frozen', False):
+        return os.path.dirname(sys.executable)
+    return os.path.dirname(os.path.abspath(__file__))
 
 # Helper function for automation logic
 async def _automate_login_and_extract(playwright: Playwright, browser_id: str, account_info: dict, ws_endpoint: str):
@@ -162,7 +168,7 @@ async def _automate_login_and_extract(playwright: Playwright, browser_id: str, a
                     line = f"{href}----{email}"
                     
                     # Save to file
-                    save_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "sheerIDlink.txt")
+                    save_path = os.path.join(get_base_path(), "sheerIDlink.txt")
                     with open(save_path, "a", encoding="utf-8") as f:
                         f.write(line + "\n")
                     print(f"Saved link to {save_path}")
@@ -177,7 +183,7 @@ async def _automate_login_and_extract(playwright: Playwright, browser_id: str, a
                 reason = "Offer not available" if is_invalid else "Timeout (6s allowed)"
                 print(f"Account marked as NOT eligible: {reason}")
                 
-                save_path_invalid = os.path.join(os.path.dirname(os.path.abspath(__file__)), "无资格号.txt")
+                save_path_invalid = os.path.join(get_base_path(), "无资格号.txt")
                 with open(save_path_invalid, "a", encoding="utf-8") as f:
                     f.write(f"{email}\n")
                 print(f"Saved to {save_path_invalid}")

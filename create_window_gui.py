@@ -245,9 +245,13 @@ class WorkerThread(QThread):
             
             # 保存到文件
             if file_lines:
-                with open('2fa_codes.txt', 'w', encoding='utf-8') as f:
+                # Use absolute path relative to executable
+                base_path = os.path.dirname(sys.executable) if getattr(sys, 'frozen', False) else os.path.dirname(os.path.abspath(__file__))
+                save_path = os.path.join(base_path, '2fa_codes.txt')
+                
+                with open(save_path, 'w', encoding='utf-8') as f:
                     f.write('\n'.join(file_lines))
-                self.log(f"已保存 {len(file_lines)} 个验证码到 2fa_codes.txt")
+                self.log(f"已保存 {len(file_lines)} 个验证码到 {save_path}")
             
             self.log(f"2FA刷新完成，共生成 {count} 个")
             self.finished_signal.emit({'type': '2fa', 'codes': codes_map})
@@ -388,8 +392,22 @@ class WorkerThread(QThread):
 class BrowserWindowCreatorGUI(QMainWindow):
     def __init__(self):
         super().__init__()
+        self.ensure_data_files()
         self.worker_thread = None
         self.init_ui()
+
+    def ensure_data_files(self):
+        """Ensure necessary data files exist"""
+        base_path = os.path.dirname(sys.executable) if getattr(sys, 'frozen', False) else os.path.dirname(os.path.abspath(__file__))
+        files = ["sheerIDlink.txt", "无资格号.txt", "2fa_codes.txt"]
+        for f in files:
+            path = os.path.join(base_path, f)
+            if not os.path.exists(path):
+                try:
+                    with open(path, 'w', encoding='utf-8') as file:
+                        pass
+                except Exception as e:
+                    print(f"Failed to create {f}: {e}")
         
     def init_ui(self):
         """初始化UI"""

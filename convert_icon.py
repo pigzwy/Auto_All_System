@@ -12,9 +12,13 @@ def convert_svg_to_ico(svg_path, ico_path):
         png_path = "temp_icon.png"
         renderPM.drawToFile(drawing, png_path, fmt="PNG")
         
-        # Convert PNG to ICO using Pillow
+        # Convert PNG to ICO using Pillow with multiple sizes for better Windows support
         img = Image.open(png_path)
-        img.save(ico_path, format='ICO', sizes=[(256, 256)])
+        # Ensure base image is high res
+        if img.width < 256 or img.height < 256:
+             img = img.resize((256, 256), Image.Resampling.LANCZOS)
+             
+        img.save(ico_path, format='ICO', sizes=[(16, 16), (32, 32), (48, 48), (64, 64), (128, 128), (256, 256)])
         
         # Cleanup
         if os.path.exists(png_path):
