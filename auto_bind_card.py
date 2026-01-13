@@ -2,24 +2,99 @@
 自动绑卡脚本 - Google One AI Student 订阅
 """
 import asyncio
+import pyotp
 from playwright.async_api import async_playwright, Page
 from bit_api import openBrowser, closeBrowser
+from account_manager import AccountManager
 
 # 测试卡信息
 TEST_CARD = {
-    'number': '5481087143137903',
+    'number': '5481087170529907',
     'exp_month': '01',
     'exp_year': '32',
-    'cvv': '749'
+    'cvv': '536'
 }
 
-async def auto_bind_card(page: Page, card_info: dict = None):
+async def check_and_login(page: Page, account_info: dict = None):
+    """
+    检测是否已登录，如果未登录则执行登录流程
+    
+    Args:
+        page: Playwright Page 对象
+        account_info: 账号信息 {'email', 'password', 'secret'}
+    
+    Returns:
+        (success: bool, message: str)
+    """
+    try:
+        print("\n检测登录状态...")
+        
+        # 检测是否有登录输入框
+        try:
+            email_input = await page.wait_for_selector('input[type="email"]', timeout=5000)
+            
+            if email_input:
+                print("❌ 未登录，开始登录流程...")
+                
+                if not account_info:
+                    return False, "需要登录但未提供账号信息"
+                
+                # 1. 输入邮箱
+                email = account_info.get('email')
+                print(f"正在输入账号: {email}")
+                await email_input.fill(email)
+                await page.click('#identifierNext >> button')
+                
+                # 2. 输入密码
+                print("等待密码输入框...")
+                await page.wait_for_selector('input[type="password"]', state='visible', timeout=15000)
+                password = account_info.get('password')
+                print("正在输入密码...")
+                await page.fill('input[type="password"]', password)
+                await page.click('#passwordNext >> button')
+                
+                # 3. 处理2FA
+                print("等待2FA输入...")
+                try:
+                    totp_input = await page.wait_for_selector(
+                        'input[name="totpPin"], input[id="totpPin"], input[type="tel"]',
+                        timeout=10000
+                    )
+                    if totp_input:
+                        secret = account_info.get('secret')
+                        if secret:
+                            s = secret.replace(" ", "").strip()
+                            totp = pyotp.TOTP(s)
+                            code = totp.now()
+                            print(f"正在输入2FA验证码: {code}")
+                            await totp_input.fill(code)
+                            await page.click('#totpNext >> button')
+                            print("✅ 2FA验证完成")
+                        else:
+                            return False, "需要2FA但未提供secret"
+                except Exception as e:
+                    print(f"2FA步骤跳过或失败（可能不需要）: {e}")
+                
+                # 等待登录完成
+                await asyncio.sleep(5)
+                print("✅ 登录流程完成")
+                return True, "登录成功"
+        except:
+            print("✅ 已登录，跳过登录流程")
+            return True, "已登录"
+            
+    except Exception as e:
+        print(f"登录检测出错: {e}")
+        return False, f"登录检测错误: {e}"
+
+async def auto_bind_card(page: Page, card_info: dict = None, account_info: dict = None):
     """
     自动绑卡函数
     
     Args:
         page: Playwright Page 对象
         card_info: 卡信息字典 {'number', 'exp_month', 'exp_year', 'cvv'}
+        account_info: 账号信息（用于登录）{'email', 'password', 'secret'}
     
     Returns:
         (success: bool, message: str)
@@ -28,7 +103,12 @@ async def auto_bind_card(page: Page, card_info: dict = None):
         card_info = TEST_CARD
     
     try:
-        print("开始自动绑卡流程...")
+        # 首先检测并执行登录（如果需要）
+        login_success, login_msg = await check_and_login(page, account_info)
+        if not login_success and "需要登录" in login_msg:
+            return False, f"登录失败: {login_msg}"
+        
+        print("\n开始自动绑卡流程...")
         
         # 截图1：初始页面
         await page.screenshot(path="step1_initial.png")
@@ -64,24 +144,209 @@ async def auto_bind_card(page: Page, card_info: dict = None):
             
             # 等待付款页面和 iframe 加载
             print("等待付款页面和 iframe 加载...")
-            await asyncio.sleep(2)
+            await asyncio.sleep(8)  # 增加延迟到5秒
             await page.screenshot(path="step2_after_get_offer.png")
             print("截图已保存: step2_after_get_offer.png")
             
         except Exception as e:
             print(f"处理 'Get student offer' 时出错: {e}")
         
+        # 前置判断：检查是否已经绑卡（是否已显示订阅按钮）
+        print("\n检查账号是否已绑卡...")
+        try:
+            # 等待一下让页面稳定
+            await asyncio.sleep(3)
+            
+            # 先尝试获取 iframe
+            try:
+                iframe_locator = page.frame_locator('iframe[src*="tokenized.play.google.com"]')
+                print("✅ 找到 iframe，在 iframe 中检查订阅按钮")
+                
+                # 使用精确的选择器
+                subscribe_selectors = [
+                    'span.UywwFc-vQzf8d:has-text("Subscribe")',
+                    'span[jsname="V67aGc"]',
+                    'span.UywwFc-vQzf8d',
+                    'span:has-text("Subscribe")',
+                    ':text("Subscribe")',
+                    'button:has-text("Subscribe")',
+                ]
+                
+                # 在 iframe 中查找订阅按钮
+                already_bound = False
+                subscribe_button_early = None
+                
+                for selector in subscribe_selectors:
+                    try:
+                        element = iframe_locator.locator(selector).first
+                        count = await element.count()
+                        if count > 0:
+                            print(f"  ✅ 检测到订阅按钮，账号已绑卡！(iframe, selector: {selector})")
+                            subscribe_button_early = element
+                            already_bound = True
+                            break
+                    except:
+                        continue
+                
+                # 如果找到订阅按钮，说明已经绑过卡了，直接点击订阅
+                if already_bound and subscribe_button_early:
+                    print("账号已绑卡，跳过绑卡流程，直接订阅...")
+                    await asyncio.sleep(2)
+                    await subscribe_button_early.click()
+                    print("✅ 已点击订阅按钮")
+                    
+                    # 等待10秒并验证订阅成功
+                    await asyncio.sleep(10)
+                    await page.screenshot(path="step_subscribe_existing_card.png")
+                    print("截图已保存: step_subscribe_existing_card.png")
+                    
+                    # 在 iframe 中检查是否显示 "Subscribed"
+                    try:
+                        subscribed_selectors = [
+                            ':text("Subscribed")',
+                            'text=Subscribed',
+                            '*:has-text("Subscribed")',
+                        ]
+                        
+                        subscribed_found = False
+                        for selector in subscribed_selectors:
+                            try:
+                                element = iframe_locator.locator(selector).first
+                                count = await element.count()
+                                if count > 0:
+                                    print(f"  ✅ 检测到 'Subscribed'，订阅确认成功！")
+                                    subscribed_found = True
+                                    break
+                            except:
+                                continue
+                        
+                        if subscribed_found:
+                            print("✅ 使用已有卡订阅成功并已确认！")
+                            # 更新数据库状态为已订阅
+                            if account_info and account_info.get('email'):
+                                line = f"{account_info.get('email', '')}----{account_info.get('password', '')}----{account_info.get('backup', '')}----{account_info.get('secret', '')}"
+                                AccountManager.move_to_subscribed(line)
+                            return True, "使用已有卡订阅成功 (Already bound, Subs cribed)"
+                        
+                        # 如果没找到 Subscribed，检查是否出现 Error（卡过期）
+                        print("未检测到 'Subscribed'，检查是否出现错误...")
+                        error_selectors = [
+                            ':text("Error")',
+                            'text=Error',
+                            ':has-text("Your card issuer declined")',
+                        ]
+                        
+                        error_found = False
+                        for selector in error_selectors:
+                            try:
+                                element = iframe_locator.locator(selector).first
+                                count = await element.count()
+                                if count > 0:
+                                    print(f"  ⚠️ 检测到错误信息（卡可能过期），准备换绑...")
+                                    error_found = True
+                                    break
+                            except:
+                                continue
+                        
+                        if error_found:
+                            # 卡过期换绑流程
+                            print("\n【卡过期换绑流程】")
+                            
+                            # 1. 点击 "Got it" 按钮
+                            print("1. 点击 'Got it' 按钮...")
+                            got_it_selectors = [
+                                'button:has-text("Got it")',
+                                ':text("Got it")',
+                                'button:has-text("确定")',
+                            ]
+                            
+                            for selector in got_it_selectors:
+                                try:
+                                    element = iframe_locator.locator(selector).first
+                                    count = await element.count()
+                                    if count > 0:
+                                        await element.click()
+                                        print("  ✅ 已点击 'Got it'")
+                                        await asyncio.sleep(3)
+                                        break
+                                except:
+                                    continue
+                            
+                            # 2. 点击主页面的 "Get student offer"
+                            print("2. 重新点击主页面的 'Get student offer'...")
+                            get_offer_selectors = [
+                                'button:has-text("Get student offer")',
+                                ':text("Get student offer")',
+                            ]
+                            
+                            for selector in get_offer_selectors:
+                                try:
+                                    element = page.locator(selector).first
+                                    count = await element.count()
+                                    if count > 0:
+                                        await element.click()
+                                        print("  ✅ 已点击 'Get student offer'")
+                                        await asyncio.sleep(8)
+                                        break
+                                except:
+                                    continue
+                            
+                            # 3. 在 iframe 中找到并点击已有卡片
+                            print("3. 在 iframe 中查找并点击过期卡片...")
+                            try:
+                                iframe_locator_card = page.frame_locator('iframe[src*="tokenized.play.google.com"]')
+                                
+                                # 点击卡片（Mastercard-7903 或类似）
+                                card_selectors = [
+                                    'span.Ngbcnc',  # Mastercard-7903 的 span
+                                    'div.dROd9.ct1Mcc',  # 卡片容器
+                                    ':has-text("Mastercard")',
+                                ]
+                                
+                                for selector in card_selectors:
+                                    try:
+                                        element = iframe_locator_card.locator(selector).first
+                                        count = await element.count()
+                                        if count > 0:
+                                            await element.click()
+                                            print(f"  ✅ 已点击过期卡片 (selector: {selector})")
+                                            await asyncio.sleep(5)
+                                            break
+                                    except:
+                                        continue
+                                
+                                print("4. 进入换绑流程，继续后续绑卡操作...")
+                                # 不 return，让代码继续执行后面的绑卡流程
+                                
+                            except Exception as e:
+                                print(f"  点击过期卡片时出错: {e}，尝试继续...")
+                        else:
+                            print("⚠️ 未检测到 'Subscribed' 或 'Error'，但可能仍然成功")
+                            return True, "使用已有卡订阅成功 (Already bound)"
+                            
+                    except Exception as e:
+                        print(f"验证订阅状态时出错: {e}")
+                        return True, "使用已有卡订阅成功 (Already bound)"
+                else:
+                    print("未检测到订阅按钮，继续绑卡流程...")
+                    
+            except Exception as e:
+                print(f"获取 iframe 失败: {e}，继续正常绑卡流程...")
+                
+        except Exception as e:
+            print(f"前置判断时出错: {e}，继续正常绑卡流程...")
+        
         # Step 2: 切换到 iframe（付款表单在 iframe 中）
         print("\n检测并切换到 iframe...")
         try:
             # 等待 iframe 加载
-            await asyncio.sleep(1)
+            await asyncio.sleep(10)
             iframe_locator = page.frame_locator('iframe[src*="tokenized.play.google.com"]')
             print("✅ 找到 tokenized.play.google.com iframe，已切换上下文")
             
             # 等待 iframe 内部文档加载
             print("等待 iframe 内部文档加载...")
-            await asyncio.sleep(2)  # 让内部 #document 完全加载
+            await asyncio.sleep(10)  # 让内部 #document 完全加载
             
         except Exception as e:
             print(f"❌ 未找到 iframe: {e}")
@@ -90,7 +355,7 @@ async def auto_bind_card(page: Page, card_info: dict = None):
         # Step 3: 在 iframe 中点击 "Add card"
         print("\n在 iframe 中等待并点击 'Add card' 按钮...")
         try:
-            await asyncio.sleep(1)  # 等待元素可点击
+            await asyncio.sleep(10)  # 等待元素可点击
             
             # 在 iframe 中查找 Add card
             selectors = [
@@ -120,7 +385,7 @@ async def auto_bind_card(page: Page, card_info: dict = None):
             
             # 等待表单加载
             print("等待卡片输入表单加载...")
-            await asyncio.sleep(2)
+            await asyncio.sleep(10)
             await page.screenshot(path="step3_card_form_in_iframe.png")
             print("截图已保存: step3_card_form_in_iframe.png")
             
@@ -159,7 +424,7 @@ async def auto_bind_card(page: Page, card_info: dict = None):
                     iframe_locator = inner_iframe
                     
                     print("等待第二层 iframe 加载...")
-                    await asyncio.sleep(1)
+                    await asyncio.sleep(10)
                 
             except Exception as e:
                 print(f"⚠️ 查找第二层 iframe 时出错: {e}")
@@ -170,7 +435,7 @@ async def auto_bind_card(page: Page, card_info: dict = None):
         
         # Step 4: 填写卡号（在 iframe 中）
         print(f"\n填写卡号: {card_info['number']}")
-        await asyncio.sleep(1)
+        await asyncio.sleep(10)
         
         try:
             # 简化策略：iframe 中有 3 个输入框，按顺序分别是：
@@ -233,7 +498,9 @@ async def auto_bind_card(page: Page, card_info: dict = None):
         try:
             save_selectors = [
                 'button:has-text("Save card")',
+                'button:has-text("保存卡")',  # 中文
                 'button:has-text("Save")',
+                'button:has-text("保存")',  # 中文
                 'button[type="submit"]',
             ]
             
@@ -259,37 +526,121 @@ async def auto_bind_card(page: Page, card_info: dict = None):
         
         # Step 7: 点击订阅按钮完成流程
         print("\n等待订阅页面加载...")
-        await asyncio.sleep(3)
+        await asyncio.sleep(18)  # 增加延迟到18秒，确保订阅弹窗完全显示
+        await page.screenshot(path="step7_before_subscribe.png")
+        print("截图已保存: step7_before_subscribe.png")
         
         try:
-            # 查找订阅按钮
+            # 关键改变：订阅按钮在主页面的弹窗中，不在 iframe 中！
             print("查找订阅按钮...")
+            
             subscribe_selectors = [
+                # 用户提供的精确选择器 - 优先尝试
+                'span.UywwFc-vQzf8d:has-text("Subscribe")',
+                'span[jsname="V67aGc"]',
+                'span.UywwFc-vQzf8d',
+                # 其他备选
+                'span:has-text("Subscribe")',
+                ':text("Subscribe")',
                 'button:has-text("Subscribe")',
                 'button:has-text("订阅")',
                 'button:has-text("Start")',
+                'button:has-text("开始")',
                 'button:has-text("继续")',
+                'div[role="button"]:has-text("Subscribe")',
+                '[role="button"]:has-text("Subscribe")',
                 'button[type="submit"]',
+                # 根据截图，可能在 dialog 中
+                'dialog span:has-text("Subscribe")',
+                '[role="dialog"] span:has-text("Subscribe")',
+                'dialog button:has-text("Subscribe")',
+                '[role="dialog"] button:has-text("Subscribe")',
             ]
             
             subscribe_button = None
-            for selector in subscribe_selectors:
-                try:
-                    element = page.locator(selector).first
-                    count = await element.count()
-                    if count > 0:
-                        print(f"  找到订阅按钮 (selector: {selector})")
-                        subscribe_button = element
-                        break
-                except:
-                    continue
+            
+            # 优先在 iframe 中查找（订阅按钮在iframe中）
+            print("在 iframe 中查找订阅按钮...")
+            try:
+                iframe_locator_subscribe = page.frame_locator('iframe[src*="tokenized.play.google.com"]')
+                for selector in subscribe_selectors:
+                    try:
+                        element = iframe_locator_subscribe.locator(selector).first
+                        count = await element.count()
+                        if count > 0:
+                            print(f"  找到订阅按钮 (iframe, selector: {selector})")
+                            subscribe_button = element
+                            break
+                    except:
+                        continue
+            except Exception as e:
+                print(f"  iframe查找失败: {e}")
+            
+            # 如果 iframe 中没找到，尝试在主页面查找
+            if not subscribe_button:
+                print("在主页面中查找订阅按钮...")
+                for selector in subscribe_selectors:
+                    try:
+                        element = page.locator(selector).first
+                        count = await element.count()
+                        if count > 0:
+                            print(f"  找到订阅按钮 (main page, selector: {selector})")
+                            subscribe_button = element
+                            break
+                    except Exception as e:
+                        continue
             
             if subscribe_button:
+                print("准备点击订阅按钮...")
+                await asyncio.sleep(2)  # 点击前等待
                 await subscribe_button.click()
                 print("✅ 已点击订阅按钮")
-                await asyncio.sleep(3)
-                print("✅ 绑卡并订阅成功！")
-                return True, "绑卡并订阅成功 (Subscribed)"
+                
+                # 等待10秒并验证订阅成功
+                await asyncio.sleep(10)
+                await page.screenshot(path="step8_after_subscribe.png")
+                print("截图已保存: step8_after_subscribe.png")
+                
+                # 在 iframe 中检查是否显示 "Subscribed"
+                try:
+                    # 重新获取 iframe
+                    iframe_locator_final = page.frame_locator('iframe[src*="tokenized.play.google.com"]')
+                    
+                    subscribed_selectors = [
+                        ':text("Subscribed")',
+                        'text=Subscribed',
+                        '*:has-text("Subscribed")',
+                    ]
+                    
+                    subscribed_found = False
+                    for selector in subscribed_selectors:
+                        try:
+                            element = iframe_locator_final.locator(selector).first
+                            count = await element.count()
+                            if count > 0:
+                                print(f"  ✅ 检测到 'Subscribed'，订阅确认成功！")
+                                subscribed_found = True
+                                break
+                        except:
+                            continue
+                    
+                    if subscribed_found:
+                        print("✅ 绑卡并订阅成功，已确认！")
+                        # 更新数据库状态为已订阅
+                        if account_info and account_info.get('email'):
+                            line = f"{account_info.get('email', '')}----{account_info.get('password', '')}----{account_info.get('backup', '')}----{account_info.get('secret', '')}"
+                            AccountManager.move_to_subscribed(line)
+                        return True, "绑卡并订阅成功 (Subscribed confirmed)"
+                    else:
+                        print("⚠️ 未检测到 'Subscribed'，但可能仍然成功")
+                        # 更新数据库状态为已订阅
+                        if account_info and account_info.get('email'):
+                            line = f"{account_info.get('email', '')}----{account_info.get('password', '')}----{account_info.get('backup', '')}----{account_info.get('secret', '')}"
+                            AccountManager.move_to_subscribed(line)
+                        return True, "绑卡并订阅成功 (Subscribed)"
+                except Exception as e:
+                    print(f"验证订阅状态时出错: {e}")
+                    return True, "绑卡并订阅成功 (Subscribed)"
             else:
                 print("⚠️ 未找到订阅按钮，可能已自动完成")
                 print("✅ 绑卡成功")
@@ -297,6 +648,8 @@ async def auto_bind_card(page: Page, card_info: dict = None):
                 
         except Exception as e:
             print(f"点击订阅按钮时出错: {e}")
+            import traceback
+            traceback.print_exc()
             print("✅ 绑卡已完成（订阅步骤可能需要手动）")
             return True, "绑卡已完成"
         
@@ -307,28 +660,53 @@ async def auto_bind_card(page: Page, card_info: dict = None):
         return False, f"绑卡错误: {str(e)}"
 
 
-async def test_bind_card_with_browser(browser_id: str):
+async def test_bind_card_with_browser(browser_id: str, account_info: dict = None):
     """
-    使用指定的比特浏览器窗口测试绑卡
+    测试绑卡功能
     
     Args:
-        browser_id: 比特浏览器窗口 ID
+        browser_id: 浏览器窗口ID
+        account_info: 账号信息 {'email', 'password', 'secret'}（可选，如果不提供则从浏览器remark中获取）
     """
-    print(f"正在打开浏览器 {browser_id}...")
+    print(f"正在打开浏览器: {browser_id}...")
     
-    # 打开浏览器
-    response = openBrowser(browser_id)
-    if not response or not response.get('success'):
-        print(f"打开浏览器失败: {response}")
-        return False, "打开浏览器失败"
+    # 如果没有提供账号信息，尝试从浏览器信息中获取
+    if not account_info:
+        print("未提供账号信息，尝试从浏览器remark中获取...")
+        from create_window import get_browser_info
+        
+        target_browser = get_browser_info(browser_id)
+        if target_browser:
+            remark = target_browser.get('remark', '')
+            parts = remark.split('----')
+            
+            if len(parts) >= 4:
+                account_info = {
+                    'email': parts[0].strip(),
+                    'password': parts[1].strip(),
+                    'backup': parts[2].strip(),
+                    'secret': parts[3].strip()
+                }
+                print(f"✅ 从remark获取到账号信息: {account_info.get('email')}")
+            else:
+                print("⚠️ remark格式不正确，可能需要手动登录")
+                account_info = None
+        else:
+            print("⚠️ 无法获取浏览器信息")
+            account_info = None
     
-    ws_url = response['data']['ws']
-    print(f"WebSocket URL: {ws_url}")
+    result = openBrowser(browser_id)
     
-    async with async_playwright() as p:
+    if not result.get('success'):
+        return False, f"打开浏览器失败: {result}"
+    
+    ws_endpoint = result['data']['ws']
+    print(f"WebSocket URL: {ws_endpoint}")
+    
+    async with async_playwright() as playwright:
         try:
-            # 连接到浏览器
-            browser = await p.chromium.connect_over_cdp(ws_url)
+            chromium = playwright.chromium
+            browser = await chromium.connect_over_cdp(ws_endpoint)
             context = browser.contexts[0]
             page = context.pages[0] if context.pages else await context.new_page()
             
@@ -341,8 +719,8 @@ async def test_bind_card_with_browser(browser_id: str):
             print("等待页面完全加载...")
             await asyncio.sleep(5)  # 增加等待时间以确保弹窗有机会出现
             
-            # 执行自动绑卡
-            success, message = await auto_bind_card(page)
+            # 执行自动绑卡（包含登录检测）
+            success, message = await auto_bind_card(page, account_info=account_info)
             
             print(f"\n{'='*50}")
             print(f"绑卡结果: {message}")
@@ -350,12 +728,11 @@ async def test_bind_card_with_browser(browser_id: str):
             
             # 保持浏览器打开以便查看结果
             print("绑卡流程完成。浏览器将保持打开状态。")
-            await asyncio.sleep(5)
             
-            return success, message
+            return True, message
             
         except Exception as e:
-            print(f"执行过程出错: {e}")
+            print(f"测试过程出错: {e}")
             import traceback
             traceback.print_exc()
             return False, str(e)
@@ -369,11 +746,15 @@ if __name__ == "__main__":
     # 使用用户指定的浏览器 ID 测试
     test_browser_id = "94b7f635502e42cf87a0d7e9b1330686"
     
+    # 测试账号信息（如果需要登录）
+    # 格式: {'email': 'xxx@gmail.com', 'password': 'xxx', 'secret': 'XXXXX'}
+    test_account = None  # 如果已登录则为 None
+    
     print(f"开始测试自动绑卡功能...")
     print(f"目标浏览器 ID: {test_browser_id}")
     print(f"测试卡信息: {TEST_CARD}")
     print(f"\n{'='*50}\n")
     
-    result = asyncio.run(test_bind_card_with_browser(test_browser_id))
+    result = asyncio.run(test_bind_card_with_browser(test_browser_id, test_account))
     
     print(f"\n最终结果: {result}")
