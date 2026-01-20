@@ -19,6 +19,167 @@ def get_base_path():
         return os.path.dirname(sys.executable)
     return os.path.dirname(os.path.abspath(__file__))
 
+
+# ===== 独立的辅助函数，供一键全自动处理调用 =====
+
+async def check_and_login(page, account_info: dict, target_url: str):
+    """
+    检查登录状态，如果需要则执行登录
+    
+    Args:
+        page: Playwright page 对象
+        account_info: 账号信息 {'email': '', 'password': '', 'secret': '', 'backup': ''}
+        target_url: 登录后要跳转的目标URL
+        
+    Returns:
+        (success: bool, message: str)
+    """
+    try:
+        # 先导航到 Google 账号页面检查登录状态
+        try:
+            await page.goto('https://accounts.google.com', timeout=30000)
+        except Exception as e:
+            print(f"Initial navigation failed: {e}")
+        
+        await asyncio.sleep(2)
+        
+        # 检查是否需要登录（是否有邮箱输入框）
+        email = account_info.get('email', '')
+        try:
+            email_input = await page.wait_for_selector('input[type="email"]', timeout=5000)
+            if email_input:
+                print(f"需要登录，输入邮箱: {email}")
+                await email_input.fill(email)
+                await page.click('#identifierNext >> button')
+                
+                # 输入密码
+                await page.wait_for_selector('input[type="password"]', state='visible', timeout=15000)
+                password = account_info.get('password', '')
+                await page.fill('input[type="password"]', password)
+                await page.click('#passwordNext >> button')
+                
+                # 处理2FA
+                try:
+                    totp_input = await page.wait_for_selector(
+                        'input[name="totpPin"], input[id="totpPin"], input[type="tel"]', 
+                        timeout=10000
+                    )
+                    if totp_input:
+                        secret = account_info.get('secret', '')
+                        if secret:
+                            s = secret.replace(" ", "").strip()
+                            totp = pyotp.TOTP(s)
+                            code = totp.now()
+                            print(f"输入2FA验证码: {code}")
+                            await totp_input.fill(code)
+                            await page.click('#totpNext >> button')
+                except Exception as e:
+                    print(f"2FA步骤可能已跳过: {e}")
+                
+                await asyncio.sleep(3)
+        except Exception as e:
+            print(f"可能已登录或登录流程不同: {e}")
+        
+        # 导航到目标页面
+        try:
+            await page.goto(target_url, timeout=60000)
+            await asyncio.sleep(3)
+            return True, "登录成功"
+        except Exception as e:
+            return False, f"导航到目标页面失败: {e}"
+            
+    except Exception as e:
+        return False, f"登录过程出错: {e}"
+
+
+async def detect_account_status(page):
+    """
+    检测账号当前状态
+    
+    Returns:
+        status: 'link_ready' | 'verified' | 'subscribed' | 'ineligible' | 'unknown'
+    """
+    # 状态检测短语
+    not_available_phrases = [
+        "This offer is not available",
+        "Ưu đãi này hiện không dùng được",
+        "Esta oferta no está disponible",
+        "Cette offre n'est pas disponible",
+        "此优惠目前不可用",
+        "這項優惠目前無法使用",
+        "Die Aktion ist nicht verfügbar",
+        "Bu teklif kullanılamıyor"
+    ]
+    
+    subscribed_phrases = [
+        "You're already subscribed",
+        "Bạn đã đăng ký",
+        "已订阅",
+        "Ya estás suscrito"
+    ]
+    
+    verified_unbound_phrases = [
+        "Get student offer",
+        "Get offer",  # 添加这个短语
+        "Nhận ưu đãi dành cho sinh viên",
+        "Obtener oferta para estudiantes",
+        "获取学生优惠",
+        "獲取學生優惠",
+        "Dapatkan penawaran pelajar",
+        "Start your free trial",
+        "开始免费试用",
+    ]
+    
+    try:
+        start_time = time.time()
+        while time.time() - start_time < 10:
+            # 检查已订阅
+            for phrase in subscribed_phrases:
+                if await page.locator(f'text="{phrase}"').is_visible():
+                    return "subscribed"
+            
+            # 检查已验证未绑卡 (Get Offer)
+            for phrase in verified_unbound_phrases:
+                if await page.locator(f'text="{phrase}"').is_visible():
+                    return "verified"
+            
+            # 检查无资格
+            for phrase in not_available_phrases:
+                if await page.locator(f'text="{phrase}"').is_visible():
+                    return "ineligible"
+            
+            # 检查是否有 SheerID 验证链接
+            link_element = page.locator('a[href*="sheerid.com"]').first
+            if await link_element.count() > 0:
+                return "link_ready"
+            
+            await asyncio.sleep(0.5)
+        
+        return "unknown"
+        
+    except Exception as e:
+        print(f"状态检测出错: {e}")
+        return "unknown"
+
+
+async def extract_link(page):
+    """
+    从页面提取 SheerID 验证链接
+    
+    Returns:
+        link: str or None
+    """
+    try:
+        link_element = page.locator('a[href*="sheerid.com"]').first
+        if await link_element.count() > 0:
+            href = await link_element.get_attribute("href")
+            return href
+        return None
+    except Exception as e:
+        print(f"提取链接出错: {e}")
+        return None
+
+
 # Helper function for automation logic
 async def _automate_login_and_extract(playwright: Playwright, browser_id: str, account_info: dict, ws_endpoint: str, log_callback=None):
     chromium = playwright.chromium

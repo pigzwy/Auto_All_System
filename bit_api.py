@@ -8,7 +8,15 @@ import time
 # 此demo仅作为参考使用，以下使用的指纹参数仅是部分参数，完整参数请参考文档
 
 url = "http://127.0.0.1:54345"
-headers = {'Content-Type': 'application/json'}
+
+# API Token - 从 BitBrowser 设置中获取
+# 如果开启了鉴权控制，需要填写这个 Token
+API_TOKEN = "50892c3021374a7ebb69437ea256ba5e"
+
+headers = {
+    'Content-Type': 'application/json',
+    'X-API-KEY': API_TOKEN  # 添加 API Token
+}
 
 
 def createBrowser():  # 创建或者更新窗口，指纹参数 browserFingerPrint 如没有特定需求，只需要指定下内核即可，如果需要更详细的参数，请参考文档

@@ -1,0 +1,34 @@
+# Google账号辅助邮箱列表
+# 所有邮件会自动转发到 chujian123qwe@163.com
+# 使用域名: xiaochujian.asia
+
+recovery01@xiaochujian.asia
+recovery02@xiaochujian.asia
+recovery03@xiaochujian.asia
+recovery04@xiaochujian.asia
+recovery05@xiaochujian.asia
+recovery06@xiaochujian.asia
+recovery07@xiaochujian.asia
+recovery08@xiaochujian.asia
+recovery09@xiaochujian.asia
+recovery10@xiaochujian.asia
+backup01@xiaochujian.asia
+backup02@xiaochujian.asia
+backup03@xiaochujian.asia
+backup04@xiaochujian.asia
+backup05@xiaochujian.asia
+backup06@xiaochujian.asia
+backup07@xiaochujian.asia
+backup08@xiaochujian.asia
+backup09@xiaochujian.asia
+backup10@xiaochujian.asia
+security01@xiaochujian.asia
+security02@xiaochujian.asia
+security03@xiaochujian.asia
+security04@xiaochujian.asia
+security05@xiaochujian.asia
+verify01@xiaochujian.asia
+verify02@xiaochujian.asia
+verify03@xiaochujian.asia
+verify04@xiaochujian.asia
+verify05@xiaochujian.asia

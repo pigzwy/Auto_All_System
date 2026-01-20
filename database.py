@@ -237,6 +237,145 @@ class DBManager:
             rows = cursor.fetchall()
             conn.close()
             return [dict(row) for row in rows]
+    
+    @staticmethod
+    def update_2fa_secret(email, new_secret, old_secret=None):
+        """更新2FA密钥，保留旧密钥记录"""
+        if not email or not new_secret:
+            print(f"[DB] update_2fa_secret: email或new_secret为空，跳过")
+            return False
+        
+        try:
+            with lock:
+                conn = DBManager.get_connection()
+                cursor = conn.cursor()
+                
+                # 先尝试添加old_secret_key列（如果不存在）
+                try:
+                    cursor.execute("ALTER TABLE accounts ADD COLUMN old_secret_key TEXT")
+                    cursor.execute("ALTER TABLE accounts ADD COLUMN security_update_time TEXT")
+                except:
+                    pass  # 列已存在
+                
+                # 获取当前密钥作为旧密钥
+                cursor.execute("SELECT secret_key FROM accounts WHERE email = ?", (email,))
+                row = cursor.fetchone()
+                current_secret = row['secret_key'] if row else old_secret
+                
+                # 更新
+                import datetime
+                now = datetime.datetime.now().isoformat()
+                cursor.execute('''
+                    UPDATE accounts 
+                    SET secret_key = ?, old_secret_key = ?, security_update_time = ?, updated_at = CURRENT_TIMESTAMP 
+                    WHERE email = ?
+                ''', (new_secret, current_secret, now, email))
+                
+                conn.commit()
+                conn.close()
+                
+                print(f"[DB] 更新2FA密钥: {email}, 新密钥: {new_secret[:8]}...")
+                return True
+        except Exception as e:
+            print(f"[DB ERROR] update_2fa_secret 失败: {e}")
+            import traceback
+            traceback.print_exc()
+            return False
+    
+    @staticmethod
+    def update_recovery_email(email, new_recovery, old_recovery=None):
+        """更新辅助邮箱，保留旧邮箱记录"""
+        if not email or not new_recovery:
+            print(f"[DB] update_recovery_email: email或new_recovery为空，跳过")
+            return False
+        
+        try:
+            with lock:
+                conn = DBManager.get_connection()
+                cursor = conn.cursor()
+                
+                # 先尝试添加old_recovery_email列（如果不存在）
+                try:
+                    cursor.execute("ALTER TABLE accounts ADD COLUMN old_recovery_email TEXT")
+                    cursor.execute("ALTER TABLE accounts ADD COLUMN security_update_time TEXT")
+                except:
+                    pass  # 列已存在
+                
+                # 获取当前辅助邮箱作为旧邮箱
+                cursor.execute("SELECT recovery_email FROM accounts WHERE email = ?", (email,))
+                row = cursor.fetchone()
+                current_recovery = row['recovery_email'] if row else old_recovery
+                
+                # 更新
+                import datetime
+                now = datetime.datetime.now().isoformat()
+                cursor.execute('''
+                    UPDATE accounts 
+                    SET recovery_email = ?, old_recovery_email = ?, security_update_time = ?, updated_at = CURRENT_TIMESTAMP 
+                    WHERE email = ?
+                ''', (new_recovery, current_recovery, now, email))
+                
+                conn.commit()
+                conn.close()
+                
+                print(f"[DB] 更新辅助邮箱: {email}, 新邮箱: {new_recovery}")
+                return True
+        except Exception as e:
+            print(f"[DB ERROR] update_recovery_email 失败: {e}")
+            import traceback
+            traceback.print_exc()
+            return False
+    
+    @staticmethod
+    def update_backup_codes(email, codes):
+        """
+        更新账号的备份验证码
+        
+        Args:
+            email: 账号邮箱
+            codes: 备份验证码列表
+        
+        Returns:
+            bool: 是否更新成功
+        """
+        if not email or not codes:
+            print(f"[DB] update_backup_codes: email或codes为空，跳过")
+            return False
+        
+        try:
+            with lock:
+                conn = DBManager.get_connection()
+                cursor = conn.cursor()
+                
+                # 先尝试添加backup_codes列（如果不存在）
+                try:
+                    cursor.execute("ALTER TABLE accounts ADD COLUMN backup_codes TEXT")
+                    cursor.execute("ALTER TABLE accounts ADD COLUMN backup_codes_time TEXT")
+                except:
+                    pass  # 列已存在
+                
+                # 将codes列表转换为逗号分隔的字符串
+                codes_str = ",".join(codes) if isinstance(codes, list) else codes
+                
+                # 更新
+                import datetime
+                now = datetime.datetime.now().isoformat()
+                cursor.execute('''
+                    UPDATE accounts 
+                    SET backup_codes = ?, backup_codes_time = ?, updated_at = CURRENT_TIMESTAMP 
+                    WHERE email = ?
+                ''', (codes_str, now, email))
+                
+                conn.commit()
+                conn.close()
+                
+                print(f"[DB] 更新备份验证码: {email}, 数量: {len(codes) if isinstance(codes, list) else 'N/A'}")
+                return True
+        except Exception as e:
+            print(f"[DB ERROR] update_backup_codes 失败: {e}")
+            import traceback
+            traceback.print_exc()
+            return False
 
     @staticmethod
     def export_to_files():

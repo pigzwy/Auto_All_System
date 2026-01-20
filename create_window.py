@@ -24,7 +24,7 @@ def read_proxies(file_path: str) -> list:
         file_path: 代理文件路径
         
     Returns:
-        代理列表，每个代理为字典格式 {'type': 'socks5', 'host': '', 'port': '', 'username': '', 'password': ''}
+        代理列表，每个代理为字典格式 {'type': 'http/socks5', 'host': '', 'port': '', 'username': '', 'password': ''}
         如果没有代理则返回空列表
     """
     proxies = []
@@ -38,19 +38,78 @@ def read_proxies(file_path: str) -> list:
                 line = line.strip()
                 if not line or line.startswith('#'):
                     continue
-                match = re.match(r'^socks5://([^:]+):([^@]+)@([^:]+):(\d+)$', line)
-                if match:
+                
+                # 支持 socks5 格式: socks5://username:password@host:port
+                # 也支持 socks5h 格式 (DNS over proxy): socks5h://username:password@host:port
+                match_socks5 = re.match(r'^socks5h?://([^:]+):([^@]+)@([^:]+):(\d+)$', line)
+                if match_socks5:
                     proxies.append({
                         'type': 'socks5',
-                        'host': match.group(3),
-                        'port': match.group(4),
-                        'username': match.group(1),
-                        'password': match.group(2)
+                        'host': match_socks5.group(3),
+                        'port': match_socks5.group(4),
+                        'username': match_socks5.group(1),
+                        'password': match_socks5.group(2)
                     })
+                    continue
+                
+                # 支持 HTTP 格式: http://username:password@host:port
+                # 也支持 HTTPS 格式: https://username:password@host:port
+                match_http = re.match(r'^https?://([^:]+):([^@]+)@([^:]+):(\d+)$', line)
+                if match_http:
+                    proxies.append({
+                        'type': 'http',
+                        'host': match_http.group(3),
+                        'port': match_http.group(4),
+                        'username': match_http.group(1),
+                        'password': match_http.group(2)
+                    })
+                    continue
     except Exception:
         pass
     
     return proxies
+
+
+def remove_first_proxy(file_path: str) -> bool:
+    """
+    从代理文件中删除第一个有效代理
+    
+    Args:
+        file_path: 代理文件路径
+        
+    Returns:
+        是否成功删除
+    """
+    if not os.path.exists(file_path):
+        return False
+    
+    try:
+        with open(file_path, 'r', encoding='utf-8') as f:
+            lines = f.readlines()
+        
+        # 找到第一个有效代理行的索引
+        first_proxy_index = -1
+        for i, line in enumerate(lines):
+            stripped = line.strip()
+            if stripped and not stripped.startswith('#'):
+                # 检查是否是有效的代理格式
+                if stripped.startswith('socks5') or stripped.startswith('http'):
+                    first_proxy_index = i
+                    break
+        
+        if first_proxy_index == -1:
+            return False  # 没有找到有效代理
+        
+        # 删除该行
+        del lines[first_proxy_index]
+        
+        # 写回文件
+        with open(file_path, 'w', encoding='utf-8') as f:
+            f.writelines(lines)
+        
+        return True
+    except Exception:
+        return False
 
 
 def read_separator_config(file_path: str) -> str:

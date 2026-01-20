@@ -15,13 +15,14 @@ from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QLineEdit, QTextEdit, QPushButton, QMessageBox, QGroupBox,
     QTableWidget, QTableWidgetItem, QHeaderView, QCheckBox, QSplitter,
-    QAbstractItemView, QSpinBox, QToolBox
+    QAbstractItemView, QSpinBox, QToolBox, QDialog, QDialogButtonBox
 )
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer
 from PyQt6.QtGui import QFont, QColor, QIcon
 from create_window import (
     read_accounts, read_proxies, get_browser_list, get_browser_info,
-    delete_browsers_by_name, delete_browser_by_id, open_browser_by_id, create_browser_window, get_next_window_name
+    delete_browsers_by_name, delete_browser_by_id, open_browser_by_id, create_browser_window, get_next_window_name,
+    remove_first_proxy
 )
 from run_playwright_google import process_browser
 from sheerid_verifier import SheerIDVerifier
@@ -38,6 +39,84 @@ def resource_path(relative_path):
         base_path = os.path.dirname(os.path.abspath(__file__))
 
     return os.path.join(base_path, relative_path)
+
+
+class DataEditorDialog(QDialog):
+    """数据编辑对话框 - 用于编辑账号/代理/卡号文件"""
+    
+    def __init__(self, parent, title, file_name, format_hint):
+        super().__init__(parent)
+        self.file_name = file_name
+        self.setWindowTitle(title)
+        self.setMinimumSize(600, 500)
+        self.init_ui(format_hint)
+        self.load_data()
+    
+    def init_ui(self, format_hint):
+        layout = QVBoxLayout()
+        
+        # 格式提示
+        hint_label = QLabel(format_hint)
+        hint_label.setStyleSheet("color: #666; padding: 5px; background-color: #f5f5f5; border-radius: 3px;")
+        hint_label.setWordWrap(True)
+        layout.addWidget(hint_label)
+        
+        # 编辑区域
+        self.text_edit = QTextEdit()
+        self.text_edit.setPlaceholderText("每行一条数据...")
+        self.text_edit.setStyleSheet("font-family: Consolas, monospace; font-size: 12px;")
+        layout.addWidget(self.text_edit)
+        
+        # 计数显示
+        self.count_label = QLabel("当前行数: 0")
+        self.text_edit.textChanged.connect(self.update_count)
+        layout.addWidget(self.count_label)
+        
+        # 按钮
+        btn_layout = QHBoxLayout()
+        
+        save_btn = QPushButton("💾 保存")
+        save_btn.setStyleSheet("background-color: #4CAF50; color: white; font-weight: bold; padding: 10px 20px;")
+        save_btn.clicked.connect(self.save_data)
+        
+        cancel_btn = QPushButton("取消")
+        cancel_btn.setStyleSheet("padding: 10px 20px;")
+        cancel_btn.clicked.connect(self.reject)
+        
+        btn_layout.addStretch()
+        btn_layout.addWidget(save_btn)
+        btn_layout.addWidget(cancel_btn)
+        layout.addLayout(btn_layout)
+        
+        self.setLayout(layout)
+    
+    def update_count(self):
+        text = self.text_edit.toPlainText()
+        lines = [l for l in text.split('\n') if l.strip() and not l.strip().startswith('#')]
+        self.count_label.setText(f"有效行数: {len(lines)}")
+    
+    def get_file_path(self):
+        base_path = os.path.dirname(sys.executable) if getattr(sys, 'frozen', False) else os.path.dirname(os.path.abspath(__file__))
+        return os.path.join(base_path, self.file_name)
+    
+    def load_data(self):
+        file_path = self.get_file_path()
+        try:
+            if os.path.exists(file_path):
+                with open(file_path, 'r', encoding='utf-8') as f:
+                    self.text_edit.setText(f.read())
+        except Exception as e:
+            QMessageBox.warning(self, "警告", f"加载文件失败: {e}")
+    
+    def save_data(self):
+        file_path = self.get_file_path()
+        try:
+            with open(file_path, 'w', encoding='utf-8') as f:
+                f.write(self.text_edit.toPlainText())
+            QMessageBox.information(self, "成功", f"已保存到 {self.file_name}")
+            self.accept()
+        except Exception as e:
+            QMessageBox.critical(self, "错误", f"保存失败: {e}")
 
 
 
@@ -500,8 +579,14 @@ class WorkerThread(QThread):
                 self.log(f"\n{'='*40}")
                 self.log(f"[进度] ({i}/{len(accounts)}) 创建: {account['email']}")
                 
-                # 获取对应的代理（如果有）
-                proxy = proxies[i - 1] if i - 1 < len(proxies) else None
+                # 重新读取代理列表，始终获取第一个可用代理
+                current_proxies = read_proxies(proxies_file)
+                proxy = current_proxies[0] if current_proxies else None
+                
+                if proxy:
+                    self.log(f"[代理] 使用: {proxy['type']}://{proxy['host']}:{proxy['port']}")
+                else:
+                    self.log(f"[代理] 无可用代理，将不使用代理")
                 
                 browser_id, error_msg = create_browser_window(
                     account, 
@@ -516,6 +601,27 @@ class WorkerThread(QThread):
                 if browser_id:
                     success_count += 1
                     self.log(f"[成功] 窗口创建成功！ID: {browser_id}")
+                    
+                    # 删除已使用的代理
+                    if proxy:
+                        if remove_first_proxy(proxies_file):
+                            self.log(f"[代理] 已删除使用过的代理")
+                        else:
+                            self.log(f"[警告] 删除代理失败")
+                    
+                    # 自动将账号同步到数据库（用于一键全自动处理）
+                    try:
+                        from database import DBManager
+                        DBManager.init_db()
+                        DBManager.upsert_account(
+                            email=account.get('email', ''),
+                            password=account.get('password', ''),
+                            recovery_email=account.get('backup_email', ''),
+                            secret_key=account.get('2fa_secret', ''),
+                            status='pending'
+                        )
+                    except Exception as db_err:
+                        self.log(f"[警告] 同步数据库失败: {db_err}")
                 else:
                     self.log(f"[失败] 窗口创建失败: {error_msg}")
             
@@ -669,6 +775,27 @@ class BrowserWindowCreatorGUI(QMainWindow):
         self.btn_auto_all.clicked.connect(self.action_auto_all)
         google_layout.addWidget(self.btn_auto_all)
         
+        # === 新增：Google安全修改按钮 ===
+        # 批量修改2FA按钮
+        self.btn_change_2fa = QPushButton("🔐 批量修改2FA密钥")
+        self.btn_change_2fa.setFixedHeight(40)
+        self.btn_change_2fa.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_change_2fa.setStyleSheet("""
+            QPushButton {
+                text-align: left; 
+                padding-left: 15px; 
+                font-weight: bold; 
+                color: white;
+                background-color: #E91E63;
+                border-radius: 5px;
+            }
+            QPushButton:hover { background-color: #C2185B; }
+        """)
+        self.btn_change_2fa.clicked.connect(self.action_change_2fa)
+        google_layout.addWidget(self.btn_change_2fa)
+        
+        google_layout.addStretch()
+        
         google_layout.addStretch()
         google_page.setLayout(google_layout)
         self.toolbox.addItem(google_page, "Google 专区")
@@ -688,6 +815,69 @@ class BrowserWindowCreatorGUI(QMainWindow):
         tg_layout.addStretch()
         tg_page.setLayout(tg_layout)
         self.toolbox.addItem(tg_page, "Telegram 专区")
+        
+        # --- 数据管理分区 ---
+        data_page = QWidget()
+        data_layout = QVBoxLayout()
+        data_layout.setContentsMargins(5, 10, 5, 10)
+        
+        # 编辑账号按钮
+        self.btn_edit_accounts = QPushButton("📝 编辑账号 (accounts.txt)")
+        self.btn_edit_accounts.setFixedHeight(40)
+        self.btn_edit_accounts.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_edit_accounts.setStyleSheet("""
+            QPushButton {
+                text-align: left; 
+                padding-left: 15px; 
+                font-weight: bold; 
+                color: white;
+                background-color: #3F51B5;
+                border-radius: 5px;
+            }
+            QPushButton:hover { background-color: #303F9F; }
+        """)
+        self.btn_edit_accounts.clicked.connect(self.action_edit_accounts)
+        data_layout.addWidget(self.btn_edit_accounts)
+        
+        # 编辑代理按钮
+        self.btn_edit_proxies = QPushButton("🌐 编辑代理 (proxies.txt)")
+        self.btn_edit_proxies.setFixedHeight(40)
+        self.btn_edit_proxies.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_edit_proxies.setStyleSheet("""
+            QPushButton {
+                text-align: left; 
+                padding-left: 15px; 
+                font-weight: bold; 
+                color: white;
+                background-color: #009688;
+                border-radius: 5px;
+            }
+            QPushButton:hover { background-color: #00796B; }
+        """)
+        self.btn_edit_proxies.clicked.connect(self.action_edit_proxies)
+        data_layout.addWidget(self.btn_edit_proxies)
+        
+        # 编辑卡号按钮
+        self.btn_edit_cards = QPushButton("💳 编辑卡号 (cards.txt)")
+        self.btn_edit_cards.setFixedHeight(40)
+        self.btn_edit_cards.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_edit_cards.setStyleSheet("""
+            QPushButton {
+                text-align: left; 
+                padding-left: 15px; 
+                font-weight: bold; 
+                color: white;
+                background-color: #FF5722;
+                border-radius: 5px;
+            }
+            QPushButton:hover { background-color: #E64A19; }
+        """)
+        self.btn_edit_cards.clicked.connect(self.action_edit_cards)
+        data_layout.addWidget(self.btn_edit_cards)
+        
+        data_layout.addStretch()
+        data_page.setLayout(data_layout)
+        self.toolbox.addItem(data_page, "📁 数据管理")
         
         # 默认展开谷歌
         self.toolbox.setCurrentIndex(0)
@@ -865,13 +1055,14 @@ class BrowserWindowCreatorGUI(QMainWindow):
         
         # 表格控件
         self.table = QTableWidget()
-        self.table.setColumnCount(5)
-        self.table.setHorizontalHeaderLabels(["选择", "名称", "窗口ID", "2FA验证码", "备注"])
+        self.table.setColumnCount(6)
+        self.table.setHorizontalHeaderLabels(["选择", "名称", "窗口ID", "代理", "2FA验证码", "备注"])
         self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents) # Checkbox
         self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Interactive)      # Name
         self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.Interactive)      # ID
-        self.table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.Interactive)      # 2FA
-        self.table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeMode.Stretch)          # Remark
+        self.table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.Interactive)      # Proxy
+        self.table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeMode.Interactive)      # 2FA
+        self.table.horizontalHeader().setSectionResizeMode(5, QHeaderView.ResizeMode.Stretch)          # Remark
         self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         list_layout.addWidget(self.table)
         
@@ -955,12 +1146,25 @@ class BrowserWindowCreatorGUI(QMainWindow):
                 bid = str(browser.get('id', ''))
                 self.table.setItem(i, 2, QTableWidgetItem(bid))
                 
+                # Proxy Status
+                proxy_type = browser.get('proxyType', 'noproxy')
+                proxy_host = browser.get('host', '')
+                if proxy_type and proxy_type != 'noproxy' and proxy_host:
+                    proxy_text = f"✅ {proxy_type}://{proxy_host[:20]}..."
+                    proxy_item = QTableWidgetItem(proxy_text)
+                    proxy_item.setForeground(QColor("green"))
+                else:
+                    proxy_text = "❌ 无代理"
+                    proxy_item = QTableWidgetItem(proxy_text)
+                    proxy_item.setForeground(QColor("red"))
+                self.table.setItem(i, 3, proxy_item)
+                
                 # 2FA (Initial empty)
-                self.table.setItem(i, 3, QTableWidgetItem(""))
+                self.table.setItem(i, 4, QTableWidgetItem(""))
                 
                 # Remark
                 remark = str(browser.get('remark', ''))
-                self.table.setItem(i, 4, QTableWidgetItem(remark))
+                self.table.setItem(i, 5, QTableWidgetItem(remark))
             
             self.log(f"列表刷新完成，共 {len(browsers)} 个窗口")
             
@@ -1034,7 +1238,55 @@ class BrowserWindowCreatorGUI(QMainWindow):
             QMessageBox.warning(self, "错误", f"无法打开全自动处理窗口: {e}")
             import traceback
             traceback.print_exc()
-        
+    
+    def action_change_2fa(self):
+        """打开批量修改2FA窗口"""
+        try:
+            from google_security_gui import GoogleSecurityWindow
+            
+            if not hasattr(self, 'security_2fa_window') or self.security_2fa_window is None:
+                self.security_2fa_window = GoogleSecurityWindow(mode="2fa")
+            
+            self.security_2fa_window.show()
+            self.security_2fa_window.raise_()
+            self.security_2fa_window.activateWindow()
+        except Exception as e:
+            QMessageBox.warning(self, "错误", f"无法打开2FA修改窗口: {e}")
+            import traceback
+            traceback.print_exc()
+    
+    def action_edit_accounts(self):
+        """编辑账号文件"""
+        dialog = DataEditorDialog(
+            self,
+            "编辑账号 - accounts.txt",
+            "accounts.txt",
+            "格式：邮箱----密码----辅助邮箱----2FA密钥\n例如：example@gmail.com----password123----backup@gmail.com----ABCDEFGHIJKLMNOP"
+        )
+        dialog.exec()
+        self.check_files()  # 刷新文件状态
+    
+    def action_edit_proxies(self):
+        """编辑代理文件"""
+        dialog = DataEditorDialog(
+            self,
+            "编辑代理 - proxies.txt",
+            "proxies.txt",
+            "格式：每行一个代理\n支持格式：\n• host:port:username:password\n• socks5://host:port:username:password\n• http://host:port:username:password"
+        )
+        dialog.exec()
+        self.check_files()  # 刷新文件状态
+    
+    def action_edit_cards(self):
+        """编辑卡号文件"""
+        dialog = DataEditorDialog(
+            self,
+            "编辑卡号 - cards.txt",
+            "cards.txt",
+            "格式：卡号 月 年 CVV (空格分隔)\n例如：4242424242424242 12 26 123"
+        )
+        dialog.exec()
+    
     def open_selected_browsers(self):
         """打开选中的窗口"""
         ids = self.get_selected_browser_ids()
