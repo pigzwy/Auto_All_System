@@ -84,13 +84,25 @@ class GeekezBrowserAPI:
         except Exception:
             return False
 
-    def wait_until_ready(self, timeout_seconds: float = 30.0, interval_seconds: float = 1.0) -> bool:
+    def wait_until_ready(
+        self, timeout_seconds: float = 30.0, interval_seconds: float = 1.0
+    ) -> bool:
         deadline = time.time() + float(timeout_seconds)
         while time.time() < deadline:
             if self.is_running():
                 return True
             time.sleep(float(interval_seconds))
         return False
+
+    def wait_until_down(
+        self, timeout_seconds: float = 15.0, interval_seconds: float = 0.5
+    ) -> bool:
+        deadline = time.time() + float(timeout_seconds)
+        while time.time() < deadline:
+            if not self.is_running():
+                return True
+            time.sleep(float(interval_seconds))
+        return not self.is_running()
 
     def enable_remote_debugging(self) -> None:
         settings = _read_json(self.settings_file, {})
@@ -191,9 +203,14 @@ class GeekezBrowserAPI:
     # ------------------------------
     # Control API calls
     # ------------------------------
-    def launch_profile(self, profile_id: str, debug_port: int = 0, enable_remote_debugging: bool = True) -> LaunchInfo:
+    def launch_profile(
+        self, profile_id: str, debug_port: int = 0, enable_remote_debugging: bool = True
+    ) -> LaunchInfo:
         url = f"{self.base_url}/profiles/{profile_id}/launch"
-        payload = {"debugPort": int(debug_port), "enableRemoteDebugging": bool(enable_remote_debugging)}
+        payload = {
+            "debugPort": int(debug_port),
+            "enableRemoteDebugging": bool(enable_remote_debugging),
+        }
         resp = requests.post(url, json=payload, timeout=self.timeout_seconds)
         resp.raise_for_status()
         result = resp.json() if resp.content else {}
@@ -205,11 +222,22 @@ class GeekezBrowserAPI:
         if not endpoint:
             endpoint = f"http://127.0.0.1:{port}"
 
-        return LaunchInfo(profile_id=profile_id, debug_port=port, cdp_endpoint=str(endpoint))
+        return LaunchInfo(
+            profile_id=profile_id, debug_port=port, cdp_endpoint=str(endpoint)
+        )
 
     def close_profile(self, profile_id: str) -> bool:
         try:
             url = f"{self.base_url}/profiles/{profile_id}/close"
+            resp = requests.post(url, timeout=self.timeout_seconds)
+            return resp.status_code == 200
+        except Exception:
+            return False
+
+    def shutdown(self) -> bool:
+        """Ask GeekezBrowser app to quit via control server."""
+        try:
+            url = f"{self.base_url}/shutdown"
             resp = requests.post(url, timeout=self.timeout_seconds)
             return resp.status_code == 200
         except Exception:

@@ -17,6 +17,7 @@ import sys
 import os
 import time
 import asyncio
+import logging
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -65,6 +66,51 @@ def safe_str(msg: Any) -> str:
         return str(msg)
     except Exception:
         return repr(msg)
+
+
+class _QtStreamForwarder:
+    """Forward stdout/stderr writes into a callback, line-buffered."""
+
+    def __init__(self, emit_line):
+        self._emit_line = emit_line
+        self._buf = ""
+
+    def write(self, s: str) -> int:
+        if not s:
+            return 0
+        text = safe_str(s)
+        self._buf += text
+
+        while "\n" in self._buf:
+            line, self._buf = self._buf.split("\n", 1)
+            line = line.rstrip("\r")
+            if line.strip():
+                self._emit_line(line)
+        return len(text)
+
+    def flush(self) -> None:
+        if self._buf.strip():
+            self._emit_line(self._buf.rstrip("\r"))
+        self._buf = ""
+
+    def isatty(self) -> bool:
+        return False
+
+
+class _QtLogHandler(logging.Handler):
+    """Forward python logging records into a callback."""
+
+    def __init__(self, emit_line):
+        super().__init__()
+        self._emit_line = emit_line
+
+    def emit(self, record: logging.LogRecord) -> None:
+        try:
+            msg = self.format(record)
+        except Exception:
+            msg = record.getMessage()
+        if msg and str(msg).strip():
+            self._emit_line(str(msg))
 
 
 def base_dir() -> Path:
@@ -159,13 +205,32 @@ class AppLauncher:
             return False
 
     def stop(self) -> None:
+        # Prefer graceful shutdown via control server.
+        if self.api.is_running():
+            try:
+                self.api.shutdown()
+            except Exception:
+                pass
+
         if self.process:
-            self.process.terminate()
+            try:
+                self.process.terminate()
+            except Exception:
+                pass
             try:
                 self.process.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                self.process.kill()
+            except Exception:
+                try:
+                    self.process.kill()
+                except Exception:
+                    pass
             self.process = None
+
+        # Best-effort wait until /health goes down.
+        try:
+            self.api.wait_until_down(timeout_seconds=10)
+        except Exception:
+            pass
 
 
 class GeekWorkerThread(QThread):
@@ -202,6 +267,18 @@ class GeekWorkerThread(QThread):
         self.log_signal.emit(safe_str(msg))
 
     def run(self) -> None:
+        # Many modules in this repo use `print()` for progress (DB export, login steps, etc.).
+        # Capture stdout/stderr inside worker thread so these logs appear in the GUI.
+        orig_stdout = sys.stdout
+        orig_stderr = sys.stderr
+        sys.stdout = _QtStreamForwarder(self._log)
+        sys.stderr = _QtStreamForwarder(self._log)
+
+        root_logger = logging.getLogger()
+        handler = _QtLogHandler(self._log)
+        handler.setFormatter(logging.Formatter("[%(levelname)s] %(message)s"))
+        root_logger.addHandler(handler)
+
         try:
             ensure_data_files()
 
@@ -281,12 +358,12 @@ class GeekWorkerThread(QThread):
                 self.finished_signal.emit({"success": True})
                 return
 
-            if self.task_type in {"sheerlink", "auto"}:
+            if self.task_type in {"sheerlink", "auto", "bind"}:
                 if not self.selected_emails:
                     self.finished_signal.emit({"success": True})
                     return
 
-                if self.task_type == "auto" and not cards:
+                if self.task_type in {"auto", "bind"} and not cards:
                     self.finished_signal.emit(
                         {"success": False, "error": "cards.txt 为空"}
                     )
@@ -297,9 +374,30 @@ class GeekWorkerThread(QThread):
                     if not acc:
                         return email, False, "账号未找到"
 
+                    proxy_str = None
+                    if proxies:
+                        # Round-robin assign proxies to selected accounts.
+                        try:
+                            from geek_process import proxy_to_url
+
+                            proxy_str = proxy_to_url(proxies[idx % len(proxies)])
+                        except Exception:
+                            proxy_str = None
+
                     if self.task_type == "sheerlink":
                         ok, msg = proc.run_sheerlink(
-                            acc, proxy_str=None, log_callback=self._log
+                            acc, proxy_str=proxy_str, log_callback=self._log
+                        )
+                        return email, ok, msg
+
+                    if self.task_type == "bind":
+                        card = cards[idx % len(cards)]
+                        ok, msg = proc.run_auto(
+                            acc,
+                            card=card,
+                            api_key="",
+                            proxy_str=proxy_str,
+                            log_callback=self._log,
                         )
                         return email, ok, msg
 
@@ -308,7 +406,7 @@ class GeekWorkerThread(QThread):
                         acc,
                         card=card,
                         api_key=self.api_key,
-                        proxy_str=None,
+                        proxy_str=proxy_str,
                         log_callback=self._log,
                     )
                     return email, ok, msg
@@ -345,6 +443,16 @@ class GeekWorkerThread(QThread):
 
             traceback.print_exc()
             self.finished_signal.emit({"success": False, "error": safe_str(e)})
+        finally:
+            try:
+                root_logger.removeHandler(handler)
+            except Exception:
+                pass
+            try:
+                sys.stdout = orig_stdout
+                sys.stderr = orig_stderr
+            except Exception:
+                pass
 
 
 class DataEditorDialog(QDialog):
@@ -363,14 +471,16 @@ class DataEditorDialog(QDialog):
 
         hint = QLabel(format_hint)
         hint.setStyleSheet(
-            "color: #666; padding: 5px; background: #f5f5f5; border-radius: 3px;"
+            "color: #aaa; padding: 5px; background: #252525; border-radius: 3px;"
         )
         hint.setWordWrap(True)
         layout.addWidget(hint)
 
         self.text_edit = QTextEdit()
         self.text_edit.setPlaceholderText("每行一条数据...")
-        self.text_edit.setStyleSheet("font-family: Consolas, monospace;")
+        self.text_edit.setStyleSheet(
+            "font-family: Consolas, monospace; background: #1e1e1e; color: #eee; border: 1px solid #333;"
+        )
         layout.addWidget(self.text_edit)
 
         self.count_label = QLabel("行数: 0")
@@ -430,268 +540,375 @@ class GeekezBrowserMainWindow(QMainWindow):
         self.accounts: List[Dict[str, Any]] = []
         self.email_row: Dict[str, int] = {}
 
+        # Best-effort local state for per-row start/stop buttons.
+        # GeekezBrowser does not expose a "list running profiles" HTTP endpoint yet.
+        self._running_envs: set[str] = set()
+
         ensure_data_files()
         self._init_ui()
         self._check_app_status()
         self.refresh_list()
 
     def _init_ui(self) -> None:
-        self.setWindowTitle("🧩 GeekezBrowser 管理工具")
-        self.setGeometry(100, 80, 1200, 800)
+        self.setWindowTitle("P工具箱")
+        self.setGeometry(100, 80, 1300, 800)
+
+        # Dark Theme Global Styles
+        self.setStyleSheet("""
+            QMainWindow, QWidget { background-color: #121212; color: #e0e0e0; font-family: 'Segoe UI', sans-serif; }
+            QGroupBox { border: 1px solid #333; margin-top: 8px; padding-top: 10px; font-weight: bold; color: #aaa; }
+            QGroupBox::title { subcontrol-origin: margin; left: 10px; padding: 0 3px; }
+            QLineEdit, QSpinBox { background-color: #2d2d2d; border: 1px solid #444; border-radius: 4px; color: #fff; padding: 4px; }
+            QTextEdit { background-color: #1e1e1e; border: 1px solid #333; color: #ddd; }
+            QCheckBox { color: #ddd; }
+            QHeaderView::section { background-color: #252525; color: #ddd; border: none; padding: 5px; font-weight: bold; border-right: 1px solid #333; }
+            QTableWidget { background-color: #1e1e1e; alternate-background-color: #252525; gridline-color: #333; border: 1px solid #333; }
+            QTableWidget::item:selected { background-color: #3d3d3d; color: white; }
+            QScrollBar:vertical { border: none; background: #121212; width: 10px; margin: 0; }
+            QScrollBar::handle:vertical { background: #444; min-height: 20px; border-radius: 5px; }
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }
+            QPushButton { background-color: #2d2d2d; color: #e0e0e0; border: 1px solid #3d3d3d; border-radius: 4px; padding: 5px; }
+            QPushButton:hover { background-color: #3d3d3d; border-color: #555; }
+            QPushButton:pressed { background-color: #1a1a1a; }
+        """)
 
         central = QWidget()
         self.setCentralWidget(central)
-        main_layout = QHBoxLayout(central)
 
-        # ========== 左侧：功能工具箱 ==========
-        left_panel = QWidget()
-        left_panel.setFixedWidth(260)
-        left_layout = QVBoxLayout(left_panel)
-        left_layout.setContentsMargins(0, 0, 5, 0)
+        # Root Layout
+        main_layout = QVBoxLayout(central)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.setSpacing(0)
 
-        # 标题
-        title = QLabel("🔥 功能工具箱")
-        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        title.setStyleSheet(
-            "font-size: 16px; font-weight: bold; padding: 10px; background: #f0f0f0;"
+        # ========== 1. Top Control Bar ==========
+        top_bar = QWidget()
+        top_bar.setFixedHeight(50)
+        top_bar.setStyleSheet(
+            "background-color: #181818; border-bottom: 1px solid #333;"
         )
-        left_layout.addWidget(title)
+        top_layout = QHBoxLayout(top_bar)
+        top_layout.setContentsMargins(20, 0, 20, 0)
 
-        # 工具箱
+        # Title
+        title_label = QLabel("🚀 P工具箱")
+        title_label.setFont(QFont("Segoe UI", 14, QFont.Weight.Bold))
+        title_label.setStyleSheet("color: #fff; letter-spacing: 1px;")
+        top_layout.addWidget(title_label)
+
+        top_layout.addStretch()
+
+        # Engine Control
+        self.status_icon = QLabel("⚫")
+        self.status_label = QLabel("检测中...")
+        self.status_label.setStyleSheet(
+            "color: #666; font-weight: bold; margin-right: 10px;"
+        )
+
+        self.btn_engine_toggle = QPushButton("启动引擎")
+        self.btn_engine_toggle.setCheckable(True)
+        self.btn_engine_toggle.setFixedSize(110, 36)
+        self.btn_engine_toggle.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_engine_toggle.setStyleSheet("""
+            QPushButton { 
+                background-color: #4CAF50; color: white; border: none;
+                border-radius: 18px; font-weight: bold; font-size: 13px;
+            }
+            QPushButton:hover { background-color: #45a049; }
+            QPushButton:checked { background-color: #f44336; }
+            QPushButton:checked:hover { background-color: #d32f2f; }
+            QPushButton:disabled { background-color: #cccccc; }
+        """)
+        self.btn_engine_toggle.clicked.connect(self.toggle_engine)
+
+        top_layout.addWidget(self.status_icon)
+        top_layout.addWidget(self.status_label)
+        top_layout.addWidget(self.btn_engine_toggle)
+
+        main_layout.addWidget(top_bar)
+
+        # ========== 2. Main Body ==========
+        body_widget = QWidget()
+        body_layout = QHBoxLayout(body_widget)
+        body_layout.setContentsMargins(10, 10, 10, 10)
+        body_layout.setSpacing(10)
+
+        # --- Left: Toolbox ---
+        left_panel = QWidget()
+        left_panel.setFixedWidth(250)
+        left_layout = QVBoxLayout(left_panel)
+        left_layout.setContentsMargins(0, 0, 0, 0)
+
+        tb_header = QLabel("🔥 功能工具箱")
+        tb_header.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        tb_header.setStyleSheet(
+            "font-size: 13px; font-weight: bold; padding: 8px; background: #252525; color: #eee; border-radius: 4px;"
+        )
+        left_layout.addWidget(tb_header)
+
         self.toolbox = QToolBox()
         self.toolbox.setStyleSheet("""
             QToolBox::tab {
-                background: #e1e1e1;
-                border-radius: 5px;
-                color: #555;
-                font-weight: bold;
+                background: #2d2d2d; border-radius: 4px; color: #bbb; font-weight: bold; border: 1px solid #333;
             }
-            QToolBox::tab:selected {
-                background: #d0d0d0;
-                color: black;
-            }
+            QToolBox::tab:selected { background: #3d3d3d; color: white; border-left: 3px solid #4CAF50; }
         """)
+
+        self._add_google_section()
+        self._add_data_section()
+
         left_layout.addWidget(self.toolbox)
+        body_layout.addWidget(left_panel)
 
-        # --- 应用控制分区 ---
-        app_page = QWidget()
-        app_layout = QVBoxLayout()
-        app_layout.setContentsMargins(5, 10, 5, 10)
+        # --- Center: Workspace ---
+        workspace_panel = QWidget()
+        workspace_layout = QVBoxLayout(workspace_panel)
+        workspace_layout.setContentsMargins(0, 0, 0, 0)
 
-        self.btn_start_app = QPushButton("🚀 启动 GeekezBrowser")
-        self.btn_start_app.setFixedHeight(45)
-        self.btn_start_app.setStyleSheet("""
-            QPushButton { text-align: left; padding-left: 15px; font-weight: bold; 
-                         color: white; background: #4CAF50; border-radius: 5px; }
-            QPushButton:hover { background: #45a049; }
-        """)
-        self.btn_start_app.clicked.connect(self.action_start_app)
-        app_layout.addWidget(self.btn_start_app)
-
-        self.status_label = QLabel("状态: 检测中...")
-        self.status_label.setStyleSheet("padding: 5px; font-size: 12px;")
-        app_layout.addWidget(self.status_label)
-
-        app_layout.addStretch()
-        app_page.setLayout(app_layout)
-        self.toolbox.addItem(app_page, "⚙️ 应用控制")
-
-        # --- 环境管理分区 ---
-        env_page = QWidget()
-        env_layout = QVBoxLayout()
-        env_layout.setContentsMargins(5, 10, 5, 10)
-
-        self.btn_ensure = QPushButton("📦 创建/更新环境")
-        self.btn_ensure.setFixedHeight(40)
-        self.btn_ensure.setStyleSheet("""
-            QPushButton { text-align: left; padding-left: 15px; font-weight: bold;
-                         color: white; background: #2196F3; border-radius: 5px; }
-            QPushButton:hover { background: #1976D2; }
-        """)
-        self.btn_ensure.clicked.connect(lambda: self.start_task("ensure_profiles"))
-        env_layout.addWidget(self.btn_ensure)
-
-        self.btn_launch = QPushButton("▶️ 启动选中浏览器")
-        self.btn_launch.setFixedHeight(40)
-        self.btn_launch.setStyleSheet("""
-            QPushButton { text-align: left; padding-left: 15px; font-weight: bold;
-                         color: white; background: #FF9800; border-radius: 5px; }
-            QPushButton:hover { background: #F57C00; }
-        """)
-        self.btn_launch.clicked.connect(lambda: self.start_task("launch"))
-        env_layout.addWidget(self.btn_launch)
-
-        self.btn_close = QPushButton("⏹️ 关闭选中浏览器")
-        self.btn_close.setFixedHeight(40)
-        self.btn_close.setStyleSheet("""
-            QPushButton { text-align: left; padding-left: 15px; font-weight: bold;
-                         color: white; background: #f44336; border-radius: 5px; }
-            QPushButton:hover { background: #d32f2f; }
-        """)
-        self.btn_close.clicked.connect(lambda: self.start_task("close"))
-        env_layout.addWidget(self.btn_close)
-
-        env_layout.addStretch()
-        env_page.setLayout(env_layout)
-        self.toolbox.addItem(env_page, "🖥️ 环境管理")
-
-        # --- Google 专区 ---
-        google_page = QWidget()
-        google_layout = QVBoxLayout()
-        google_layout.setContentsMargins(5, 10, 5, 10)
-
-        self.btn_sheerlink = QPushButton("🔗 获取 SheerLink")
-        self.btn_sheerlink.setFixedHeight(40)
-        self.btn_sheerlink.setStyleSheet("""
-            QPushButton { text-align: left; padding-left: 15px; font-weight: bold;
-                         color: white; background: #4CAF50; border-radius: 5px; }
-            QPushButton:hover { background: #45a049; }
-        """)
-        self.btn_sheerlink.clicked.connect(lambda: self.start_task("sheerlink"))
-        google_layout.addWidget(self.btn_sheerlink)
-
-        self.btn_auto = QPushButton("🚀 全自动 (验证+绑卡)")
-        self.btn_auto.setFixedHeight(45)
-        self.btn_auto.setStyleSheet("""
-            QPushButton { text-align: left; padding-left: 15px; font-weight: bold;
-                         color: white; background: #9C27B0; border-radius: 5px; }
-            QPushButton:hover { background: #7B1FA2; }
-        """)
-        self.btn_auto.clicked.connect(lambda: self.start_task("auto"))
-        google_layout.addWidget(self.btn_auto)
-
-        google_layout.addStretch()
-        google_page.setLayout(google_layout)
-        self.toolbox.addItem(google_page, "🔍 Google 专区")
-
-        # --- 数据管理分区 ---
-        data_page = QWidget()
-        data_layout = QVBoxLayout()
-        data_layout.setContentsMargins(5, 10, 5, 10)
-
-        self.btn_edit_accounts = QPushButton("📝 编辑账号")
-        self.btn_edit_accounts.setFixedHeight(40)
-        self.btn_edit_accounts.setStyleSheet("""
-            QPushButton { text-align: left; padding-left: 15px; font-weight: bold;
-                         color: white; background: #3F51B5; border-radius: 5px; }
-            QPushButton:hover { background: #303F9F; }
-        """)
-        self.btn_edit_accounts.clicked.connect(self.action_edit_accounts)
-        data_layout.addWidget(self.btn_edit_accounts)
-
-        self.btn_edit_proxies = QPushButton("🌐 编辑代理")
-        self.btn_edit_proxies.setFixedHeight(40)
-        self.btn_edit_proxies.setStyleSheet("""
-            QPushButton { text-align: left; padding-left: 15px; font-weight: bold;
-                         color: white; background: #009688; border-radius: 5px; }
-            QPushButton:hover { background: #00796B; }
-        """)
-        self.btn_edit_proxies.clicked.connect(self.action_edit_proxies)
-        data_layout.addWidget(self.btn_edit_proxies)
-
-        self.btn_edit_cards = QPushButton("💳 编辑卡号")
-        self.btn_edit_cards.setFixedHeight(40)
-        self.btn_edit_cards.setStyleSheet("""
-            QPushButton { text-align: left; padding-left: 15px; font-weight: bold;
-                         color: white; background: #FF5722; border-radius: 5px; }
-            QPushButton:hover { background: #E64A19; }
-        """)
-        self.btn_edit_cards.clicked.connect(self.action_edit_cards)
-        data_layout.addWidget(self.btn_edit_cards)
-
-        data_layout.addStretch()
-        data_page.setLayout(data_layout)
-        self.toolbox.addItem(data_page, "📁 数据管理")
-
-        main_layout.addWidget(left_panel)
-
-        # ========== 右侧：主内容区 ==========
-        right_panel = QWidget()
-        right_layout = QVBoxLayout(right_panel)
-
-        # 设置区域
+        # Config
         cfg_group = QGroupBox("运行设置")
-        cfg_form = QFormLayout()
+        cfg_layout = QHBoxLayout()
+        cfg_layout.setContentsMargins(10, 10, 10, 10)
 
-        host_port_layout = QHBoxLayout()
+        host_layout = QHBoxLayout()
         self.host_input = QLineEdit(CONTROL_HOST)
-        self.host_input.setFixedWidth(120)
+        self.host_input.setFixedWidth(100)
         self.port_input = QLineEdit(str(CONTROL_PORT))
-        self.port_input.setFixedWidth(80)
-        host_port_layout.addWidget(QLabel("地址:"))
-        host_port_layout.addWidget(self.host_input)
-        host_port_layout.addWidget(QLabel("端口:"))
-        host_port_layout.addWidget(self.port_input)
-        host_port_layout.addStretch()
-        cfg_form.addRow("控制服务:", host_port_layout)
+        self.port_input.setFixedWidth(60)
+        host_layout.addWidget(QLabel("Addr:"))
+        host_layout.addWidget(self.host_input)
+        host_layout.addWidget(QLabel(":"))
+        host_layout.addWidget(self.port_input)
 
         self.api_key_input = QLineEdit()
         self.api_key_input.setPlaceholderText("SheerID API Key (可选)")
-        cfg_form.addRow("API Key:", self.api_key_input)
 
         self.thread_spin = QSpinBox()
         self.thread_spin.setRange(1, 20)
         self.thread_spin.setValue(3)
-        cfg_form.addRow("并发数:", self.thread_spin)
+        self.thread_spin.setPrefix("并发: ")
 
-        cfg_group.setLayout(cfg_form)
-        right_layout.addWidget(cfg_group)
+        cfg_layout.addLayout(host_layout)
+        cfg_layout.addWidget(self.api_key_input)
+        cfg_layout.addWidget(self.thread_spin)
+        cfg_group.setLayout(cfg_layout)
 
-        # 操作按钮行
-        btn_row = QHBoxLayout()
-        self.btn_refresh = QPushButton("🔄 刷新列表")
+        workspace_layout.addWidget(cfg_group)
+
+        # Action Bar
+        action_bar = QHBoxLayout()
+        self.btn_refresh = QPushButton("🔄 刷新")
+        self.btn_refresh.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_refresh.clicked.connect(self.refresh_list)
-        btn_row.addWidget(self.btn_refresh)
 
         self.select_all = QCheckBox("全选")
         self.select_all.stateChanged.connect(self.toggle_select_all)
-        btn_row.addWidget(self.select_all)
 
         self.count_label = QLabel("账号: 0")
-        btn_row.addWidget(self.count_label)
-        btn_row.addStretch()
-        right_layout.addLayout(btn_row)
 
-        # 账号表格
+        # Batch Buttons
+        self.btn_batch_start = QPushButton("▶️ 批量启动")
+        self.btn_batch_start.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_batch_start.clicked.connect(lambda: self.start_task("launch"))
+
+        self.btn_batch_stop = QPushButton("⏹️ 批量关闭")
+        self.btn_batch_stop.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_batch_stop.clicked.connect(lambda: self.start_task("close"))
+
+        action_bar.addWidget(self.btn_refresh)
+        action_bar.addWidget(self.select_all)
+        action_bar.addSpacing(10)
+        action_bar.addWidget(self.btn_batch_start)
+        action_bar.addWidget(self.btn_batch_stop)
+        action_bar.addStretch()
+        action_bar.addWidget(self.count_label)
+
+        workspace_layout.addLayout(action_bar)
+
+        # Table
         self.table = QTableWidget()
-        self.table.setColumnCount(6)
+        self.table.setColumnCount(7)
         self.table.setHorizontalHeaderLabels(
-            ["选择", "邮箱", "环境", "ProfileId", "状态", "消息"]
+            ["选", "邮箱", "操作", "环境", "ID", "状态", "消息"]
+        )
+        self.table.setAlternatingRowColors(True)
+        self.table.setStyleSheet(
+            "selection-background-color: #3d3d3d; selection-color: white;"
         )
         header = self.table.horizontalHeader()
-        if header is not None:
+        if header:
             header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
             header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
             header.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
             header.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
             header.setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
-            header.setSectionResizeMode(5, QHeaderView.ResizeMode.Stretch)
-        right_layout.addWidget(self.table)
+            header.setSectionResizeMode(5, QHeaderView.ResizeMode.ResizeToContents)
+            header.setSectionResizeMode(6, QHeaderView.ResizeMode.Stretch)
 
-        # 日志区域
-        right_layout.addWidget(QLabel("📋 运行日志:"))
+        workspace_layout.addWidget(self.table)
+        body_layout.addWidget(workspace_panel, stretch=1)
+
+        # --- Right: Log Panel ---
+        right_panel = QWidget()
+        right_panel.setFixedWidth(320)
+        right_layout = QVBoxLayout(right_panel)
+        right_layout.setContentsMargins(0, 0, 0, 0)
+
+        right_layout.addWidget(QLabel("📋 运行日志"))
         self.log_text = QTextEdit()
         self.log_text.setReadOnly(True)
-        self.log_text.setMaximumHeight(200)
         self.log_text.setStyleSheet(
-            "font-family: Consolas, monospace; font-size: 12px;"
+            "font-family: Consolas, monospace; font-size: 11px; background: #000; color: #0f0; border: 1px solid #333;"
         )
         right_layout.addWidget(self.log_text)
 
-        main_layout.addWidget(right_panel)
+        body_layout.addWidget(right_panel)
+
+        main_layout.addWidget(body_widget)
+
+    def _add_google_section(self):
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(5, 10, 5, 10)
+        layout.setSpacing(6)
+
+        def mk_btn(text, task, color):
+            btn = QPushButton(text)
+            btn.setFixedHeight(32)
+            btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            btn.setStyleSheet(f"""
+                QPushButton {{
+                    text-align: left; padding-left: 10px; font-weight: bold;
+                    color: {color}; background: #252525; border: 1px solid {color}; border-radius: 4px;
+                }}
+                QPushButton:hover {{ background: {color}; color: #121212; }}
+            """)
+            if task:
+                btn.clicked.connect(lambda: self.start_task(task))
+            return btn
+
+        self.btn_sheerlink = mk_btn("SheerLink 获取", "sheerlink", "#81C784")
+        layout.addWidget(self.btn_sheerlink)
+
+        self.btn_bind = mk_btn("仅绑卡 (无API)", "bind", "#FFB74D")
+        layout.addWidget(self.btn_bind)
+
+        self.btn_auto = mk_btn("全自动 (验证+绑卡)", "auto", "#BA68C8")
+        layout.addWidget(self.btn_auto)
+
+        self.btn_open_sheerid = mk_btn("SheerID 批量验证", None, "#90A4AE")
+        self.btn_open_sheerid.clicked.connect(self.action_open_sheerid_window)
+        layout.addWidget(self.btn_open_sheerid)
+
+        layout.addStretch()
+        self.toolbox.addItem(page, "Google 专区")
+
+    def _add_data_section(self):
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(5, 10, 5, 10)
+        layout.setSpacing(6)
+
+        def mk_btn(text, slot, color):
+            btn = QPushButton(text)
+            btn.setFixedHeight(32)
+            btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            btn.setStyleSheet(f"""
+                QPushButton {{
+                    text-align: left; padding-left: 10px; font-weight: bold;
+                    color: {color}; background: #252525; border: 1px solid {color}; border-radius: 4px;
+                }}
+                QPushButton:hover {{ background: {color}; color: #121212; }}
+            """)
+            if slot:
+                btn.clicked.connect(slot)
+            return btn
+
+        # Moved "Ensure Profiles" here from Environment section
+        self.btn_ensure = mk_btn(
+            "环境创建/更新", lambda: self.start_task("ensure_profiles"), "#64B5F6"
+        )
+        layout.addWidget(self.btn_ensure)
+
+        self.btn_edit_accounts = mk_btn(
+            "账号编辑", self.action_edit_accounts, "#7986CB"
+        )
+        layout.addWidget(self.btn_edit_accounts)
+
+        self.btn_edit_proxies = mk_btn("代理编辑", self.action_edit_proxies, "#4DB6AC")
+        layout.addWidget(self.btn_edit_proxies)
+
+        self.btn_edit_cards = mk_btn("卡号编辑", self.action_edit_cards, "#FF8A65")
+        layout.addWidget(self.btn_edit_cards)
+
+        layout.addStretch()
+        self.toolbox.addItem(page, "📁 数据管理")
+
+    def toggle_engine(self, checked: bool):
+        if checked:
+            # Start
+            if not self.launcher.is_running():
+                self.btn_engine_toggle.setText("启动中...")
+                self.btn_engine_toggle.setEnabled(False)
+                self.start_task("start_app")
+            else:
+                self._check_app_status()
+        else:
+            # Stop
+            if self.launcher.is_running():
+                self.btn_engine_toggle.setText("停止中...")
+                self.btn_engine_toggle.setEnabled(False)
+
+                import threading
+
+                def _do_stop():
+                    err: Optional[str] = None
+                    try:
+                        self.launcher.stop()
+                    except Exception as e:
+                        err = safe_str(e)
+
+                    def _finish():
+                        if err:
+                            self.append_log(f"[Control] 停止失败: {err}")
+                        else:
+                            self.append_log("[Control] 引擎已停止")
+                        self._check_app_status()
+
+                    QTimer.singleShot(0, _finish)
+
+                threading.Thread(target=_do_stop, daemon=True).start()
+            else:
+                self._check_app_status()
 
     def _check_app_status(self) -> None:
         """检查应用状态"""
-        if self.launcher.is_running():
+        is_running = self.launcher.is_running()
+        if is_running:
             self.status_label.setText("状态: ✅ 运行中")
             self.status_label.setStyleSheet(
-                "padding: 5px; font-size: 12px; color: green;"
+                "color: #66bb6a; font-weight: bold; margin-right: 10px;"
             )
+            self.status_icon.setText("🟢")
+            self.btn_engine_toggle.setChecked(True)
+            self.btn_engine_toggle.setText("停止引擎")
+            self.btn_engine_toggle.setStyleSheet("""
+                QPushButton { background: #d32f2f; color: white; border-radius: 18px; font-weight: bold; border: 1px solid #b71c1c; }
+                QPushButton:hover { background: #b71c1c; }
+            """)
         else:
             self.status_label.setText("状态: ❌ 未运行")
             self.status_label.setStyleSheet(
-                "padding: 5px; font-size: 12px; color: red;"
+                "color: #ef5350; font-weight: bold; margin-right: 10px;"
             )
+            self.status_icon.setText("🔴")
+            self.btn_engine_toggle.setChecked(False)
+            self.btn_engine_toggle.setText("启动引擎")
+            self.btn_engine_toggle.setStyleSheet("""
+                QPushButton { background: #388E3C; color: white; border-radius: 18px; font-weight: bold; border: 1px solid #2E7D32; }
+                QPushButton:hover { background: #2E7D32; }
+            """)
+
+        self.btn_engine_toggle.setEnabled(True)
 
     def append_log(self, msg: str) -> None:
         self.log_text.append(safe_str(msg))
@@ -733,10 +950,35 @@ class GeekezBrowserMainWindow(QMainWindow):
             self.table.setCellWidget(row, 0, cb)
 
             self.table.setItem(row, 1, QTableWidgetItem(email))
-            self.table.setItem(row, 2, QTableWidgetItem("✅" if has_profile else "❌"))
-            self.table.setItem(row, 3, QTableWidgetItem(profile_id or ""))
-            self.table.setItem(row, 4, QTableWidgetItem(""))
+
+            # Action Column (New)
+            action_widget = QWidget()
+            action_layout = QHBoxLayout(action_widget)
+            action_layout.setContentsMargins(2, 2, 2, 2)
+            action_layout.setSpacing(4)
+
+            btn_play = QPushButton("▶️")
+            btn_play.setFixedSize(30, 24)
+            btn_play.setToolTip("启动")
+            btn_play.setCursor(Qt.CursorShape.PointingHandCursor)
+            # Use default args to capture variable
+            btn_play.clicked.connect(lambda _, e=email: self.start_task("launch", [e]))
+
+            btn_stop = QPushButton("⏹️")
+            btn_stop.setFixedSize(30, 24)
+            btn_stop.setToolTip("关闭")
+            btn_stop.setCursor(Qt.CursorShape.PointingHandCursor)
+            btn_stop.clicked.connect(lambda _, e=email: self.start_task("close", [e]))
+
+            action_layout.addWidget(btn_play)
+            action_layout.addWidget(btn_stop)
+            action_layout.addStretch()
+            self.table.setCellWidget(row, 2, action_widget)
+
+            self.table.setItem(row, 3, QTableWidgetItem("✅" if has_profile else "❌"))
+            self.table.setItem(row, 4, QTableWidgetItem(profile_id or ""))
             self.table.setItem(row, 5, QTableWidgetItem(""))
+            self.table.setItem(row, 6, QTableWidgetItem(""))
 
             self.email_row[email] = row
 
@@ -785,12 +1027,32 @@ class GeekezBrowserMainWindow(QMainWindow):
         if dlg.exec():
             self.refresh_list()
 
-    def start_task(self, task_type: str) -> None:
+    def action_open_sheerid_window(self) -> None:
+        """打开现有的 SheerID 批量验证窗口（读取 sheerIDlink.txt）。"""
+        try:
+            from sheerid_gui import SheerIDWindow
+        except Exception as e:
+            QMessageBox.warning(self, "错误", f"无法加载 SheerID 工具: {e}")
+            return
+
+        dlg = SheerIDWindow(self)
+        # Best-effort: sync API key from main window.
+        try:
+            key = self.api_key_input.text().strip()
+            if key:
+                dlg.api_key_input.setText(key)
+        except Exception:
+            pass
+        dlg.exec()
+
+    def start_task(
+        self, task_type: str, specific_emails: Optional[List[str]] = None
+    ) -> None:
         if self.worker and self.worker.isRunning():
             QMessageBox.information(self, "提示", "任务正在运行")
             return
 
-        selected = self._selected_emails()
+        selected = specific_emails if specific_emails else self._selected_emails()
         if task_type not in {"ensure_profiles", "start_app"} and not selected:
             QMessageBox.information(self, "提示", "请先勾选账号")
             return
@@ -826,8 +1088,9 @@ class GeekezBrowserMainWindow(QMainWindow):
         row = self.email_row.get(email)
         if row is None:
             return
-        self.table.setItem(row, 4, QTableWidgetItem(safe_str(status)))
-        self.table.setItem(row, 5, QTableWidgetItem(safe_str(message)))
+        # Updated columns: Status=5, Msg=6
+        self.table.setItem(row, 5, QTableWidgetItem(safe_str(status)))
+        self.table.setItem(row, 6, QTableWidgetItem(safe_str(message)))
 
     def on_finished(self, result: Dict[str, Any]) -> None:
         self._set_buttons_enabled(True)
@@ -840,19 +1103,23 @@ class GeekezBrowserMainWindow(QMainWindow):
         self.refresh_list()
 
     def _set_buttons_enabled(self, enabled: bool) -> None:
-        for btn in [
-            self.btn_refresh,
-            self.btn_start_app,
-            self.btn_ensure,
-            self.btn_launch,
-            self.btn_close,
-            self.btn_sheerlink,
-            self.btn_auto,
-            self.btn_edit_accounts,
-            self.btn_edit_proxies,
-            self.btn_edit_cards,
-        ]:
-            btn.setEnabled(enabled)
+        buttons = [
+            getattr(self, "btn_refresh", None),
+            getattr(self, "btn_batch_start", None),
+            getattr(self, "btn_batch_stop", None),
+            getattr(self, "btn_engine_toggle", None),
+            getattr(self, "btn_sheerlink", None),
+            getattr(self, "btn_bind", None),
+            getattr(self, "btn_auto", None),
+            getattr(self, "btn_open_sheerid", None),
+            getattr(self, "btn_ensure", None),
+            getattr(self, "btn_edit_accounts", None),
+            getattr(self, "btn_edit_proxies", None),
+            getattr(self, "btn_edit_cards", None),
+        ]
+        for btn in buttons:
+            if btn is not None:
+                btn.setEnabled(bool(enabled))
 
 
 def main() -> None:
