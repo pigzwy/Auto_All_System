@@ -18,6 +18,8 @@ import os
 import time
 import asyncio
 import logging
+import threading
+from collections import deque
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -68,10 +70,28 @@ def safe_str(msg: Any) -> str:
         return repr(msg)
 
 
+# Thread-local storage for current email context (used by stdout/stderr capture)
+_thread_local = threading.local()
+
+
+def _get_current_email() -> str:
+    """获取当前线程的 email 上下文"""
+    return getattr(_thread_local, "current_email", "")
+
+
+def _set_current_email(email: str) -> None:
+    """设置当前线程的 email 上下文"""
+    _thread_local.current_email = email
+
+
 class _QtStreamForwarder:
-    """Forward stdout/stderr writes into a callback, line-buffered."""
+    """Forward stdout/stderr writes into a callback, line-buffered.
+
+    Automatically includes the current thread's email context.
+    """
 
     def __init__(self, emit_line):
+        """emit_line signature: (email: str, line: str) -> None"""
         self._emit_line = emit_line
         self._buf = ""
 
@@ -85,12 +105,14 @@ class _QtStreamForwarder:
             line, self._buf = self._buf.split("\n", 1)
             line = line.rstrip("\r")
             if line.strip():
-                self._emit_line(line)
+                email = _get_current_email()
+                self._emit_line(email, line)
         return len(text)
 
     def flush(self) -> None:
         if self._buf.strip():
-            self._emit_line(self._buf.rstrip("\r"))
+            email = _get_current_email()
+            self._emit_line(email, self._buf.rstrip("\r"))
         self._buf = ""
 
     def isatty(self) -> bool:
@@ -98,9 +120,13 @@ class _QtStreamForwarder:
 
 
 class _QtLogHandler(logging.Handler):
-    """Forward python logging records into a callback."""
+    """Forward python logging records into a callback.
+
+    Automatically includes the current thread's email context.
+    """
 
     def __init__(self, emit_line):
+        """emit_line signature: (email: str, line: str) -> None"""
         super().__init__()
         self._emit_line = emit_line
 
@@ -110,7 +136,8 @@ class _QtLogHandler(logging.Handler):
         except Exception:
             msg = record.getMessage()
         if msg and str(msg).strip():
-            self._emit_line(str(msg))
+            email = _get_current_email()
+            self._emit_line(email, str(msg))
 
 
 def base_dir() -> Path:
@@ -236,7 +263,7 @@ class AppLauncher:
 class GeekWorkerThread(QThread):
     """工作线程"""
 
-    log_signal = pyqtSignal(str)
+    log_signal = pyqtSignal(str, str)  # (email, line) - email 为空表示全局日志
     progress_signal = pyqtSignal(str, str, str)  # email, status, message
     finished_signal = pyqtSignal(dict)
 
@@ -263,19 +290,37 @@ class GeekWorkerThread(QThread):
     def stop(self) -> None:
         self.is_running = False
 
-    def _log(self, msg: str) -> None:
-        self.log_signal.emit(safe_str(msg))
+    def _log(self, msg: str, email: str = "") -> None:
+        """发送日志信号，email 为空表示全局日志"""
+        self.log_signal.emit(email, safe_str(msg))
+
+    def _make_log_callback(self, email: str):
+        """创建带 email 上下文的 log callback，用于传给底层模块。
+
+        同时设置 thread-local email，这样 print() 输出也能被归到对应账号。
+        """
+
+        def log_cb(msg: str) -> None:
+            _set_current_email(email)
+            self._log(msg, email)
+
+        return log_cb
+
+    def _emit_log(self, email: str, line: str) -> None:
+        """用于 stdout/stderr 捕获的回调"""
+        self.log_signal.emit(email, safe_str(line))
 
     def run(self) -> None:
         # Many modules in this repo use `print()` for progress (DB export, login steps, etc.).
         # Capture stdout/stderr inside worker thread so these logs appear in the GUI.
+        # The _QtStreamForwarder now uses thread-local email context.
         orig_stdout = sys.stdout
         orig_stderr = sys.stderr
-        sys.stdout = _QtStreamForwarder(self._log)
-        sys.stderr = _QtStreamForwarder(self._log)
+        sys.stdout = _QtStreamForwarder(self._emit_log)
+        sys.stderr = _QtStreamForwarder(self._emit_log)
 
         root_logger = logging.getLogger()
-        handler = _QtLogHandler(self._log)
+        handler = _QtLogHandler(self._emit_log)
         handler.setFormatter(logging.Formatter("[%(levelname)s] %(message)s"))
         root_logger.addHandler(handler)
 
@@ -326,17 +371,20 @@ class GeekWorkerThread(QThread):
                 for email in self.selected_emails:
                     if not self.is_running:
                         break
+                    _set_current_email(email)
                     try:
                         launch = proc.launch_by_email(email)
                         self.progress_signal.emit(
                             email, "✅ 已启动", f"port={launch.debug_port}"
                         )
                         self._log(
-                            f"[Geek] 启动成功: {email} (port={launch.debug_port})"
+                            f"[Geek] 启动成功: {email} (port={launch.debug_port})",
+                            email,
                         )
                     except Exception as e:
                         self.progress_signal.emit(email, "❌ 失败", safe_str(e))
-                        self._log(f"[Geek] 启动失败: {email} -> {e}")
+                        self._log(f"[Geek] 启动失败: {email} -> {e}", email)
+                _set_current_email("")
                 self.finished_signal.emit({"success": True})
                 return
 
@@ -344,6 +392,7 @@ class GeekWorkerThread(QThread):
                 for email in self.selected_emails:
                     if not self.is_running:
                         break
+                    _set_current_email(email)
                     try:
                         ok = proc.close_by_email(email)
                         self.progress_signal.emit(
@@ -351,10 +400,11 @@ class GeekWorkerThread(QThread):
                             "✅ 已关闭" if ok else "⚠️",
                             "closed" if ok else "未运行",
                         )
-                        self._log(f"[Geek] 关闭: {email} ({ok})")
+                        self._log(f"[Geek] 关闭: {email} ({ok})", email)
                     except Exception as e:
                         self.progress_signal.emit(email, "❌ 失败", safe_str(e))
-                        self._log(f"[Geek] 关闭失败: {email} -> {e}")
+                        self._log(f"[Geek] 关闭失败: {email} -> {e}", email)
+                _set_current_email("")
                 self.finished_signal.emit({"success": True})
                 return
 
@@ -370,6 +420,9 @@ class GeekWorkerThread(QThread):
                     return
 
                 def _task_one(email: str, idx: int):
+                    # Set thread-local email for print() capture
+                    _set_current_email(email)
+
                     acc = account_map.get(email)
                     if not acc:
                         return email, False, "账号未找到"
@@ -384,9 +437,12 @@ class GeekWorkerThread(QThread):
                         except Exception:
                             proxy_str = None
 
+                    # Create email-specific log callback
+                    log_cb = self._make_log_callback(email)
+
                     if self.task_type == "sheerlink":
                         ok, msg = proc.run_sheerlink(
-                            acc, proxy_str=proxy_str, log_callback=self._log
+                            acc, proxy_str=proxy_str, log_callback=log_cb
                         )
                         return email, ok, msg
 
@@ -397,7 +453,7 @@ class GeekWorkerThread(QThread):
                             card=card,
                             api_key="",
                             proxy_str=proxy_str,
-                            log_callback=self._log,
+                            log_callback=log_cb,
                         )
                         return email, ok, msg
 
@@ -407,7 +463,7 @@ class GeekWorkerThread(QThread):
                         card=card,
                         api_key=self.api_key,
                         proxy_str=proxy_str,
-                        log_callback=self._log,
+                        log_callback=log_cb,
                     )
                     return email, ok, msg
 
@@ -430,7 +486,8 @@ class GeekWorkerThread(QThread):
                             )
                         except Exception as e:
                             self.progress_signal.emit(email, "❌", safe_str(e))
-                            self._log(f"[Geek] 错误: {email} -> {e}")
+                            self._log(f"[Geek] 错误: {email} -> {e}", email)
+                _set_current_email("")
                 self.finished_signal.emit({"success": True})
                 return
 
@@ -533,6 +590,9 @@ class DataEditorDialog(QDialog):
 class GeekezBrowserMainWindow(QMainWindow):
     """GeekezBrowser 完整管理界面"""
 
+    # 每个账号日志缓存的最大行数
+    MAX_LOG_LINES = 2000
+
     def __init__(self) -> None:
         super().__init__()
         self.worker: Optional[GeekWorkerThread] = None
@@ -543,6 +603,11 @@ class GeekezBrowserMainWindow(QMainWindow):
         # Best-effort local state for per-row start/stop buttons.
         # GeekezBrowser does not expose a "list running profiles" HTTP endpoint yet.
         self._running_envs: set[str] = set()
+
+        # 日志缓存
+        self._global_logs: deque = deque(maxlen=self.MAX_LOG_LINES)
+        self._account_logs: Dict[str, deque] = {}  # email -> deque of log lines
+        self._selected_email: str = ""  # 当前选中的账号
 
         ensure_data_files()
         self._init_ui()
@@ -724,6 +789,13 @@ class GeekezBrowserMainWindow(QMainWindow):
 
         workspace_layout.addLayout(action_bar)
 
+        # ---- Table + Account Log Splitter ----
+        table_log_splitter = QSplitter(Qt.Orientation.Vertical)
+        table_log_splitter.setStyleSheet("""
+            QSplitter::handle { background: #333; height: 3px; }
+            QSplitter::handle:hover { background: #4CAF50; }
+        """)
+
         # Table
         self.table = QTableWidget()
         self.table.setColumnCount(7)
@@ -731,6 +803,7 @@ class GeekezBrowserMainWindow(QMainWindow):
             ["选", "邮箱", "操作", "环境", "ID", "状态", "消息"]
         )
         self.table.setAlternatingRowColors(True)
+        self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.table.setStyleSheet(
             "selection-background-color: #3d3d3d; selection-color: white;"
         )
@@ -744,7 +817,38 @@ class GeekezBrowserMainWindow(QMainWindow):
             header.setSectionResizeMode(5, QHeaderView.ResizeMode.ResizeToContents)
             header.setSectionResizeMode(6, QHeaderView.ResizeMode.Stretch)
 
-        workspace_layout.addWidget(self.table)
+        # Connect table selection change
+        self.table.itemSelectionChanged.connect(self.on_account_selected)
+
+        table_log_splitter.addWidget(self.table)
+
+        # Account Log Panel (bottom of splitter)
+        account_log_panel = QWidget()
+        account_log_layout = QVBoxLayout(account_log_panel)
+        account_log_layout.setContentsMargins(0, 5, 0, 0)
+        account_log_layout.setSpacing(3)
+
+        self.account_log_title = QLabel("📝 账号日志: (点击表格行查看)")
+        self.account_log_title.setStyleSheet(
+            "font-weight: bold; color: #aaa; padding: 2px 5px; background: #1a1a1a; border-radius: 3px;"
+        )
+        account_log_layout.addWidget(self.account_log_title)
+
+        self.account_log_text = QTextEdit()
+        self.account_log_text.setReadOnly(True)
+        self.account_log_text.setPlaceholderText("选中账号后显示该账号的日志...")
+        self.account_log_text.setStyleSheet(
+            "font-family: Consolas, monospace; font-size: 11px; background: #0a0a0a; color: #0ff; border: 1px solid #333;"
+        )
+        self.account_log_text.setMaximumHeight(180)
+        account_log_layout.addWidget(self.account_log_text)
+
+        table_log_splitter.addWidget(account_log_panel)
+
+        # Set initial splitter sizes (table larger, log smaller)
+        table_log_splitter.setSizes([400, 150])
+
+        workspace_layout.addWidget(table_log_splitter)
         body_layout.addWidget(workspace_panel, stretch=1)
 
         # --- Right: Log Panel ---
@@ -911,7 +1015,63 @@ class GeekezBrowserMainWindow(QMainWindow):
         self.btn_engine_toggle.setEnabled(True)
 
     def append_log(self, msg: str) -> None:
+        """追加到全局日志（右侧面板）"""
         self.log_text.append(safe_str(msg))
+
+    def on_worker_log(self, email: str, line: str) -> None:
+        """处理 Worker 发来的日志信号，分流到全局和账号缓存"""
+        line = safe_str(line)
+
+        # 1. 始终追加到全局日志
+        self._global_logs.append(line)
+        self.log_text.append(line)
+
+        # 2. 如果有 email，也追加到账号日志缓存
+        if email:
+            if email not in self._account_logs:
+                self._account_logs[email] = deque(maxlen=self.MAX_LOG_LINES)
+            self._account_logs[email].append(line)
+
+            # 如果当前选中的就是这个账号，实时更新账号日志面板
+            if email == self._selected_email:
+                self.account_log_text.append(line)
+
+    def on_account_selected(self) -> None:
+        """表格选中行变化时，刷新账号日志面板"""
+        selection_model = self.table.selectionModel()
+        if not selection_model:
+            return
+
+        selected_rows = selection_model.selectedRows()
+        if not selected_rows:
+            self._selected_email = ""
+            self.account_log_title.setText("📝 账号日志: (点击表格行查看)")
+            self.account_log_text.clear()
+            return
+
+        row = selected_rows[0].row()
+        email_item = self.table.item(row, 1)
+        if not email_item:
+            return
+
+        email = email_item.text().strip()
+        if not email:
+            return
+
+        self._selected_email = email
+        self.account_log_title.setText(f"📝 账号日志: {email}")
+
+        # 从缓存加载该账号的历史日志
+        self.account_log_text.clear()
+        if email in self._account_logs:
+            logs = list(self._account_logs[email])
+            self.account_log_text.setPlainText("\n".join(logs))
+            # 滚动到底部
+            scrollbar = self.account_log_text.verticalScrollBar()
+            if scrollbar:
+                scrollbar.setValue(scrollbar.maximum())
+        else:
+            self.account_log_text.setPlainText("(暂无日志)")
 
     def toggle_select_all(self, state: int) -> None:
         checked = state == Qt.CheckState.Checked.value
@@ -1076,7 +1236,7 @@ class GeekezBrowserMainWindow(QMainWindow):
             thread_count=thread_count,
             launcher=self.launcher,
         )
-        self.worker.log_signal.connect(self.append_log)
+        self.worker.log_signal.connect(self.on_worker_log)
         self.worker.progress_signal.connect(self.update_row_status)
         self.worker.finished_signal.connect(self.on_finished)
 
