@@ -107,7 +107,8 @@ class SheerIDVerifier:
             if resp.status_code in [403, 401]:
                 logger.warning(f"Token expired (status {resp.status_code}), refreshing again...")
                 if self._get_csrf_token():
-                    headers["X-CSRF-Token"] = self.csrf_token
+                    if isinstance(self.csrf_token, str) and self.csrf_token:
+                        headers["X-CSRF-Token"] = self.csrf_token
                     resp = self.session.post(
                         f"{BASE_URL}/api/batch", 
                         headers=headers, 
@@ -210,6 +211,50 @@ class SheerIDVerifier:
         
         return {"status": "error", "message": "Polling timeout (120s)"}
 
+    def verify_single(self, link_or_vid: str, callback=None):
+        """Verify a single SheerID link or verificationId.
+
+        Existing GUI/automation code sometimes passes the full SheerID URL.
+        We extract `verificationId` from:
+        - query: verificationId=XXXX
+        - path:  /verify/XXXX
+
+        Returns: (success: bool, vid: str|None, message: str)
+        """
+        if not link_or_vid:
+            return False, None, "empty input"
+
+        text = str(link_or_vid).strip()
+        vid = None
+
+        match_param = re.search(r"verificationId=([a-zA-Z0-9]+)", text)
+        if match_param:
+            vid = match_param.group(1)
+        else:
+            match_path = re.search(r"verify/([a-zA-Z0-9]+)", text)
+            if match_path:
+                vid = match_path.group(1)
+
+        if not vid and re.fullmatch(r"[a-zA-Z0-9]+", text):
+            vid = text
+
+        if not vid:
+            return False, None, "未找到有效的 verificationId"
+
+        results = self.verify_batch([vid], callback=callback)
+        data = results.get(vid) if isinstance(results, dict) else None
+        if not isinstance(data, dict):
+            return False, vid, "verify_batch returned no result"
+
+        status = data.get("currentStep") or data.get("status")
+        message = data.get("message") or ""
+        if status == "success":
+            return True, vid, message or "success"
+        if status == "error":
+            return False, vid, message or "error"
+
+        return False, vid, message or f"unexpected status: {status}"
+
     def cancel_verification(self, verification_id):
         """Cancel a verification process"""
         if not self.csrf_token:
@@ -218,7 +263,8 @@ class SheerIDVerifier:
         
         url = f"{BASE_URL}/api/cancel"
         headers = self.headers.copy()
-        headers["X-CSRF-Token"] = self.csrf_token
+        if isinstance(self.csrf_token, str) and self.csrf_token:
+            headers["X-CSRF-Token"] = self.csrf_token
         headers["Content-Type"] = "application/json"
         
         try:

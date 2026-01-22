@@ -651,6 +651,7 @@ class BrowserWindowCreatorGUI(QMainWindow):
 
         self.ensure_data_files()
         self.worker_thread = None
+        self._geek_window = None
         self.init_ui()
 
     def ensure_data_files(self):
@@ -815,6 +816,34 @@ class BrowserWindowCreatorGUI(QMainWindow):
         tg_layout.addStretch()
         tg_page.setLayout(tg_layout)
         self.toolbox.addItem(tg_page, "Telegram 专区")
+
+        # --- GeekezBrowser 分区 ---
+        geek_page = QWidget()
+        geek_layout = QVBoxLayout()
+        geek_layout.setContentsMargins(5, 10, 5, 10)
+
+        self.btn_geek_gui = QPushButton("🧩 打开 GeekezBrowser 管理")
+        self.btn_geek_gui.setFixedHeight(40)
+        self.btn_geek_gui.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_geek_gui.setStyleSheet(
+            """
+            QPushButton {
+                text-align: left;
+                padding-left: 15px;
+                font-weight: bold;
+                color: white;
+                background-color: #795548;
+                border-radius: 5px;
+            }
+            QPushButton:hover { background-color: #5D4037; }
+            """
+        )
+        self.btn_geek_gui.clicked.connect(self.action_open_geek_gui)
+        geek_layout.addWidget(self.btn_geek_gui)
+        geek_layout.addStretch()
+
+        geek_page.setLayout(geek_layout)
+        self.toolbox.addItem(geek_page, "GeekezBrowser")
         
         # --- 数据管理分区 ---
         data_page = QWidget()
@@ -881,6 +910,28 @@ class BrowserWindowCreatorGUI(QMainWindow):
         
         # 默认展开谷歌
         self.toolbox.setCurrentIndex(0)
+
+    def action_open_geek_gui(self):
+        """Open GeekezBrowser GUI window (separate module)."""
+        try:
+            base_path = (
+                os.path.dirname(sys.executable)
+                if getattr(sys, 'frozen', False)
+                else os.path.dirname(os.path.abspath(__file__))
+            )
+            geek_dir = os.path.join(base_path, '2dev', 'geek')
+            if os.path.isdir(geek_dir) and geek_dir not in sys.path:
+                sys.path.insert(0, geek_dir)
+
+            from geek_gui import GeekezBrowserWindow
+
+            if self._geek_window is None:
+                self._geek_window = GeekezBrowserWindow()
+            self._geek_window.show()
+            self._geek_window.raise_()
+            self._geek_window.activateWindow()
+        except Exception as e:
+            QMessageBox.warning(self, "错误", f"打开 Geek GUI 失败: {e}")
 
     def init_ui(self):
         """初始化UI"""

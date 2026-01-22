@@ -58,6 +58,7 @@ temp_icon.png
 
 # Exclude virtual env
 venv/
+.venv/
 env/
 
 # Exclude OS files
