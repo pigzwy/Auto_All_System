@@ -186,9 +186,13 @@ class SheerLinkService:
                     acc_line += f"----{account_info['secret']}"
                 
                 # 处理不同状态
-                if status == "subscribed":
+                if status in ["subscribed", "subscribed_antigravity"]:
                     AccountManager.move_to_subscribed(acc_line)
-                    return True, "已绑卡 (Subscribed)"
+                    # 针对 antigravity 特别更新一下状态字符串
+                    if status == "subscribed_antigravity":
+                        from core.database import DBManager
+                        DBManager.update_account_status(email, 'subscribed_antigravity')
+                    return True, f"已绑卡 ({status})"
                 
                 elif status == "verified":
                     AccountManager.move_to_verified(acc_line)

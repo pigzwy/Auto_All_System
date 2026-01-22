@@ -34,9 +34,10 @@ def process_all_in_one(
     try:
         from core.bit_api import open_browser, close_browser, get_browser_info
         from core.database import DBManager
-        from google.backend.google_detector import (
+        from google.backend.google_auth import (
             check_google_login_by_avatar,
-            check_google_one_status_v2,
+            check_google_one_status,
+            ensure_google_login
         )
         from google.backend.sheerid_verifier import SheerIDVerifier
         from google.backend.bind_card_service import auto_bind_card, get_card_from_db
@@ -103,7 +104,7 @@ def process_all_in_one(
                 
                 # Step 2: 检测资格状态 (V2 - API拦截)
                 log("🔍 步骤2: 检测资格状态 (API拦截)...")
-                status, sheer_link = await check_google_one_status_v2(page, timeout=20)
+                status, sheer_link = await check_google_one_status(page, timeout=20)
                 log(f"   当前状态: {status}")
                 
                 # 根据状态决定下一步
@@ -162,7 +163,7 @@ def process_all_in_one(
                                 await page.reload(wait_until='domcontentloaded')
                                 await page.wait_for_load_state('networkidle', timeout=10000)
                                 
-                                new_status, _ = await check_google_one_status_v2(page, timeout=15)
+                                new_status, _ = await check_google_one_status(page, timeout=15)
                                 if new_status == 'verified':
                                     log("📋 验证成功，开始绑卡订阅...")
                                     if account_info:

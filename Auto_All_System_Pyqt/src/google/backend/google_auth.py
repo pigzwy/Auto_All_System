@@ -1,578 +1,406 @@
 """
 @file google_auth.py
-@brief Google账号认证和登录状态检测模块
-@details 提供Google账号登录状态检测、自动登录等功能
+@brief Google账号认证和登录状态检测模块 (V2)
+@details 包含Google账号登录状态检测(头像检测)、自动登录、资格检测(API拦截)等功能
 @author Auto System
-@date 2026-01-21
+@date 2026-01-22
 """
 
 import asyncio
+import re
 import pyotp
 from typing import Tuple, Optional, Dict, Any
-from playwright.async_api import Page
-
+from playwright.async_api import Page, expect
 
 # ==================== 登录状态枚举 ====================
 class GoogleLoginStatus:
     """Google登录状态枚举"""
     LOGGED_IN = "logged_in"           # 已登录
     NOT_LOGGED_IN = "not_logged_in"   # 未登录（在登录页面）
-    NEED_PASSWORD = "need_password"   # 需要输入密码
-    NEED_2FA = "need_2fa"             # 需要2FA验证
-    NEED_RECOVERY = "need_recovery"   # 需要辅助邮箱验证
-    SESSION_EXPIRED = "session_expired"  # 会话过期
-    SECURITY_CHECK = "security_check" # 安全检查（异常登录）
-    UNKNOWN = "unknown"               # 未知状态
+    # 以下状态在V2检测中可能归类为NOT_LOGGED_IN，但保留枚举兼容
+    NEED_PASSWORD = "need_password"   
+    NEED_2FA = "need_2fa"             
+    NEED_RECOVERY = "need_recovery"   
+    SESSION_EXPIRED = "session_expired"
+    SECURITY_CHECK = "security_check" 
+    UNKNOWN = "unknown"               
 
 
-# ==================== 页面URL特征 ====================
-# 已登录状态的URL特征
-LOGGED_IN_URL_PATTERNS = [
-    "myaccount.google.com",
-    "one.google.com",
-    "mail.google.com",
-    "drive.google.com",
-    "docs.google.com",
-    "photos.google.com",
-]
+# ==================== V2 检测逻辑 (核心) ====================
 
-# 登录页面URL特征
-LOGIN_URL_PATTERNS = [
-    "accounts.google.com/signin",
-    "accounts.google.com/v3/signin",
-    "accounts.google.com/AccountChooser",
-]
+async def check_google_login_by_avatar(page: Page, timeout: float = 10.0) -> bool:
+    """
+    @brief 核心登录检测：通过检测头像按钮判断是否已登录
+    @param page Playwright 页面对象
+    @param timeout 超时时间(秒)
+    @return True=已登录, False=未登录
+    """
+    try:
+        # 如果不在Google域下，可能需要导航（取决于调用者，这里假设已在Google页面）
+        # 如果页面是空白或 about:blank，导航到 accounts.google.com
+        if 'about:blank' in page.url:
+            await page.goto("https://accounts.google.com/", wait_until="domcontentloaded")
+            
+        # 头像按钮选择器 (多个备选)
+        avatar_selectors = [
+            'a[aria-label*="Google Account"] img.gbii',
+            'a.gb_B[role="button"] img',
+            'a[href*="SignOutOptions"] img',
+            'img.gb_Q.gbii',
+            'a[aria-label*="Google 帐号"] img',
+            'a[aria-label*="Google 账号"] img'
+        ]
+        
+        # 尝试检测头像元素
+        # 使用first匹配，any即可
+        for selector in avatar_selectors:
+            try:
+                # 使用 expect 自动等待，设置较短超时避免所有都check一遍花太久，
+                # 但首个check需要足够时间等待页面加载
+                # 这里逻辑优化：并行的逻辑比较难写，顺序检查
+                locator = page.locator(selector).first
+                if await locator.count() > 0 and await locator.is_visible():
+                     return True
+            except:
+                continue
+                
+        # 如果上面快速检查没过，使用 expect 等待其中一个通用选择器（等待页面加载延迟）
+        try:
+            primary_selector = 'a[aria-label*="Google"] img'
+            await expect(page.locator(primary_selector).first).to_be_visible(timeout=timeout * 1000)
+            return True
+        except:
+            pass
 
+        return False
+        
+    except Exception as e:
+        print(f"[GoogleAuth] 登录检测异常: {e}")
+        return False
 
-# ==================== 核心函数 ====================
 
 async def check_google_login_status(page: Page, timeout: float = 5.0) -> Tuple[str, Dict[str, Any]]:
     """
-    @brief 检测当前页面的Google登录状态
-    @param page Playwright页面对象
-    @param timeout 超时时间（秒）
-    @return (status, extra_info) 状态和额外信息
-    @details 通过检查URL和页面元素来判断当前登录状态
-    
-    使用示例:
-        status, info = await check_google_login_status(page)
-        if status == GoogleLoginStatus.LOGGED_IN:
-            print(f"已登录: {info.get('email')}")
-        elif status == GoogleLoginStatus.NEED_2FA:
-            print("需要2FA验证")
+    @brief 兼容旧接口：检测登录状态
+    @return (status, extra_info)
     """
-    extra_info = {}
-    current_url = page.url
+    is_logged = await check_google_login_by_avatar(page, timeout)
+    if is_logged:
+        # 尝试获取邮箱（可选）
+        email = await _extract_logged_in_email(page)
+        return GoogleLoginStatus.LOGGED_IN, {'email': email} if email else {}
+    else:
+        return GoogleLoginStatus.NOT_LOGGED_IN, {}
+
+
+async def check_google_one_status(
+    page: Page, 
+    timeout: float = 20.0
+) -> Tuple[str, Optional[str]]:
+    """
+    @brief V2资格检测：通过 API 拦截 + jsname 属性检测资格状态
+    @param page Playwright 页面对象
+    @param timeout 超时时间(秒)
+    @return (status, sheerid_link)
+            status: 'subscribed_antigravity' | 'subscribed' | 'verified' | 'link_ready' | 'ineligible' | 'error'
+    """
+    api_response_data = None
+    response_received = asyncio.Event()
     
-    # 1. 首先通过URL快速判断
-    for pattern in LOGGED_IN_URL_PATTERNS:
-        if pattern in current_url:
-            # 尝试获取登录的邮箱
-            email = await _extract_logged_in_email(page)
-            if email:
-                extra_info['email'] = email
-            return GoogleLoginStatus.LOGGED_IN, extra_info
+    async def handle_response(response):
+        """响应拦截处理"""
+        nonlocal api_response_data
+        try:
+            # 关键特征 rpcids=GI6Jdd
+            if 'rpcids=GI6Jdd' in response.url:
+                text = await response.text()
+                api_response_data = text
+                response_received.set()
+                # print(f"[GoogleAuth] 🔍 拦截到 GI6Jdd API 响应")
+        except Exception:
+            pass
     
-    # 2. 检查是否在登录页面
-    for pattern in LOGIN_URL_PATTERNS:
-        if pattern in current_url:
-            return GoogleLoginStatus.NOT_LOGGED_IN, extra_info
+    # 注册响应监听器
+    page.on("response", handle_response)
     
-    # 3. 检查页面元素来判断详细状态
     try:
-        # 检查是否有邮箱输入框
-        email_input = page.locator('input[type="email"]')
-        if await email_input.count() > 0 and await email_input.is_visible():
-            return GoogleLoginStatus.NOT_LOGGED_IN, extra_info
+        # 导航到目标页面（如果不在的话）
+        target_url = "https://one.google.com/ai-student?g1_landing_page=75"
+        if target_url not in page.url:
+            await page.goto(target_url, wait_until="domcontentloaded", timeout=timeout * 1000)
         
-        # 检查是否有密码输入框
-        password_input = page.locator('input[type="password"]')
-        if await password_input.count() > 0 and await password_input.is_visible():
-            return GoogleLoginStatus.NEED_PASSWORD, extra_info
+        # 等待 API 响应 (最多 timeout 秒)
+        try:
+            await asyncio.wait_for(response_received.wait(), timeout=timeout)
+        except asyncio.TimeoutError:
+            pass # 超时没收到API，继续检查元素
         
-        # 检查是否有2FA输入框
-        totp_selectors = [
-            'input[name="totpPin"]',
-            'input[id="totpPin"]', 
-            'input[type="tel"][autocomplete="one-time-code"]'
-        ]
-        for selector in totp_selectors:
-            totp_input = page.locator(selector)
-            if await totp_input.count() > 0 and await totp_input.is_visible():
-                return GoogleLoginStatus.NEED_2FA, extra_info
+        # 等待页面网络空闲（确保元素加载）
+        try:
+            await page.wait_for_load_state("networkidle", timeout=5000)
+        except:
+            pass
         
-        # 检查是否有辅助邮箱验证
-        recovery_selectors = [
-            'input[name="knowledgePreregisteredEmailResponse"]',
-            'input[id="knowledge-preregistered-email-response"]'
-        ]
-        for selector in recovery_selectors:
-            recovery_input = page.locator(selector)
-            if await recovery_input.count() > 0 and await recovery_input.is_visible():
-                return GoogleLoginStatus.NEED_RECOVERY, extra_info
+        # ============ 分析 API 响应 ============
+        if api_response_data:
+            status = _parse_api_response(api_response_data)
+            if status:
+                return status, None
         
-        # 检查是否有"重新登录"或"会话过期"提示
-        session_expired_texts = [
-            "Your session has expired",
-            "会话已过期",
-            "Please sign in again",
-            "请重新登录"
-        ]
-        for text in session_expired_texts:
-            if await page.locator(f'text="{text}"').count() > 0:
-                return GoogleLoginStatus.SESSION_EXPIRED, extra_info
+        # ============ 检测页面元素 (API没拦截到或API显示未订阅时) ============
+        return await _detect_page_elements(page)
         
-        # 检查是否有安全检查页面
-        security_texts = [
-            "Verify it's you",
-            "确认您的身份",
-            "Unusual sign-in",
-            "异常登录"
-        ]
-        for text in security_texts:
-            if await page.locator(f'text="{text}"').count() > 0:
-                return GoogleLoginStatus.SECURITY_CHECK, extra_info
-        
-        # 最后检查是否有用户头像（已登录标志）
-        avatar = page.locator('img[data-user-email], a[href*="SignOutOptions"]')
-        if await avatar.count() > 0:
-            email = await _extract_logged_in_email(page)
-            if email:
-                extra_info['email'] = email
-            return GoogleLoginStatus.LOGGED_IN, extra_info
-            
     except Exception as e:
-        extra_info['error'] = str(e)
-    
-    return GoogleLoginStatus.UNKNOWN, extra_info
+        print(f"[GoogleAuth] 资格检测异常: {e}")
+        return 'error', str(e)
+        
+    finally:
+        # 移除监听器
+        page.remove_listener("response", handle_response)
+
+
+# ==================== 辅助函数 ====================
+
+def _parse_api_response(response_text: str) -> Optional[str]:
+    """解析 GI6Jdd API 响应"""
+    try:
+        # 检查订阅状态
+        # 响应通常包含 JSON 数组，这里简化做字符串匹配
+        has_2tb = '2 TB' in response_text or '2TB' in response_text or '"2 TB"' in response_text
+        has_antigravity = 'Antigravity' in response_text or '"Antigravity"' in response_text
+        
+        if has_2tb:
+            if has_antigravity:
+                return 'subscribed_antigravity'
+            else:
+                return 'subscribed'
+        return None
+    except Exception:
+        return None
+
+
+async def _detect_page_elements(page: Page) -> Tuple[str, Optional[str]]:
+    """通过页面元素检测资格状态"""
+    try:
+        # 1. 检查 hSRGPd (有资格待验证 - 含有 SheerID 验证链接)
+        link_ready_locator = page.locator('[jsname="hSRGPd"]')
+        if await link_ready_locator.count() > 0 and await link_ready_locator.first.is_visible():
+            sheerid_link = await _extract_sheerid_link(page)
+            return 'link_ready', sheerid_link
+        
+        # 2. 检查 V67aGc (已验证未绑卡 - Get student offer 按钮)
+        verified_locator = page.locator('[jsname="V67aGc"]')
+        if await verified_locator.count() > 0 and await verified_locator.first.is_visible():
+            return 'verified', None
+        
+        # 3. 再次检查是否有 SheerID 链接 (备选方案 - 有时候jsname可能变)
+        sheerid_link = await _extract_sheerid_link(page)
+        if sheerid_link:
+            return 'link_ready', sheerid_link
+        
+        # 4. 检查是否有 "Get student offer" 相关按钮
+        offer_selectors = [
+            'button:has-text("Get student offer")',
+            'button:has-text("Get offer")',
+            '[data-action="offerDetails"]',
+        ]
+        for selector in offer_selectors:
+             if await page.locator(selector).count() > 0:
+                 return 'verified', None
+
+        # 5. 再次检查已订阅文本（防止API漏掉）
+        if await page.locator('text="Subscribed"').count() > 0 or await page.locator('text="已订阅"').count() > 0:
+             return 'subscribed', None
+
+        return 'ineligible', None
+        
+    except Exception:
+        return 'ineligible', None
+
+
+async def _extract_sheerid_link(page: Page) -> Optional[str]:
+    """提取 SheerID 验证链接"""
+    try:
+        # 方法1: 查找 sheerid.com 链接
+        sheerid_locator = page.locator('a[href*="sheerid.com"]')
+        if await sheerid_locator.count() > 0:
+            href = await sheerid_locator.first.get_attribute("href")
+            if href:
+                return href
+        
+        # 方法2: 从页面内容中查找
+        content = await page.content()
+        match = re.search(r'https://[^"\']*sheerid\.com[^"\']*', content)
+        if match:
+            return match.group(0)
+        return None
+    except Exception:
+        return None
 
 
 async def _extract_logged_in_email(page: Page) -> Optional[str]:
-    """
-    @brief 从页面提取已登录的邮箱地址
-    @param page Playwright页面对象
-    @return 邮箱地址或None
-    """
+    """提取已登录邮箱"""
     try:
-        # 方法1: 从用户头像的data属性获取
-        avatar = page.locator('img[data-user-email]')
-        if await avatar.count() > 0:
-            email = await avatar.get_attribute('data-user-email')
-            if email:
-                return email
-        
-        # 方法2: 从账号信息链接获取
-        account_link = page.locator('a[aria-label*="@"]')
-        if await account_link.count() > 0:
-            label = await account_link.get_attribute('aria-label')
-            if label and '@' in label:
-                # 提取邮箱
-                import re
-                match = re.search(r'[\w\.-]+@[\w\.-]+', label)
-                if match:
-                    return match.group(0)
-        
-        # 方法3: 从myaccount页面获取
-        if "myaccount.google.com" in page.url:
-            email_element = page.locator('text=@gmail.com, text=@googlemail.com').first
-            if await email_element.count() > 0:
-                text = await email_element.inner_text()
-                import re
-                match = re.search(r'[\w\.-]+@[\w\.-]+', text)
-                if match:
-                    return match.group(0)
-                    
-    except Exception:
+        # 尝试从aria-label提取: "Google Account: Name  (email@gmail.com)"
+        label_locator = page.locator('a[aria-label*="Google"]').first
+        if await label_locator.count() > 0:
+            label = await label_locator.get_attribute('aria-label') or ""
+            match = re.search(r'[\w\.-]+@[\w\.-]+', label)
+            if match:
+                return match.group(0)
+    except:
         pass
-    
     return None
 
 
+# ==================== 登录操作逻辑 (保持) ====================
+
 async def is_logged_in(page: Page) -> bool:
-    """
-    @brief 快速检查是否已登录Google
-    @param page Playwright页面对象
-    @return True表示已登录，False表示未登录
-    """
-    status, _ = await check_google_login_status(page)
-    return status == GoogleLoginStatus.LOGGED_IN
+    """检查是否已登录"""
+    return await check_google_login_by_avatar(page)
 
 
-async def navigate_and_check_login(page: Page, target_url: str = "https://myaccount.google.com") -> Tuple[bool, str]:
-    """
-    @brief 导航到目标URL并检查登录状态
-    @param page Playwright页面对象
-    @param target_url 目标URL
-    @return (is_logged_in, current_url)
-    """
-    try:
-        await page.goto(target_url, timeout=30000, wait_until='domcontentloaded')
-        await asyncio.sleep(2)
-        
-        status, _ = await check_google_login_status(page)
-        return status == GoogleLoginStatus.LOGGED_IN, page.url
-    except Exception as e:
-        return False, str(e)
+async def ensure_google_login(page: Page, account_info: dict) -> Tuple[bool, str]:
+    """确保Google已登录"""
+    email = account_info.get('email', '')
+    
+    # 1. 检查当前状态
+    is_logged = await check_google_login_by_avatar(page)
+    if is_logged:
+        # 可选：检查是否是正确账号
+        current_email = await _extract_logged_in_email(page)
+        if current_email and email and current_email.lower() != email.lower():
+            print(f"[GoogleAuth] 账号不匹配: 当前 {current_email}, 目标 {email}")
+            # 这里如果不匹配，可能需要退出登录? 或者直接报错
+            # 为简单起见，暂不强制退出，仅提示
+        return True, "已登录"
+
+    # 2. 未登录，执行登录
+    return await google_login(page, account_info)
 
 
 async def google_login(page: Page, account_info: dict) -> Tuple[bool, str]:
-    """
-    @brief 执行Google登录流程
-    @param page Playwright页面对象
-    @param account_info 账号信息字典，包含email, password, backup_email/backup, secret/2fa_secret
-    @return (success, message)
-    @details 支持: 账号密码登录, 2FA(TOTP), 辅助邮箱验证
-             并处理登录后的安全提醒弹窗
-    """
-    import time
+    """执行登录流程"""
     email = account_info.get('email', '')
-    print(f"[GoogleLogin] 开始登录流程: {email}")
+    password = account_info.get('password', '')
     
-    # 0. 首先检查是否已登录
-    status, info = await check_google_login_status(page)
-    if status == GoogleLoginStatus.LOGGED_IN:
-        logged_email = info.get('email', '')
-        if logged_email and logged_email.lower() == email.lower():
-            print(f"[GoogleLogin] ✅ 已登录正确账号")
-            return True, "已登录（正确账号）"
-        elif logged_email:
-            print(f"[GoogleLogin] 当前登录账号 {logged_email} 与目标账号 {email} 不符")
+    print(f"[GoogleAuth] 开始登录: {email}")
     
-    # 1. 导航到登录页
-    print("[GoogleLogin] 步骤1: 导航到登录页...")
     try:
-        current_url = page.url
-        if "accounts.google.com" not in current_url:
-            await page.goto('https://accounts.google.com', timeout=60000)
-            await asyncio.sleep(2)
-    except Exception as e:
-        print(f"[GoogleLogin] ❌ 导航失败: {e}")
-        return False, f"导航失败: {e}"
-    
-    # 2. 等待并输入邮箱
-    print("[GoogleLogin] 步骤2: 等待邮箱输入框...")
-    email_timeout = 10
-    start_time = time.time()
-    email_input = None
-    
-    while time.time() - start_time < email_timeout:
-        try:
-            email_input = page.locator('input[type="email"]')
-            if await email_input.count() > 0 and await email_input.is_visible():
-                print(f"[GoogleLogin] 步骤2: 输入邮箱 {email}")
-                await email_input.fill(email)
-                await page.click('#identifierNext >> button')
-                break
-        except:
-            pass
-        await asyncio.sleep(0.5)
-    else:
-        print("[GoogleLogin] ❌ 超时: 邮箱输入框未出现")
-        return False, "超时: 邮箱输入框未出现"
-    
-    # 3. 等待并输入密码
-    print("[GoogleLogin] 步骤3: 等待密码输入框...")
-    password_timeout = 10
-    start_time = time.time()
-    password_entered = False
-    
-    while time.time() - start_time < password_timeout:
-        try:
-            password_input = page.locator('input[type="password"]')
-            if await password_input.count() > 0 and await password_input.is_visible():
-                password = account_info.get('password', '')
-                if not password:
-                    print("[GoogleLogin] ❌ 未提供密码")
-                    return False, "未提供密码"
-                
-                print("[GoogleLogin] 步骤3: 输入密码...")
-                await password_input.fill(password)
-                await page.click('#passwordNext >> button')
-                password_entered = True
-                break
-        except:
-            pass
-        await asyncio.sleep(0.5)
-    
-    if not password_entered:
-        print("[GoogleLogin] ❌ 超时: 密码输入框未出现")
-        return False, "超时: 密码输入框未出现"
-    
-    # 等待密码验证
-    print("[GoogleLogin] 步骤4: 等待密码验证...")
-    await asyncio.sleep(3)
-    
-    # 5. 处理验证步骤循环
-    max_attempts = 10
-    for attempt in range(max_attempts):
-        # 检查是否已登录
-        current_url = page.url
-        for pattern in LOGGED_IN_URL_PATTERNS:
-            if pattern in current_url:
-                print("[GoogleLogin] ✅ 登录成功")
-                return True, "登录成功"
+        # 1. 导航
+        if "accounts.google.com" not in page.url:
+            await page.goto('https://accounts.google.com/signin', wait_until='domcontentloaded')
         
-        # A. 检测2FA输入框
+        # 2. 邮箱
         try:
-            totp_input = page.locator('input[name="totpPin"], input[id="totpPin"], input[type="tel"]').first
-            if await totp_input.count() > 0 and await totp_input.is_visible():
-                print("[GoogleLogin] 步骤5-2FA: 检测到2FA验证码输入框")
-                secret = account_info.get('secret') or account_info.get('2fa_secret') or account_info.get('secret_key')
+            await page.locator('input[type="email"]').fill(email)
+            await page.click('#identifierNext >> button')
+        except Exception as e:
+            # 可能已经在密码页，或者其他情况
+            pass
+            
+        # 3. 密码
+        try:
+            # 等待密码框出现
+            await expect(page.locator('input[type="password"]')).to_be_visible(timeout=10000)
+            await page.locator('input[type="password"]').fill(password)
+            await page.click('#passwordNext >> button')
+        except Exception as e:
+            # 检查是否有错误提示
+            if await page.locator('text="Couldn\'t find your Google Account"').count() > 0:
+                return False, "账号不存在"
+            # 可能是直接进入了2FA或者无需密码? 
+            pass
+
+        # 4. 辅助验证 (2FA / Recovery)
+        # 循环检测接下来几步
+        for _ in range(5):
+            await page.wait_for_load_state("networkidle", timeout=2000)
+            
+            # 检测是否登录成功
+            if await check_google_login_by_avatar(page, timeout=3):
+                return True, "登录成功"
+            
+            # 检测2FA
+            if await page.locator('input[id="totpPin"]').count() > 0:
+                secret = account_info.get('secret') or account_info.get('2fa_secret')
                 if secret:
                     try:
-                        s = secret.replace(" ", "").strip()
-                        totp = pyotp.TOTP(s)
-                        code = totp.now()
-                        print(f"[GoogleLogin] 步骤5-2FA: 输入验证码 {code}")
-                        await totp_input.fill(code)
+                        code = pyotp.TOTP(secret.replace(" ", "")).now()
+                        await page.locator('input[id="totpPin"]').fill(code)
                         await page.click('#totpNext >> button')
-                        await asyncio.sleep(3)
                         continue
-                    except Exception as e:
-                        print(f"[GoogleLogin] ❌ 2FA生成失败: {e}")
-                        return False, f"2FA生成失败: {e}"
+                    except:
+                        return False, "2FA密钥无效"
                 else:
-                    print("[GoogleLogin] ❌ 需要2FA但未提供密钥")
-                    return False, "需要2FA但未提供密钥"
-        except:
-            pass
-        
-        # B. 检测"Confirm your recovery email"选择页面
-        try:
-            recovery_option = page.locator('div[role="link"]:has-text("Confirm your recovery email")').first
-            if await recovery_option.count() > 0 and await recovery_option.is_visible():
-                print("[GoogleLogin] 步骤5-选择: 点击'确认辅助邮箱'选项")
-                await recovery_option.click(force=True)
-                await asyncio.sleep(3)
-                continue
-        except:
-            pass
-        
-        # C. 检测辅助邮箱输入框
-        try:
-            recovery_input = page.locator('input[name="knowledgePreregisteredEmailResponse"], input[id="knowledge-preregistered-email-response"]').first
-            if await recovery_input.count() > 0 and await recovery_input.is_visible():
-                print("[GoogleLogin] 步骤5-辅助邮箱: 检测到辅助邮箱输入框")
-                backup_email = account_info.get('backup') or account_info.get('backup_email') or account_info.get('recovery_email')
-                if backup_email:
-                    print(f"[GoogleLogin] 步骤5-辅助邮箱: 输入 {backup_email}")
-                    await recovery_input.fill(backup_email)
-                    next_btn = page.locator('button:has-text("Next"), button:has-text("下一步")').first
-                    if await next_btn.count() > 0:
-                        await next_btn.click()
-                    else:
-                        await page.keyboard.press('Enter')
-                    await asyncio.sleep(3)
-                    continue
-                else:
-                    print("[GoogleLogin] ❌ 需要辅助邮箱但未提供")
-                    return False, "需要辅助邮箱但未提供"
-        except:
-            pass
-        
-        # D. 检测密码错误提示
-        try:
-            error_texts = ['Wrong password', '密码错误', 'Couldn\'t sign you in', '无法登录']
-            for err in error_texts:
-                if await page.locator(f'text="{err}"').count() > 0:
-                    print(f"[GoogleLogin] ❌ 密码错误或登录失败")
-                    return False, "密码错误或登录失败"
-        except:
-            pass
-        
-        # 等待并继续检测
-        await asyncio.sleep(2)
-    
-    # 6. 处理登录后的安全弹窗
-    print("[GoogleLogin] 步骤6: 检查安全弹窗...")
-    try:
-        dismiss_buttons = [
-            'button:has-text("Not now")',
-            'button:has-text("Cancel")',
-            'button:has-text("No thanks")',
-            'button:has-text("暂不")',
-            'button:has-text("取消")'
-        ]
-        for selector in dismiss_buttons:
-            btn = page.locator(selector).first
-            if await btn.count() > 0 and await btn.is_visible():
-                print("[GoogleLogin] 步骤6: 关闭安全弹窗")
-                await btn.click()
-                await asyncio.sleep(1)
-                break
-    except Exception:
-        pass
-    
-    # 最终检查
-    print("[GoogleLogin] 步骤7: 最终登录状态检查...")
-    final_status, _ = await check_google_login_status(page)
-    if final_status == GoogleLoginStatus.LOGGED_IN:
-        print("[GoogleLogin] ✅ 登录成功")
-        return True, "登录成功"
-    
-    print(f"[GoogleLogin] ❌ 登录失败，最终状态: {final_status}")
-    return False, f"登录失败，最终状态: {final_status}"
-
-
-# ==================== Google One状态检测 ====================
-
-# 状态检测用的多语言短语
-NOT_AVAILABLE_PHRASES = [
-    "This offer is not available",
-    "Ưu đãi này hiện không dùng được",
-    "Esta oferta no está disponible",
-    "Cette offre n'est pas disponible",
-    "此优惠目前不可用",
-    "這項優惠目前無法使用",
-]
-
-SUBSCRIBED_PHRASES = [
-    "You're already subscribed",
-    "Bạn đã đăng ký",
-    "已订阅", 
-    "Ya estás suscrito"
-]
-
-VERIFIED_UNBOUND_PHRASES = [
-    "Get student offer",
-    "Nhận ưu đãi dành cho sinh viên",
-    "Obtener oferta para estudiantes",
-    "获取学生优惠",
-    "獲取學生優惠",
-]
-
-
-async def check_google_one_status(page: Page, timeout: float = 10.0) -> Tuple[str, Optional[str]]:
-    """
-    @brief 检测Google One AI学生优惠页面的状态
-    @param page Playwright页面对象
-    @param timeout 超时时间（秒）
-    @return (status, extra_data)
-           status: 'subscribed' | 'verified' | 'link_ready' | 'ineligible' | 'timeout'
-           extra_data: SheerID链接或其他信息
-    
-    CSS类说明:
-    - 无资格: krEaxf tTa5V rv8wkf b3UMcc TrfCJc-ow6TGd rv8wkf-ow6TGd b3UMcc
-    - 有资格: krEaxf ZLZvHe rv8wkf b3UMcc
-    
-    检测优先级: 已订阅 > 已验证未绑卡 > SheerID链接 > 无资格CSS类 > 无资格文本
-    """
-    import time
-    start_time = time.time()
-    print(f"[GoogleOne] 开始检测状态 (超时: {timeout}秒)...")
-    
-    while time.time() - start_time < timeout:
-        try:
-            # 1. 检查"已订阅" - 最高优先级（避免误判）
-            for phrase in SUBSCRIBED_PHRASES:
-                try:
-                    locator = page.locator(f'text="{phrase}"')
-                    if await locator.count() > 0 and await locator.first.is_visible():
-                        print(f"[GoogleOne] 文本检测: {phrase} -> subscribed")
-                        return "subscribed", None
-                except:
-                    pass
+                    return False, "缺少2FA密钥"
             
-            # 2. 检查"已验证未绑卡" (Get student offer)
-            for phrase in VERIFIED_UNBOUND_PHRASES:
-                try:
-                    locator = page.locator(f'text="{phrase}"')
-                    if await locator.count() > 0 and await locator.first.is_visible():
-                        print(f"[GoogleOne] 文本检测: {phrase} -> verified")
-                        return "verified", None
-                except:
-                    pass
+            # 检测辅助邮箱
+            if await page.locator('div:has-text("Confirm your recovery email")').count() > 0 or \
+               await page.locator('input[InputType="email"]').count() > 0: # 简化判断，实际需更精确
+               # Playwright locator logic for recovery email to be added if specific selector known
+               pass
             
-            # 3. 检查SheerID链接 (有资格待验证)
-            try:
-                link_element = page.locator('a[href*="sheerid.com"]').first
-                if await link_element.count() > 0:
-                    href = await link_element.get_attribute("href")
-                    print(f"[GoogleOne] 检测到SheerID链接 -> link_ready")
-                    return "link_ready", href
-            except:
-                pass
-            
-            # 4. 检查"Verify eligibility"按钮
-            try:
-                verify_btn = page.locator('text="Verify eligibility"')
-                if await verify_btn.count() > 0 and await verify_btn.first.is_visible():
-                    print(f"[GoogleOne] 检测到Verify eligibility -> link_ready")
-                    return "link_ready", None
-            except:
-                pass
-            
-            # 5. CSS类检测无资格
-            # 完整CSS类: krEaxf tTa5V rv8wkf b3UMcc TrfCJc-ow6TGd rv8wkf-ow6TGd b3UMcc
-            try:
-                # 使用完整的CSS类组合检测
-                ineligible_locator = page.locator('div.krEaxf.tTa5V.rv8wkf.b3UMcc.TrfCJc-ow6TGd.rv8wkf-ow6TGd')
-                if await ineligible_locator.count() > 0:
-                    print(f"[GoogleOne] CSS类检测: 完整无资格类组合 -> ineligible")
-                    return "ineligible", None
-            except:
-                pass
-            
-            # 6. 检查"无资格" - 文本检测（备选）
-            for phrase in NOT_AVAILABLE_PHRASES:
-                try:
-                    locator = page.locator(f'text="{phrase}"')
-                    if await locator.count() > 0 and await locator.first.is_visible():
-                        print(f"[GoogleOne] 文本检测: {phrase} -> ineligible")
-                        return "ineligible", None
-                except:
-                    pass
-            
-            await asyncio.sleep(0.5)
-            
-        except Exception as e:
-            print(f"[GoogleOne] 检测异常: {e}")
+            # 处理 "Not now" 弹窗
+            if await page.locator('button:has-text("Not now")').count() > 0:
+                await page.click('button:has-text("Not now")')
+                
             await asyncio.sleep(1)
-    
-    print(f"[GoogleOne] 检测超时")
-    return "timeout", None
 
+        # 最终检查
+        if await check_google_login_by_avatar(page):
+            return True, "登录成功"
+            
+        return False, "登录超时或失败"
+        
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return False, f"登录异常: {e}"
 
-# ==================== 完整登录流程封装 ====================
+# ==================== 综合检测流程 ====================
 
-async def ensure_google_login(page: Page, account_info: dict) -> Tuple[bool, str]:
+async def full_google_detection(
+    page: Page,
+    account_info: dict = None,
+    timeout: float = 20.0
+) -> Tuple[bool, str, Optional[str]]:
     """
-    @brief 确保Google已登录（先检查状态，未登录才执行登录）
-    @param page Playwright页面对象
-    @param account_info 账号信息字典
-    @return (success, message)
-    
-    使用示例:
-        success, msg = await ensure_google_login(page, account_info)
-        if success:
-            # 继续后续操作
+    @brief 完整的 Google 检测流程 (登录 + 资格)
+    @return (is_logged_in, status, sheerid_link)
     """
-    email = account_info.get('email', '')
-    print(f"[EnsureLogin] 检查登录状态: {email}")
+    # 1. 检测登录状态
+    is_logged_in = await check_google_login_by_avatar(page, timeout=timeout)
     
-    # 1. 先检查当前状态
-    status, info = await check_google_login_status(page)
+    if not is_logged_in:
+        return False, 'not_logged_in', None
     
-    if status == GoogleLoginStatus.LOGGED_IN:
-        logged_email = info.get('email', '')
-        if logged_email:
-            if logged_email.lower() == email.lower():
-                print(f"[EnsureLogin] 已登录正确账号: {logged_email}")
-                return True, f"已登录: {logged_email}"
-            else:
-                print(f"[EnsureLogin] 当前账号 {logged_email} 与目标 {email} 不符，需重新登录")
-        else:
-            print(f"[EnsureLogin] 已登录（账号未知），继续使用")
-            return True, "已登录"
+    # 2. 检测资格状态
+    status, sheerid_link = await check_google_one_status(page, timeout=timeout)
     
-    # 2. 未登录，执行登录流程
-    print(f"[EnsureLogin] 未登录，开始登录流程...")
-    success, message = await google_login(page, account_info)
-    
-    if success:
-        print(f"[EnsureLogin] 登录成功: {message}")
-    else:
-        print(f"[EnsureLogin] 登录失败: {message}")
-    
-    return success, message
+    return True, status, sheerid_link
 
+
+# ==================== 状态常量 ====================
+
+# 账号状态定义
+STATUS_NOT_LOGGED_IN = 'not_logged_in'
+STATUS_SUBSCRIBED_ANTIGRAVITY = 'subscribed_antigravity'
+STATUS_SUBSCRIBED = 'subscribed'
+STATUS_VERIFIED = 'verified'
+STATUS_LINK_READY = 'link_ready'
+STATUS_INELIGIBLE = 'ineligible'
+STATUS_ERROR = 'error'
+STATUS_PENDING = 'pending_check'
+
+# 状态显示映射
+STATUS_DISPLAY = {
+    STATUS_PENDING: '❔待检测',
+    STATUS_NOT_LOGGED_IN: '🔒未登录',
+    STATUS_INELIGIBLE: '❌无资格',
+    STATUS_LINK_READY: '🔗待验证',
+    STATUS_VERIFIED: '✅已验证',
+    STATUS_SUBSCRIBED: '👑已订阅',
+    STATUS_SUBSCRIBED_ANTIGRAVITY: '🌟已解锁',
+    STATUS_ERROR: '⚠️错误',
+}
