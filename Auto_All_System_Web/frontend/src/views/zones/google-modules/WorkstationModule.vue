@@ -111,14 +111,23 @@ const recentTasks = ref([
 const fetchStats = async () => {
   loading.value = true
   try {
-    const accountsResponse = await googleAccountsApi.getAccounts({ page_size: 1 })
-    stats.totalAccounts = accountsResponse.count || 0
-    
-    const subscribedResponse = await googleAccountsApi.getAccounts({ 
-      status: 'subscribed',
-      page_size: 1 
-    })
-    stats.subscribedAccounts = subscribedResponse.count || 0
+    const accountsResponse = await googleAccountsApi.getAccounts({ page_size: 1000 })
+    // 兼容后端返回数组或分页对象两种情况
+    if (Array.isArray(accountsResponse)) {
+      stats.totalAccounts = accountsResponse.length
+      stats.subscribedAccounts = accountsResponse.filter((a: any) => a.gemini_status === 'active').length
+    } else if (accountsResponse.count !== undefined) {
+      stats.totalAccounts = accountsResponse.count
+      // 需要单独请求已订阅数量
+      const subscribedResponse = await googleAccountsApi.getAccounts({ 
+        status: 'subscribed',
+        page_size: 1 
+      })
+      stats.subscribedAccounts = subscribedResponse.count || 0
+    } else {
+      stats.totalAccounts = 0
+      stats.subscribedAccounts = 0
+    }
     
     // TODO: 获取其他统计数据
     stats.availableCards = 0

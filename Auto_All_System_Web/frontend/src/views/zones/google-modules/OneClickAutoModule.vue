@@ -96,7 +96,14 @@ const progressStatus = computed(() => {
 const fetchAvailableAccounts = async () => {
   try {
     const response = await googleAccountsApi.getAccounts({ page_size: 100 })
-    availableAccounts.value = response.results
+    // 兼容后端返回数组或分页对象两种情况
+    if (Array.isArray(response)) {
+      availableAccounts.value = response
+    } else if (response.results) {
+      availableAccounts.value = response.results
+    } else {
+      availableAccounts.value = []
+    }
   } catch (error) {
     ElMessage.error('获取账号列表失败')
   }
