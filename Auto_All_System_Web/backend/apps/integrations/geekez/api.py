@@ -50,11 +50,12 @@ class GeekezBrowserAPI:
     - 设置管理
     """
 
-    def __init__(self, host: str = "127.0.0.1", port: int = 19527, timeout: int = 30):
-        self.host = host
-        self.port = port
+    def __init__(self, host: str = None, port: int = None, timeout: int = 30):
+        # 优先从环境变量读取，支持 Docker 环境
+        self.host = host or os.environ.get("GEEKEZ_API_HOST", "127.0.0.1")
+        self.port = port or int(os.environ.get("GEEKEZ_API_PORT", "19527"))
         self.timeout = timeout
-        self.base_url = f"http://{host}:{port}"
+        self.base_url = f"http://{self.host}:{self.port}"
 
     # ==================== 健康检查 ====================
 
