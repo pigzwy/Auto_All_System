@@ -81,6 +81,14 @@
             <el-icon><Connection /></el-icon>
             <template #title>代理管理</template>
           </el-menu-item>
+          <el-menu-item index="security">
+            <el-icon><Lock /></el-icon>
+            <template #title>安全设置</template>
+          </el-menu-item>
+          <el-menu-item index="subscription">
+            <el-icon><Tickets /></el-icon>
+            <template #title>订阅验证</template>
+          </el-menu-item>
         </el-menu>
       </div>
 
@@ -101,7 +109,7 @@ import { balanceApi } from '@/api/balance'
 import {
   Platform, User, ArrowDown, Check, CreditCard,
   Cpu, DataLine, Fold, Expand, Avatar, Link, Wallet,
-  Connection
+  Connection, Lock, Tickets
 } from '@element-plus/icons-vue'
 
 // 导入模块组件
@@ -112,6 +120,8 @@ import OneClickAutoModule from './google-modules/OneClickAutoModule.vue'
 import SheerIDModule from './google-modules/SheerIDModule.vue'
 import AutoBindCardModule from './google-modules/AutoBindCardModule.vue'
 import ProxyManagementModule from './google-modules/ProxyManagementModule.vue'
+import SecurityModule from './google-modules/SecurityModule.vue'
+import SubscriptionModule from './google-modules/SubscriptionModule.vue'
 
 const router = useRouter()
 const userStore = useUserStore()
@@ -143,7 +153,9 @@ const moduleComponents: Record<string, any> = {
   'auto-all': OneClickAutoModule,
   sheerid: SheerIDModule,
   'bind-card': AutoBindCardModule,
-  'proxy-management': ProxyManagementModule
+  'proxy-management': ProxyManagementModule,
+  security: SecurityModule,
+  subscription: SubscriptionModule
 }
 
 // 当前模块组件
