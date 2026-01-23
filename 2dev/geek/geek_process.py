@@ -213,13 +213,17 @@ class GeekProcess:
         data_dir: Optional[Path] = None,
         timeout_seconds: float = 8.0,
     ) -> None:
-        self.api = GeekezBrowserAPI(host=host, port=port, data_dir=data_dir, timeout_seconds=timeout_seconds)
+        self.api = GeekezBrowserAPI(
+            host=host, port=port, data_dir=data_dir, timeout_seconds=timeout_seconds
+        )
         self._profiles_lock = threading.Lock()
 
     # ------------------------------
     # Environments (accounts -> profiles)
     # ------------------------------
-    def list_envs(self, accounts: Optional[List[Dict[str, Any]]] = None) -> List[EnvInfo]:
+    def list_envs(
+        self, accounts: Optional[List[Dict[str, Any]]] = None
+    ) -> List[EnvInfo]:
         accounts = accounts or load_accounts()
         envs: List[EnvInfo] = []
 
@@ -232,10 +236,18 @@ class GeekProcess:
             if not email:
                 continue
             profile = profile_by_name.get(email)
-            envs.append(EnvInfo(email=email, profile_id=profile.get("id") if profile else None, has_profile=bool(profile)))
+            envs.append(
+                EnvInfo(
+                    email=email,
+                    profile_id=profile.get("id") if profile else None,
+                    has_profile=bool(profile),
+                )
+            )
         return envs
 
-    def ensure_profile(self, account: Dict[str, Any], proxy_str: Optional[str] = None) -> Dict[str, Any]:
+    def ensure_profile(
+        self, account: Dict[str, Any], proxy_str: Optional[str] = None
+    ) -> Dict[str, Any]:
         email = (account.get("email") or "").strip()
         if not email:
             raise ValueError("account.email is required")
@@ -243,7 +255,9 @@ class GeekProcess:
         # Store account line as metadata for debugging / later lookup.
         metadata = {"remark": build_account_line(account)}
         with self._profiles_lock:
-            return self.api.upsert_profile(name=email, proxy_str=proxy_str, metadata=metadata)
+            return self.api.upsert_profile(
+                name=email, proxy_str=proxy_str, metadata=metadata
+            )
 
     def ensure_profiles(
         self,
@@ -283,9 +297,13 @@ class GeekProcess:
             raise RuntimeError(f"profile not found for email: {email}")
 
         if not self.api.is_running():
-            raise RuntimeError("GeekezBrowser control server not running (GET /health failed)")
+            raise RuntimeError(
+                "GeekezBrowser control server not running (GET /health failed)"
+            )
 
-        return self.api.launch_profile(profile["id"], debug_port=0, enable_remote_debugging=True)
+        return self.api.launch_profile(
+            profile["id"], debug_port=0, enable_remote_debugging=True
+        )
 
     def close_by_email(self, email: str) -> bool:
         with self._profiles_lock:
@@ -314,7 +332,9 @@ class GeekProcess:
 
         playwright = await async_playwright().start()
         browser = await playwright.chromium.connect_over_cdp(cdp_endpoint)
-        context = browser.contexts[0] if browser.contexts else await browser.new_context()
+        context = (
+            browser.contexts[0] if browser.contexts else await browser.new_context()
+        )
         page = context.pages[0] if context.pages else await context.new_page()
         return playwright, browser, page
 
@@ -322,7 +342,9 @@ class GeekProcess:
     async def _detect_status(page) -> str:
         text = ""
         try:
-            text = await page.evaluate("() => document.body ? document.body.innerText : ''")
+            text = await page.evaluate(
+                "() => document.body ? document.body.innerText : ''"
+            )
         except Exception:
             pass
 
@@ -339,12 +361,19 @@ class GeekProcess:
             return "verified"
         if "verify your eligibility" in lower or "验证您的资格" in text:
             return "link_ready"
-        if "not available" in lower or "ineligible" in lower or "不可用" in text or "无资格" in text:
+        if (
+            "not available" in lower
+            or "ineligible" in lower
+            or "不可用" in text
+            or "无资格" in text
+        ):
             return "ineligible"
         return "error"
 
     @staticmethod
-    async def _extract_sheerid_link(page, log_callback: Optional[Callable[[str], None]] = None) -> Optional[str]:
+    async def _extract_sheerid_link(
+        page, log_callback: Optional[Callable[[str], None]] = None
+    ) -> Optional[str]:
         # Try to click the eligibility button (best-effort; UI copies differ).
         for selector in [
             "text=verify your eligibility",
@@ -403,8 +432,14 @@ class GeekProcess:
         async def _runner() -> Tuple[bool, str]:
             playwright = browser = None
             try:
-                playwright, browser, page = await self._connect_page(launch.cdp_endpoint)
-                await page.goto("https://one.google.com/ai-student", wait_until="domcontentloaded", timeout=60_000)
+                playwright, browser, page = await self._connect_page(
+                    launch.cdp_endpoint
+                )
+                await page.goto(
+                    "https://one.google.com/ai-student",
+                    wait_until="domcontentloaded",
+                    timeout=60_000,
+                )
                 await page.wait_for_timeout(2000)
 
                 await check_and_login(page, to_auto_account_info(account))
@@ -457,8 +492,14 @@ class GeekProcess:
         async def _runner() -> Tuple[bool, str]:
             playwright = browser = None
             try:
-                playwright, browser, page = await self._connect_page(launch.cdp_endpoint)
-                await page.goto("https://one.google.com/ai-student", wait_until="domcontentloaded", timeout=60_000)
+                playwright, browser, page = await self._connect_page(
+                    launch.cdp_endpoint
+                )
+                await page.goto(
+                    "https://one.google.com/ai-student",
+                    wait_until="domcontentloaded",
+                    timeout=60_000,
+                )
                 await page.wait_for_timeout(2000)
 
                 await check_and_login(page, to_auto_account_info(account))
@@ -476,10 +517,14 @@ class GeekProcess:
                     return True, "ineligible"
 
                 if status == "link_ready":
-                    link = await self._extract_sheerid_link(page, log_callback=log_callback)
+                    link = await self._extract_sheerid_link(
+                        page, log_callback=log_callback
+                    )
                     if not link:
                         AccountManager.move_to_error(build_account_line(account))
-                        DBManager.update_status(email, "error", message="link not found")
+                        DBManager.update_status(
+                            email, "error", message="link not found"
+                        )
                         return False, "link not found"
 
                     AccountManager.save_link(build_account_line(account, link=link))
@@ -489,20 +534,30 @@ class GeekProcess:
                         return True, "link saved (no api key)"
 
                     verifier = SheerIDVerifier(api_key=api_key)
-                    success, vid, msg = await asyncio.to_thread(verifier.verify_single, link)
+                    success, vid, msg = await asyncio.to_thread(
+                        verifier.verify_single, link
+                    )
                     if not success:
-                        AccountManager.move_to_error(build_account_line(account, link=link))
-                        DBManager.update_status(email, "error", message=f"sheerid verify failed: {msg}")
+                        AccountManager.move_to_error(
+                            build_account_line(account, link=link)
+                        )
+                        DBManager.update_status(
+                            email, "error", message=f"sheerid verify failed: {msg}"
+                        )
                         return False, f"sheerid verify failed: {msg}"
 
-                    AccountManager.move_to_verified(build_account_line(account, link=link))
+                    AccountManager.move_to_verified(
+                        build_account_line(account, link=link)
+                    )
                     await page.reload(wait_until="domcontentloaded")
                     await page.wait_for_timeout(1500)
                     # Continue to bind card after verified.
                     status = "verified"
 
                 if status == "verified":
-                    ok, message = await auto_bind_card(page, card, to_auto_account_info(account))
+                    ok, message = await auto_bind_card(
+                        page, card, to_auto_account_info(account)
+                    )
                     if ok:
                         AccountManager.move_to_subscribed(build_account_line(account))
                         DBManager.update_status(email, "subscribed", message=message)
@@ -514,7 +569,9 @@ class GeekProcess:
 
                 # Unknown state
                 AccountManager.move_to_error(build_account_line(account))
-                DBManager.update_status(email, "error", message=f"unknown status: {status}")
+                DBManager.update_status(
+                    email, "error", message=f"unknown status: {status}"
+                )
                 return False, f"unknown status: {status}"
             finally:
                 try:
@@ -526,6 +583,434 @@ class GeekProcess:
         try:
             ok, msg = asyncio.run(_runner())
             return ok, msg
+        finally:
+            self.close_by_profile_id(launch.profile_id)
+
+    # -------------------------------------------
+    # 订阅验证相关方法
+    # -------------------------------------------
+
+    def verify_subscription_status(
+        self,
+        account: Dict[str, Any],
+        proxy_str: Optional[str] = None,
+        log_callback: Optional[Callable[[str], None]] = None,
+        take_screenshot: bool = True,
+    ) -> Tuple[bool, str, Optional[str]]:
+        """
+        验证订阅状态并可选截图。
+
+        返回: (is_subscribed, status_message, screenshot_path)
+
+        状态说明:
+        - subscribed: 已订阅
+        - verified: 已验证学生身份，待订阅
+        - link_ready: 需要验证学生身份
+        - ineligible: 无资格
+        - error: 未知状态
+        """
+        from account_manager import AccountManager
+        from auto_bind_card import check_and_login
+
+        email = (account.get("email") or "").strip()
+        if not email:
+            return False, "missing email", None
+
+        self.ensure_profile(account, proxy_str=proxy_str)
+        launch = self.launch_by_email(email)
+
+        async def _runner() -> Tuple[bool, str, Optional[str]]:
+            playwright = browser = None
+            screenshot_path = None
+            try:
+                playwright, browser, page = await self._connect_page(
+                    launch.cdp_endpoint
+                )
+                await page.goto(
+                    "https://one.google.com/ai-student",
+                    wait_until="domcontentloaded",
+                    timeout=60_000,
+                )
+                await page.wait_for_timeout(2000)
+
+                await check_and_login(page, to_auto_account_info(account))
+                await page.wait_for_timeout(1500)
+
+                status = await self._detect_status(page)
+                _log(f"[Geek] 订阅状态: {email} -> {status}", log_callback)
+
+                is_subscribed = status == "subscribed"
+
+                # 截图
+                if take_screenshot:
+                    try:
+                        import os
+                        from datetime import datetime
+
+                        screenshots_dir = _base_dir() / "screenshots"
+                        screenshots_dir.mkdir(parents=True, exist_ok=True)
+                        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                        safe_email = email.replace("@", "_at_").replace(".", "_")
+                        screenshot_path = str(
+                            screenshots_dir / f"{safe_email}_{status}_{timestamp}.png"
+                        )
+                        await page.screenshot(path=screenshot_path, full_page=True)
+                        _log(f"[Geek] 截图已保存: {screenshot_path}", log_callback)
+                    except Exception as e:
+                        _log(f"[Geek] 截图失败: {e}", log_callback)
+
+                # 更新状态
+                if status == "subscribed":
+                    AccountManager.move_to_subscribed(build_account_line(account))
+                elif status == "ineligible":
+                    AccountManager.move_to_ineligible(build_account_line(account))
+
+                return is_subscribed, status, screenshot_path
+            finally:
+                try:
+                    if playwright:
+                        await playwright.stop()
+                except Exception:
+                    pass
+
+        try:
+            result = asyncio.run(_runner())
+            return result
+        finally:
+            self.close_by_profile_id(launch.profile_id)
+
+    def click_subscribe_button(
+        self,
+        account: Dict[str, Any],
+        proxy_str: Optional[str] = None,
+        log_callback: Optional[Callable[[str], None]] = None,
+    ) -> Tuple[bool, str]:
+        """
+        点击 Subscribe 按钮进行订阅。
+
+        返回: (success, message)
+
+        前提: 账号已验证学生身份(verified状态)
+        """
+        from auto_bind_card import check_and_login
+
+        email = (account.get("email") or "").strip()
+        if not email:
+            return False, "missing email"
+
+        self.ensure_profile(account, proxy_str=proxy_str)
+        launch = self.launch_by_email(email)
+
+        async def _runner() -> Tuple[bool, str]:
+            playwright = browser = None
+            try:
+                playwright, browser, page = await self._connect_page(
+                    launch.cdp_endpoint
+                )
+                await page.goto(
+                    "https://one.google.com/ai-student",
+                    wait_until="domcontentloaded",
+                    timeout=60_000,
+                )
+                await page.wait_for_timeout(2000)
+
+                await check_and_login(page, to_auto_account_info(account))
+                await page.wait_for_timeout(1500)
+
+                # 查找并点击 Subscribe 按钮
+                subscribe_selectors = [
+                    'button:has-text("Subscribe")',
+                    'button:has-text("订阅")',
+                    'button:has-text("Get student offer")',
+                    'button:has-text("获取学生优惠")',
+                    'text="Subscribe"',
+                    'text="订阅"',
+                    '[data-action="subscribe"]',
+                ]
+
+                clicked = False
+                for selector in subscribe_selectors:
+                    try:
+                        elem = page.locator(selector)
+                        if await elem.count() > 0:
+                            await elem.first.click()
+                            clicked = True
+                            _log(f"[Geek] 点击订阅按钮成功: {selector}", log_callback)
+                            await page.wait_for_timeout(2000)
+                            break
+                    except Exception:
+                        continue
+
+                if not clicked:
+                    _log(f"[Geek] 未找到订阅按钮", log_callback)
+                    return False, "Subscribe button not found"
+
+                # 检查是否有确认对话框
+                confirm_result = await self._handle_confirmation_dialog(
+                    page, log_callback
+                )
+
+                return confirm_result
+
+            finally:
+                try:
+                    if playwright:
+                        await playwright.stop()
+                except Exception:
+                    pass
+
+        try:
+            ok, msg = asyncio.run(_runner())
+            return ok, msg
+        finally:
+            self.close_by_profile_id(launch.profile_id)
+
+    def check_confirmation_dialog(
+        self,
+        account: Dict[str, Any],
+        proxy_str: Optional[str] = None,
+        log_callback: Optional[Callable[[str], None]] = None,
+    ) -> Tuple[bool, str]:
+        """
+        检查并处理确认对话框。
+
+        返回: (has_dialog, message)
+
+        用途: 处理订阅流程中可能出现的确认弹窗
+        """
+        from auto_bind_card import check_and_login
+
+        email = (account.get("email") or "").strip()
+        if not email:
+            return False, "missing email"
+
+        self.ensure_profile(account, proxy_str=proxy_str)
+        launch = self.launch_by_email(email)
+
+        async def _runner() -> Tuple[bool, str]:
+            playwright = browser = None
+            try:
+                playwright, browser, page = await self._connect_page(
+                    launch.cdp_endpoint
+                )
+                await page.goto(
+                    "https://one.google.com/ai-student",
+                    wait_until="domcontentloaded",
+                    timeout=60_000,
+                )
+                await page.wait_for_timeout(2000)
+
+                await check_and_login(page, to_auto_account_info(account))
+                await page.wait_for_timeout(1500)
+
+                return await self._handle_confirmation_dialog(page, log_callback)
+
+            finally:
+                try:
+                    if playwright:
+                        await playwright.stop()
+                except Exception:
+                    pass
+
+        try:
+            ok, msg = asyncio.run(_runner())
+            return ok, msg
+        finally:
+            self.close_by_profile_id(launch.profile_id)
+
+    @staticmethod
+    async def _handle_confirmation_dialog(
+        page,
+        log_callback: Optional[Callable[[str], None]] = None,
+    ) -> Tuple[bool, str]:
+        """
+        处理确认对话框的内部方法。
+
+        查找并点击 Confirm/Continue/OK 等确认按钮。
+        """
+        # 检查是否有对话框
+        dialog_selectors = [
+            '[role="dialog"]',
+            '[role="alertdialog"]',
+            ".modal",
+            '[class*="dialog"]',
+            '[class*="modal"]',
+        ]
+
+        has_dialog = False
+        for selector in dialog_selectors:
+            try:
+                elem = page.locator(selector)
+                if await elem.count() > 0:
+                    has_dialog = True
+                    _log(f"[Geek] 检测到对话框: {selector}", log_callback)
+                    break
+            except Exception:
+                continue
+
+        # 查找确认按钮
+        confirm_selectors = [
+            'button:has-text("Confirm")',
+            'button:has-text("确认")',
+            'button:has-text("Continue")',
+            'button:has-text("继续")',
+            'button:has-text("OK")',
+            'button:has-text("确定")',
+            'button:has-text("Yes")',
+            'button:has-text("是")',
+            'button:has-text("Accept")',
+            'button:has-text("接受")',
+            'button:has-text("Agree")',
+            'button:has-text("同意")',
+        ]
+
+        for selector in confirm_selectors:
+            try:
+                elem = page.locator(selector)
+                if await elem.count() > 0:
+                    await elem.first.click()
+                    _log(f"[Geek] 点击确认按钮: {selector}", log_callback)
+                    await page.wait_for_timeout(1500)
+                    return True, "confirmed"
+            except Exception:
+                continue
+
+        if has_dialog:
+            return True, "dialog found but no confirm button"
+
+        return False, "no dialog"
+
+    def verify_result(
+        self,
+        account: Dict[str, Any],
+        proxy_str: Optional[str] = None,
+        log_callback: Optional[Callable[[str], None]] = None,
+    ) -> Tuple[bool, str, Optional[str]]:
+        """
+        验证操作结果（成功/失败）并截图。
+
+        返回: (is_success, result_type, screenshot_path)
+
+        result_type: "success", "error", "pending", "unknown"
+        """
+        from auto_bind_card import check_and_login
+
+        email = (account.get("email") or "").strip()
+        if not email:
+            return False, "missing email", None
+
+        self.ensure_profile(account, proxy_str=proxy_str)
+        launch = self.launch_by_email(email)
+
+        async def _runner() -> Tuple[bool, str, Optional[str]]:
+            playwright = browser = None
+            screenshot_path = None
+            try:
+                playwright, browser, page = await self._connect_page(
+                    launch.cdp_endpoint
+                )
+                await page.goto(
+                    "https://one.google.com/ai-student",
+                    wait_until="domcontentloaded",
+                    timeout=60_000,
+                )
+                await page.wait_for_timeout(2000)
+
+                await check_and_login(page, to_auto_account_info(account))
+                await page.wait_for_timeout(1500)
+
+                # 获取页面文本
+                page_text = ""
+                try:
+                    page_text = await page.evaluate(
+                        "() => document.body ? document.body.innerText : ''"
+                    )
+                except Exception:
+                    pass
+
+                lower_text = page_text.lower()
+
+                # 检测结果类型
+                result_type = "unknown"
+                is_success = False
+
+                # 成功关键词
+                success_keywords = [
+                    "success",
+                    "successful",
+                    "complete",
+                    "completed",
+                    "subscribed",
+                    "thank you",
+                    "welcome",
+                    "成功",
+                    "完成",
+                    "已订阅",
+                    "谢谢",
+                    "欢迎",
+                ]
+
+                # 错误关键词
+                error_keywords = [
+                    "error",
+                    "failed",
+                    "declined",
+                    "rejected",
+                    "invalid",
+                    "expired",
+                    "problem",
+                    "issue",
+                    "错误",
+                    "失败",
+                    "拒绝",
+                    "无效",
+                    "过期",
+                    "问题",
+                ]
+
+                for kw in success_keywords:
+                    if kw in lower_text:
+                        result_type = "success"
+                        is_success = True
+                        break
+
+                if result_type == "unknown":
+                    for kw in error_keywords:
+                        if kw in lower_text:
+                            result_type = "error"
+                            break
+
+                _log(f"[Geek] 结果检测: {email} -> {result_type}", log_callback)
+
+                # 截图
+                try:
+                    from datetime import datetime
+
+                    screenshots_dir = _base_dir() / "screenshots"
+                    screenshots_dir.mkdir(parents=True, exist_ok=True)
+                    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                    safe_email = email.replace("@", "_at_").replace(".", "_")
+                    screenshot_path = str(
+                        screenshots_dir
+                        / f"{safe_email}_result_{result_type}_{timestamp}.png"
+                    )
+                    await page.screenshot(path=screenshot_path, full_page=True)
+                    _log(f"[Geek] 结果截图: {screenshot_path}", log_callback)
+                except Exception as e:
+                    _log(f"[Geek] 截图失败: {e}", log_callback)
+
+                return is_success, result_type, screenshot_path
+
+            finally:
+                try:
+                    if playwright:
+                        await playwright.stop()
+                except Exception:
+                    pass
+
+        try:
+            result = asyncio.run(_runner())
+            return result
         finally:
             self.close_by_profile_id(launch.profile_id)
 

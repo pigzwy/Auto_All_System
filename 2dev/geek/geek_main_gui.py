@@ -491,6 +491,69 @@ class GeekWorkerThread(QThread):
                 self.finished_signal.emit({"success": True})
                 return
 
+            # 订阅验证相关任务
+            if self.task_type in {"verify_subscription", "click_subscribe"}:
+                if not self.selected_emails:
+                    self.finished_signal.emit({"success": True})
+                    return
+
+                def _subscription_task(email: str, idx: int):
+                    _set_current_email(email)
+
+                    acc = account_map.get(email)
+                    if not acc:
+                        return email, False, "账号未找到"
+
+                    proxy_str = None
+                    if proxies:
+                        try:
+                            from geek_process import proxy_to_url
+
+                            proxy_str = proxy_to_url(proxies[idx % len(proxies)])
+                        except Exception:
+                            proxy_str = None
+
+                    log_cb = self._make_log_callback(email)
+
+                    if self.task_type == "verify_subscription":
+                        is_sub, status, screenshot = proc.verify_subscription_status(
+                            acc, proxy_str=proxy_str, log_callback=log_cb
+                        )
+                        msg = f"{status}" + (f" ({screenshot})" if screenshot else "")
+                        return email, is_sub, msg
+
+                    if self.task_type == "click_subscribe":
+                        ok, msg = proc.click_subscribe_button(
+                            acc, proxy_str=proxy_str, log_callback=log_cb
+                        )
+                        return email, ok, msg
+
+                    return email, False, "unknown task"
+
+                max_workers = max(1, self.thread_count)
+                self._log(f"[Geek] 开始 {self.task_type}，线程数={max_workers}")
+
+                with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                    futures = {
+                        executor.submit(_subscription_task, email, idx): email
+                        for idx, email in enumerate(self.selected_emails)
+                    }
+                    for future in as_completed(futures):
+                        if not self.is_running:
+                            break
+                        email = futures[future]
+                        try:
+                            _email, ok, msg = future.result()
+                            self.progress_signal.emit(
+                                _email, "✅" if ok else "❌", safe_str(msg)
+                            )
+                        except Exception as e:
+                            self.progress_signal.emit(email, "❌", safe_str(e))
+                            self._log(f"[Geek] 错误: {email} -> {e}", email)
+                _set_current_email("")
+                self.finished_signal.emit({"success": True})
+                return
+
             self.finished_signal.emit(
                 {"success": False, "error": f"未知任务: {self.task_type}"}
             )
@@ -903,6 +966,19 @@ class GeekezBrowserMainWindow(QMainWindow):
         self.btn_open_sheerid.clicked.connect(self.action_open_sheerid_window)
         layout.addWidget(self.btn_open_sheerid)
 
+        self.btn_open_security = mk_btn("🔐 安全设置修改", None, "#E57373")
+        self.btn_open_security.clicked.connect(self.action_open_security_window)
+        layout.addWidget(self.btn_open_security)
+
+        # 订阅验证相关
+        self.btn_verify_sub = mk_btn(
+            "📋 验证订阅状态", "verify_subscription", "#64B5F6"
+        )
+        layout.addWidget(self.btn_verify_sub)
+
+        self.btn_click_sub = mk_btn("🔘 点击订阅按钮", "click_subscribe", "#4DD0E1")
+        layout.addWidget(self.btn_click_sub)
+
         layout.addStretch()
         self.toolbox.addItem(page, "Google 专区")
 
@@ -1205,6 +1281,30 @@ class GeekezBrowserMainWindow(QMainWindow):
             pass
         dlg.exec()
 
+    def action_open_security_window(self) -> None:
+        """打开 Google 安全设置修改窗口（2FA/换邮箱/备份码）- Geek版。"""
+        try:
+            # 导入同目录下的 geek_security_gui
+            from geek_security_gui import GeekSecurityWindow
+        except Exception as e:
+            QMessageBox.warning(
+                self,
+                "错误",
+                f"无法加载安全设置工具: {e}\n\n请确保 geek_security_gui.py 存在",
+            )
+            return
+
+        # 获取当前配置的 host 和 port
+        host = self.host_input.text().strip() or CONTROL_HOST
+        try:
+            port = int(self.port_input.text().strip() or CONTROL_PORT)
+        except Exception:
+            port = CONTROL_PORT
+
+        # GeekSecurityWindow 是 QWidget，需要用 show() 而非 exec()
+        self._security_window = GeekSecurityWindow(host=host, port=port)
+        self._security_window.show()
+
     def start_task(
         self, task_type: str, specific_emails: Optional[List[str]] = None
     ) -> None:
@@ -1272,6 +1372,9 @@ class GeekezBrowserMainWindow(QMainWindow):
             getattr(self, "btn_bind", None),
             getattr(self, "btn_auto", None),
             getattr(self, "btn_open_sheerid", None),
+            getattr(self, "btn_open_security", None),
+            getattr(self, "btn_verify_sub", None),
+            getattr(self, "btn_click_sub", None),
             getattr(self, "btn_ensure", None),
             getattr(self, "btn_edit_accounts", None),
             getattr(self, "btn_edit_proxies", None),
