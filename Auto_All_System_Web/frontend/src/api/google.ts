@@ -81,3 +81,57 @@ export const googleCardsApi = {
   }
 }
 
+// Google 浏览器管理 API
+export const googleBrowserApi = {
+  // 获取可用浏览器列表
+  getAvailable(): Promise<ApiResponse<any>> {
+    return request.get('/plugins/google-business/browser/available/')
+  },
+
+  // 设置默认浏览器
+  setDefault(data: { browser_type: string }): Promise<ApiResponse<any>> {
+    return request.post('/plugins/google-business/browser/set_default/', data)
+  },
+
+  // 获取浏览器池统计
+  getPoolStats(): Promise<ApiResponse<any>> {
+    return request.get('/plugins/google-business/browser/pool_stats/')
+  }
+}
+
+// Google 安全设置 API
+export const googleSecurityApi = {
+  // 修改 2FA 密钥
+  change2fa(data: { account_ids: number[]; browser_type?: string }): Promise<ApiResponse<any>> {
+    return request.post('/plugins/google-business/security/change_2fa/', data)
+  },
+
+  // 修改辅助邮箱
+  changeRecoveryEmail(data: { account_ids: number[]; new_email: string; browser_type?: string }): Promise<ApiResponse<any>> {
+    return request.post('/plugins/google-business/security/change_recovery_email/', data)
+  },
+
+  // 获取备份验证码
+  getBackupCodes(data: { account_ids: number[]; browser_type?: string }): Promise<ApiResponse<any>> {
+    return request.post('/plugins/google-business/security/get_backup_codes/', data)
+  },
+
+  // 一键修改全部
+  oneClickUpdate(data: { account_ids: number[]; new_email?: string; browser_type?: string }): Promise<ApiResponse<any>> {
+    return request.post('/plugins/google-business/security/one_click_update/', data)
+  }
+}
+
+// Google 订阅验证 API
+export const googleSubscriptionApi = {
+  // 验证订阅状态
+  verifyStatus(data: { account_ids: number[]; take_screenshot?: boolean; browser_type?: string }): Promise<ApiResponse<any>> {
+    return request.post('/plugins/google-business/subscription/verify_status/', data)
+  },
+
+  // 点击订阅按钮
+  clickSubscribe(data: { account_ids: number[]; browser_type?: string }): Promise<ApiResponse<any>> {
+    return request.post('/plugins/google-business/subscription/click_subscribe/', data)
+  }
+}
+

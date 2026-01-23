@@ -32,7 +32,7 @@ COPY docker-entrypoint.sh /usr/local/bin/
 RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 
 # 创建静态文件和日志目录
-RUN mkdir -p staticfiles media /var/log/auto_all_system
+RUN mkdir -p staticfiles media /var/log/auto_all_system logs && touch logs/django.log
 
 # 暴露端口
 EXPOSE 8000

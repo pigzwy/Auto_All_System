@@ -2,6 +2,7 @@
 Celery异步任务
 处理Google Business插件的后台任务
 """
+
 import logging
 from typing import List, Dict, Any
 from celery import shared_task, group, chord
@@ -15,7 +16,7 @@ from .services import (
     GoogleLoginService,
     GoogleOneLinkService,
     SheerIDVerifyService,
-    GoogleOneBindCardService
+    GoogleOneBindCardService,
 )
 from .utils import TaskLogger
 
@@ -30,11 +31,11 @@ def process_single_account(
     browser_id: str,
     ws_endpoint: str,
     task_type: str,
-    config: Dict[str, Any]
+    config: Dict[str, Any],
 ) -> Dict[str, Any]:
     """
     处理单个账号的任务
-    
+
     Args:
         self: Celery task实例
         task_id: 任务ID
@@ -43,27 +44,29 @@ def process_single_account(
         ws_endpoint: WebSocket连接端点
         task_type: 任务类型 (login, get_link, verify, bind_card, one_click)
         config: 任务配置
-        
+
     Returns:
         Dict: 处理结果
     """
     from playwright.async_api import async_playwright
     import asyncio
-    
+
     task = GoogleTask.objects.get(id=task_id)
-    task_account = GoogleTaskAccount.objects.get(task=task, google_account_id=account_id)
-    
+    task_account = GoogleTaskAccount.objects.get(
+        task=task, google_account_id=account_id
+    )
+
     # 创建任务日志记录器
     task_logger = TaskLogger(task_id, f"Account {account_id}")
-    
+
     try:
         task_logger.info(f"开始处理账号 (任务类型: {task_type})...")
-        
+
         # 更新状态为运行中
-        task_account.status = 'running'
+        task_account.status = "running"
         task_account.started_at = timezone.now()
         task_account.save()
-        
+
         # 使用浏览器资源池获取实例
         async def _process():
             # 连接到浏览器
@@ -71,355 +74,349 @@ def process_single_account(
             browser = await playwright.chromium.connect_over_cdp(ws_endpoint)
             context = browser.contexts[0]
             page = context.pages[0] if context.pages else await context.new_page()
-            
+
             try:
                 result = None
-                
+
                 # 获取账号信息
                 account = GoogleAccount.objects.get(id=account_id)
                 account_info = {
-                    'email': account.email,
-                    'password': account.password,
-                    'secret': account.secret_key,
-                    'backup': account.recovery_email,
+                    "email": account.email,
+                    "password": account.password,
+                    "secret": account.secret_key,
+                    "backup": account.recovery_email,
                 }
-                
+
                 # 根据任务类型执行相应操作
-                if task_type == 'login':
+                if task_type == "login":
                     # 登录任务
                     login_service = GoogleLoginService()
                     result = await login_service.login(page, account_info, task_logger)
-                    
-                elif task_type == 'get_link':
+
+                elif task_type == "get_link":
                     # 获取链接任务
                     link_service = GoogleOneLinkService()
                     status, link, message = await link_service.get_verification_link(
                         page, account_info, task_logger
                     )
                     result = {
-                        'success': status in ['link_ready', 'verified', 'subscribed'],
-                        'status': status,
-                        'link': link,
-                        'message': message
+                        "success": status in ["link_ready", "verified", "subscribed"],
+                        "status": status,
+                        "link": link,
+                        "message": message,
                     }
-                    
+
                     # 保存链接到数据库
                     if link:
                         account.sheerid_link = link
                         account.save()
-                    
-                elif task_type == 'verify':
+
+                elif task_type == "verify":
                     # SheerID验证任务
-                    verify_service = SheerIDVerifyService(api_key=config.get('api_key'))
-                    
+                    verify_service = SheerIDVerifyService(api_key=config.get("api_key"))
+
                     # 从账号获取验证ID
-                    verification_id = SheerIDVerifyService.extract_verification_id(account.sheerid_link)
+                    verification_id = SheerIDVerifyService.extract_verification_id(
+                        account.sheerid_link
+                    )
                     if not verification_id:
                         raise Exception("No verification ID found")
-                    
+
                     # 批量验证（单个）
                     results = verify_service.verify_batch(
                         [verification_id],
                         callback=lambda vid, msg: task_logger.info(msg),
-                        task_logger=task_logger
+                        task_logger=task_logger,
                     )
-                    
+
                     verify_result = results.get(verification_id, {})
-                    success = verify_result.get('status') == 'success'
-                    
+                    success = verify_result.get("status") == "success"
+
                     if success:
                         account.sheerid_verified = True
                         account.save()
-                    
+
                     result = {
-                        'success': success,
-                        'message': verify_result.get('message', 'Unknown'),
-                        'data': verify_result
+                        "success": success,
+                        "message": verify_result.get("message", "Unknown"),
+                        "data": verify_result,
                     }
-                    
-                elif task_type == 'bind_card':
+
+                elif task_type == "bind_card":
                     # 绑卡订阅任务
                     bind_service = GoogleOneBindCardService()
-                    
+
                     # 获取卡片信息
-                    card_id = config.get('card_id') or task_account.card_id
+                    card_id = config.get("card_id") or task_account.card_id
                     if not card_id:
                         raise Exception("No card specified")
-                    
+
                     card = GoogleCardInfo.objects.get(id=card_id)
                     card_info = {
-                        'number': card.get_card_number(),
-                        'exp_month': card.exp_month,
-                        'exp_year': card.exp_year,
-                        'cvv': card.get_cvv()
+                        "number": card.get_card_number(),
+                        "exp_month": card.exp_month,
+                        "exp_year": card.exp_year,
+                        "cvv": card.get_cvv(),
                     }
-                    
+
                     success, message = await bind_service.bind_and_subscribe(
                         page, card_info, account_info, task_logger
                     )
-                    
+
                     if success:
                         account.card_bound = True
                         account.save()
-                        
+
                         # 更新卡片使用次数
                         card.times_used += 1
                         card.save()
-                    
-                    result = {
-                        'success': success,
-                        'message': message
-                    }
-                    
-                elif task_type == 'one_click':
+
+                    result = {"success": success, "message": message}
+
+                elif task_type == "one_click":
                     # 一键到底任务（登录+获取链接+验证+绑卡）
                     task_logger.info("执行一键到底任务...")
-                    
+
                     # 1. 登录
                     task_logger.info("步骤 1/4: 登录...")
                     login_service = GoogleLoginService()
-                    login_result = await login_service.login(page, account_info, task_logger)
-                    if not login_result['success']:
+                    login_result = await login_service.login(
+                        page, account_info, task_logger
+                    )
+                    if not login_result["success"]:
                         raise Exception(f"登录失败: {login_result.get('error')}")
-                    
+
                     # 2. 获取链接
                     task_logger.info("步骤 2/4: 获取验证链接...")
                     link_service = GoogleOneLinkService()
                     status, link, message = await link_service.get_verification_link(
                         page, account_info, task_logger
                     )
-                    
-                    if status not in ['link_ready', 'verified']:
+
+                    if status not in ["link_ready", "verified"]:
                         raise Exception(f"获取链接失败: {message}")
-                    
+
                     if link:
                         account.sheerid_link = link
                         account.save()
-                    
+
                     # 3. 验证（如果需要）
-                    if status == 'link_ready' and link:
+                    if status == "link_ready" and link:
                         task_logger.info("步骤 3/4: SheerID验证...")
-                        verify_service = SheerIDVerifyService(api_key=config.get('api_key'))
-                        
-                        verification_id = SheerIDVerifyService.extract_verification_id(link)
+                        verify_service = SheerIDVerifyService(
+                            api_key=config.get("api_key")
+                        )
+
+                        verification_id = SheerIDVerifyService.extract_verification_id(
+                            link
+                        )
                         if verification_id:
                             results = verify_service.verify_batch(
                                 [verification_id],
                                 callback=lambda vid, msg: task_logger.info(msg),
-                                task_logger=task_logger
+                                task_logger=task_logger,
                             )
-                            
+
                             verify_result = results.get(verification_id, {})
-                            if verify_result.get('status') != 'success':
-                                task_logger.warning(f"验证未成功: {verify_result.get('message')}")
+                            if verify_result.get("status") != "success":
+                                task_logger.warning(
+                                    f"验证未成功: {verify_result.get('message')}"
+                                )
                             else:
                                 account.sheerid_verified = True
                                 account.save()
-                    
+
                     # 4. 绑卡订阅
                     task_logger.info("步骤 4/4: 绑卡订阅...")
                     bind_service = GoogleOneBindCardService()
-                    
-                    card_id = config.get('card_id') or task_account.card_id
+
+                    card_id = config.get("card_id") or task_account.card_id
                     if not card_id:
                         raise Exception("No card specified")
-                    
+
                     card = GoogleCardInfo.objects.get(id=card_id)
                     card_info = {
-                        'number': card.get_card_number(),
-                        'exp_month': card.exp_month,
-                        'exp_year': card.exp_year,
-                        'cvv': card.get_cvv()
+                        "number": card.get_card_number(),
+                        "exp_month": card.exp_month,
+                        "exp_year": card.exp_year,
+                        "cvv": card.get_cvv(),
                     }
-                    
+
                     success, message = await bind_service.bind_and_subscribe(
                         page, card_info, account_info, task_logger
                     )
-                    
+
                     if success:
                         account.card_bound = True
                         account.save()
-                        
+
                         card.times_used += 1
                         card.save()
-                    
+
                     result = {
-                        'success': success,
-                        'message': '一键到底任务完成: ' + message
+                        "success": success,
+                        "message": "一键到底任务完成: " + message,
                     }
-                
+
                 else:
                     raise Exception(f"Unknown task type: {task_type}")
-                
+
                 # 更新任务账号状态
-                task_account.status = 'completed' if result['success'] else 'failed'
+                task_account.status = "completed" if result["success"] else "failed"
                 task_account.completed_at = timezone.now()
-                task_account.result_message = result.get('message', '')
+                task_account.result_message = result.get("message", "")
                 task_account.result_data = result
                 task_account.save()
-                
+
                 # 更新任务统计
                 with transaction.atomic():
                     task.refresh_from_db()
-                    if result['success']:
+                    if result["success"]:
                         task.success_count += 1
                     else:
                         task.failed_count += 1
                     task.save()
-                
+
                 task_logger.info(f"✅ 任务完成: {result.get('message', '')}")
-                
+
                 return result
-                
+
             except Exception as e:
                 raise
             finally:
                 # 不在这里关闭浏览器，由资源池管理
                 pass
-        
+
         # 运行异步函数
         result = asyncio.run(_process())
-        
+
         return result
-        
+
     except Exception as e:
         error_msg = f"处理失败: {str(e)}"
         task_logger.error(error_msg)
         logger.error(f"Task {task_id} account {account_id} failed: {e}", exc_info=True)
-        
+
         # 更新任务账号状态为失败
-        task_account.status = 'failed'
+        task_account.status = "failed"
         task_account.completed_at = timezone.now()
         task_account.error_message = str(e)
         task_account.save()
-        
+
         # 更新任务统计
         with transaction.atomic():
             task.refresh_from_db()
             task.failed_count += 1
             task.save()
-        
+
         # 重试逻辑
         if self.request.retries < self.max_retries:
             # 指数退避
-            countdown = 2 ** self.request.retries
+            countdown = 2**self.request.retries
             raise self.retry(exc=e, countdown=countdown)
-        
-        return {
-            'success': False,
-            'error': str(e)
-        }
+
+        return {"success": False, "error": str(e)}
 
 
 @shared_task
 def batch_process_task(
-    task_id: int,
-    account_ids: List[int],
-    task_type: str,
-    config: Dict[str, Any]
+    task_id: int, account_ids: List[int], task_type: str, config: Dict[str, Any]
 ) -> Dict[str, Any]:
     """
     批量处理任务
-    
+
     Args:
         task_id: 任务ID
         account_ids: 账号ID列表
         task_type: 任务类型
         config: 任务配置
-        
+
     Returns:
         Dict: 批量处理结果
     """
     from apps.integrations.bitbrowser.api import BitBrowserAPI
-    
+
     task = GoogleTask.objects.get(id=task_id)
-    task.status = 'running'
+    task.status = "running"
     task.started_at = timezone.now()
     task.save()
-    
+
     logger.info(f"Starting batch task {task_id} with {len(account_ids)} accounts")
-    
+
     try:
         browser_api = BitBrowserAPI()
-        
+
         # 创建子任务列表
         subtasks = []
-        
+
         for account_id in account_ids:
             # 获取账号关联的浏览器ID
-            task_account = GoogleTaskAccount.objects.get(task=task, google_account_id=account_id)
+            task_account = GoogleTaskAccount.objects.get(
+                task=task, google_account_id=account_id
+            )
             browser_id = task_account.browser_id
-            
+
             if not browser_id:
                 logger.warning(f"Account {account_id} has no browser_id")
-                task_account.status = 'skipped'
-                task_account.error_message = 'No browser ID'
+                task_account.status = "skipped"
+                task_account.error_message = "No browser ID"
                 task_account.save()
                 continue
-            
+
             # 打开浏览器
             result = browser_api.open_browser(browser_id)
-            if not result.get('success'):
+            if not result.get("success"):
                 logger.error(f"Failed to open browser {browser_id}: {result}")
-                task_account.status = 'failed'
+                task_account.status = "failed"
                 task_account.error_message = f"Failed to open browser: {result}"
                 task_account.save()
                 continue
-            
-            ws_endpoint = result.get('data', {}).get('ws')
+
+            ws_endpoint = result.get("data", {}).get("ws")
             if not ws_endpoint:
                 logger.error(f"No WebSocket endpoint for browser {browser_id}")
-                task_account.status = 'failed'
-                task_account.error_message = 'No WebSocket endpoint'
+                task_account.status = "failed"
+                task_account.error_message = "No WebSocket endpoint"
                 task_account.save()
                 continue
-            
+
             # 创建子任务
             subtask = process_single_account.s(
-                task_id,
-                account_id,
-                browser_id,
-                ws_endpoint,
-                task_type,
-                config
+                task_id, account_id, browser_id, ws_endpoint, task_type, config
             )
             subtasks.append(subtask)
-        
+
         # 并发执行子任务（使用group）
         if subtasks:
             job = group(subtasks)
             result = job.apply_async()
-            
+
             # 等待所有子任务完成（可选，取决于是否需要同步等待）
             # results = result.get()
-        
+
         # 更新任务状态为已完成
-        task.status = 'completed'
+        task.status = "completed"
         task.completed_at = timezone.now()
         task.save()
-        
+
         logger.info(f"Batch task {task_id} completed")
-        
+
         return {
-            'success': True,
-            'task_id': task_id,
-            'total': len(account_ids),
-            'started': len(subtasks)
+            "success": True,
+            "task_id": task_id,
+            "total": len(account_ids),
+            "started": len(subtasks),
         }
-        
+
     except Exception as e:
         logger.error(f"Batch task {task_id} failed: {e}", exc_info=True)
-        
-        task.status = 'failed'
+
+        task.status = "failed"
         task.completed_at = timezone.now()
         task.error_message = str(e)
         task.save()
-        
-        return {
-            'success': False,
-            'task_id': task_id,
-            'error': str(e)
-        }
+
+        return {"success": False, "task_id": task_id, "error": str(e)}
 
 
 @shared_task
@@ -428,58 +425,722 @@ def cleanup_browser_pool():
     清理浏览器资源池（定期任务）
     """
     import asyncio
-    
+
     logger.info("Running browser pool cleanup...")
-    
+
     try:
         asyncio.run(browser_pool.cleanup_all())
         logger.info("Browser pool cleanup completed")
-        return {'success': True}
+        return {"success": True}
     except Exception as e:
         logger.error(f"Browser pool cleanup failed: {e}", exc_info=True)
-        return {'success': False, 'error': str(e)}
+        return {"success": False, "error": str(e)}
 
 
 @shared_task
 def update_task_statistics(task_id: int):
     """
     更新任务统计信息
-    
+
     Args:
         task_id: 任务ID
     """
     try:
         task = GoogleTask.objects.get(id=task_id)
-        
+
         # 统计各状态的账号数量
         task_accounts = GoogleTaskAccount.objects.filter(task=task)
-        
+
         total_count = task_accounts.count()
-        success_count = task_accounts.filter(status='completed').count()
-        failed_count = task_accounts.filter(status='failed').count()
-        skipped_count = task_accounts.filter(status='skipped').count()
-        
+        success_count = task_accounts.filter(status="completed").count()
+        failed_count = task_accounts.filter(status="failed").count()
+        skipped_count = task_accounts.filter(status="skipped").count()
+
         # 更新任务
         task.total_count = total_count
         task.success_count = success_count
         task.failed_count = failed_count
         task.skipped_count = skipped_count
         task.save()
-        
+
         logger.info(f"Updated statistics for task {task_id}")
-        
+
         return {
-            'success': True,
-            'task_id': task_id,
-            'statistics': {
-                'total': total_count,
-                'success': success_count,
-                'failed': failed_count,
-                'skipped': skipped_count
-            }
+            "success": True,
+            "task_id": task_id,
+            "statistics": {
+                "total": total_count,
+                "success": success_count,
+                "failed": failed_count,
+                "skipped": skipped_count,
+            },
         }
-        
+
     except Exception as e:
         logger.error(f"Failed to update task statistics: {e}", exc_info=True)
-        return {'success': False, 'error': str(e)}
+        return {"success": False, "error": str(e)}
 
+
+# ==================== 安全设置任务 ====================
+
+
+@shared_task(bind=True, name="google_business.security_change_2fa")
+def security_change_2fa_task(
+    self,
+    account_ids: list,
+    user_id: int,
+    browser_type: str = None,
+):
+    """
+    修改 2FA 密钥任务
+    """
+    from .models import GoogleAccount
+    from .services import browser_pool
+    from .services.security_service import GoogleSecurityService
+    from apps.integrations.browser_base import BrowserType
+
+    logger.info(f"Starting 2FA change task for {len(account_ids)} accounts")
+
+    bt = BrowserType(browser_type) if browser_type else None
+    security_service = GoogleSecurityService(browser_type=bt)
+    results = []
+
+    for i, account_id in enumerate(account_ids):
+        try:
+            account = GoogleAccount.objects.get(id=account_id)
+            account_info = {
+                "email": account.email,
+                "password": account.password,
+                "totp_secret": account.totp_secret,
+            }
+
+            self.update_state(
+                state="PROGRESS",
+                meta={
+                    "current": i + 1,
+                    "total": len(account_ids),
+                    "email": account.email,
+                },
+            )
+
+            # 获取浏览器实例
+            instance = asyncio.run(
+                browser_pool.acquire_by_email(
+                    email=account.email,
+                    task_id=str(self.request.id),
+                    account_info=account_info,
+                    browser_type=bt,
+                )
+            )
+
+            if not instance or not instance.page:
+                results.append(
+                    {
+                        "email": account.email,
+                        "success": False,
+                        "message": "无法获取浏览器实例",
+                    }
+                )
+                continue
+
+            # 执行 2FA 修改
+            async def run_change_2fa():
+                return await security_service.change_2fa_secret(
+                    instance.page,
+                    account_info,
+                )
+
+            ok, msg, new_secret = asyncio.run(run_change_2fa())
+
+            if ok and new_secret:
+                # 更新数据库
+                account.totp_secret = new_secret
+                account.save(update_fields=["totp_secret"])
+
+            results.append(
+                {
+                    "email": account.email,
+                    "success": ok,
+                    "message": msg,
+                    "new_secret": new_secret if ok else None,
+                }
+            )
+
+        except Exception as e:
+            logger.error(
+                f"2FA change failed for account {account_id}: {e}", exc_info=True
+            )
+            results.append(
+                {
+                    "account_id": account_id,
+                    "success": False,
+                    "message": str(e),
+                }
+            )
+        finally:
+            # 释放浏览器
+            if "account" in dir():
+                asyncio.run(
+                    browser_pool.release_by_email(
+                        account.email, browser_type=bt, close=True
+                    )
+                )
+
+    return {
+        "success": True,
+        "results": results,
+        "total": len(account_ids),
+        "succeeded": sum(1 for r in results if r.get("success")),
+    }
+
+
+@shared_task(bind=True, name="google_business.security_change_recovery_email")
+def security_change_recovery_email_task(
+    self,
+    account_ids: list,
+    new_email: str,
+    user_id: int,
+    browser_type: str = None,
+):
+    """
+    修改辅助邮箱任务
+    """
+    from .models import GoogleAccount
+    from .services import browser_pool
+    from .services.security_service import GoogleSecurityService
+    from apps.integrations.browser_base import BrowserType
+
+    logger.info(f"Starting recovery email change task for {len(account_ids)} accounts")
+
+    bt = BrowserType(browser_type) if browser_type else None
+    security_service = GoogleSecurityService(browser_type=bt)
+    results = []
+
+    for i, account_id in enumerate(account_ids):
+        try:
+            account = GoogleAccount.objects.get(id=account_id)
+            account_info = {
+                "email": account.email,
+                "password": account.password,
+                "totp_secret": account.totp_secret,
+            }
+
+            self.update_state(
+                state="PROGRESS",
+                meta={
+                    "current": i + 1,
+                    "total": len(account_ids),
+                    "email": account.email,
+                },
+            )
+
+            instance = asyncio.run(
+                browser_pool.acquire_by_email(
+                    email=account.email,
+                    task_id=str(self.request.id),
+                    account_info=account_info,
+                    browser_type=bt,
+                )
+            )
+
+            if not instance or not instance.page:
+                results.append(
+                    {
+                        "email": account.email,
+                        "success": False,
+                        "message": "无法获取浏览器实例",
+                    }
+                )
+                continue
+
+            async def run_change_email():
+                return await security_service.change_recovery_email(
+                    instance.page,
+                    account_info,
+                    new_email,
+                )
+
+            ok, msg = asyncio.run(run_change_email())
+
+            if ok:
+                account.recovery_email = new_email
+                account.save(update_fields=["recovery_email"])
+
+            results.append(
+                {
+                    "email": account.email,
+                    "success": ok,
+                    "message": msg,
+                }
+            )
+
+        except Exception as e:
+            logger.error(
+                f"Recovery email change failed for account {account_id}: {e}",
+                exc_info=True,
+            )
+            results.append(
+                {
+                    "account_id": account_id,
+                    "success": False,
+                    "message": str(e),
+                }
+            )
+        finally:
+            if "account" in dir():
+                asyncio.run(
+                    browser_pool.release_by_email(
+                        account.email, browser_type=bt, close=True
+                    )
+                )
+
+    return {
+        "success": True,
+        "results": results,
+        "total": len(account_ids),
+        "succeeded": sum(1 for r in results if r.get("success")),
+    }
+
+
+@shared_task(bind=True, name="google_business.security_get_backup_codes")
+def security_get_backup_codes_task(
+    self,
+    account_ids: list,
+    user_id: int,
+    browser_type: str = None,
+):
+    """
+    获取备份验证码任务
+    """
+    from .models import GoogleAccount
+    from .services import browser_pool
+    from .services.security_service import GoogleSecurityService
+    from apps.integrations.browser_base import BrowserType
+
+    logger.info(f"Starting backup codes task for {len(account_ids)} accounts")
+
+    bt = BrowserType(browser_type) if browser_type else None
+    security_service = GoogleSecurityService(browser_type=bt)
+    results = []
+
+    for i, account_id in enumerate(account_ids):
+        try:
+            account = GoogleAccount.objects.get(id=account_id)
+            account_info = {
+                "email": account.email,
+                "password": account.password,
+                "totp_secret": account.totp_secret,
+            }
+
+            self.update_state(
+                state="PROGRESS",
+                meta={
+                    "current": i + 1,
+                    "total": len(account_ids),
+                    "email": account.email,
+                },
+            )
+
+            instance = asyncio.run(
+                browser_pool.acquire_by_email(
+                    email=account.email,
+                    task_id=str(self.request.id),
+                    account_info=account_info,
+                    browser_type=bt,
+                )
+            )
+
+            if not instance or not instance.page:
+                results.append(
+                    {
+                        "email": account.email,
+                        "success": False,
+                        "message": "无法获取浏览器实例",
+                    }
+                )
+                continue
+
+            async def run_get_codes():
+                return await security_service.get_backup_codes(
+                    instance.page,
+                    account_info,
+                )
+
+            ok, msg, codes = asyncio.run(run_get_codes())
+
+            results.append(
+                {
+                    "email": account.email,
+                    "success": ok,
+                    "message": msg,
+                    "backup_codes": codes if ok else [],
+                }
+            )
+
+        except Exception as e:
+            logger.error(
+                f"Backup codes failed for account {account_id}: {e}", exc_info=True
+            )
+            results.append(
+                {
+                    "account_id": account_id,
+                    "success": False,
+                    "message": str(e),
+                }
+            )
+        finally:
+            if "account" in dir():
+                asyncio.run(
+                    browser_pool.release_by_email(
+                        account.email, browser_type=bt, close=True
+                    )
+                )
+
+    return {
+        "success": True,
+        "results": results,
+        "total": len(account_ids),
+        "succeeded": sum(1 for r in results if r.get("success")),
+    }
+
+
+@shared_task(bind=True, name="google_business.security_one_click")
+def security_one_click_task(
+    self,
+    account_ids: list,
+    new_recovery_email: str = None,
+    user_id: int = None,
+    browser_type: str = None,
+):
+    """
+    一键安全设置任务
+    """
+    from .models import GoogleAccount
+    from .services import browser_pool
+    from .services.security_service import GoogleSecurityService
+    from apps.integrations.browser_base import BrowserType
+
+    logger.info(f"Starting one-click security task for {len(account_ids)} accounts")
+
+    bt = BrowserType(browser_type) if browser_type else None
+    security_service = GoogleSecurityService(browser_type=bt)
+    results = []
+
+    for i, account_id in enumerate(account_ids):
+        try:
+            account = GoogleAccount.objects.get(id=account_id)
+            account_info = {
+                "email": account.email,
+                "password": account.password,
+                "totp_secret": account.totp_secret,
+            }
+
+            self.update_state(
+                state="PROGRESS",
+                meta={
+                    "current": i + 1,
+                    "total": len(account_ids),
+                    "email": account.email,
+                },
+            )
+
+            instance = asyncio.run(
+                browser_pool.acquire_by_email(
+                    email=account.email,
+                    task_id=str(self.request.id),
+                    account_info=account_info,
+                    browser_type=bt,
+                )
+            )
+
+            if not instance or not instance.page:
+                results.append(
+                    {
+                        "email": account.email,
+                        "success": False,
+                        "message": "无法获取浏览器实例",
+                    }
+                )
+                continue
+
+            async def run_one_click():
+                return await security_service.one_click_security_update(
+                    instance.page,
+                    account_info,
+                    new_recovery_email,
+                )
+
+            ok, msg, data = asyncio.run(run_one_click())
+
+            # 更新数据库
+            if ok and data:
+                if data.get("new_2fa_secret"):
+                    account.totp_secret = data["new_2fa_secret"]
+                if data.get("new_recovery_email"):
+                    account.recovery_email = data["new_recovery_email"]
+                account.save()
+
+            results.append(
+                {
+                    "email": account.email,
+                    "success": ok,
+                    "message": msg,
+                    "data": data if ok else None,
+                }
+            )
+
+        except Exception as e:
+            logger.error(
+                f"One-click security failed for account {account_id}: {e}",
+                exc_info=True,
+            )
+            results.append(
+                {
+                    "account_id": account_id,
+                    "success": False,
+                    "message": str(e),
+                }
+            )
+        finally:
+            if "account" in dir():
+                asyncio.run(
+                    browser_pool.release_by_email(
+                        account.email, browser_type=bt, close=True
+                    )
+                )
+
+    return {
+        "success": True,
+        "results": results,
+        "total": len(account_ids),
+        "succeeded": sum(1 for r in results if r.get("success")),
+    }
+
+
+# ==================== 订阅验证任务 ====================
+
+
+@shared_task(bind=True, name="google_business.subscription_verify_status")
+def subscription_verify_status_task(
+    self,
+    account_ids: list,
+    take_screenshot: bool = True,
+    user_id: int = None,
+    browser_type: str = None,
+):
+    """
+    验证订阅状态任务
+    """
+    from .models import GoogleAccount
+    from .services import browser_pool
+    from .services.subscription_service import SubscriptionVerifyService
+    from apps.integrations.browser_base import BrowserType
+
+    logger.info(f"Starting subscription verify task for {len(account_ids)} accounts")
+
+    bt = BrowserType(browser_type) if browser_type else None
+    subscription_service = SubscriptionVerifyService()
+    results = []
+
+    for i, account_id in enumerate(account_ids):
+        try:
+            account = GoogleAccount.objects.get(id=account_id)
+            account_info = {
+                "email": account.email,
+                "password": account.password,
+                "totp_secret": account.totp_secret,
+            }
+
+            self.update_state(
+                state="PROGRESS",
+                meta={
+                    "current": i + 1,
+                    "total": len(account_ids),
+                    "email": account.email,
+                },
+            )
+
+            instance = asyncio.run(
+                browser_pool.acquire_by_email(
+                    email=account.email,
+                    task_id=str(self.request.id),
+                    account_info=account_info,
+                    browser_type=bt,
+                )
+            )
+
+            if not instance or not instance.page:
+                results.append(
+                    {
+                        "email": account.email,
+                        "success": False,
+                        "message": "无法获取浏览器实例",
+                    }
+                )
+                continue
+
+            async def run_verify():
+                return await subscription_service.verify_subscription_status(
+                    instance.page,
+                    account_info,
+                    take_screenshot=take_screenshot,
+                )
+
+            ok, status_info, screenshot_path = asyncio.run(run_verify())
+
+            # 更新账号状态
+            if ok and status_info.get("status"):
+                account.status = status_info["status"]
+                account.save(update_fields=["status"])
+
+            results.append(
+                {
+                    "email": account.email,
+                    "success": ok,
+                    "status": status_info,
+                    "screenshot": screenshot_path,
+                }
+            )
+
+        except Exception as e:
+            logger.error(
+                f"Subscription verify failed for account {account_id}: {e}",
+                exc_info=True,
+            )
+            results.append(
+                {
+                    "account_id": account_id,
+                    "success": False,
+                    "message": str(e),
+                }
+            )
+        finally:
+            if "account" in dir():
+                asyncio.run(
+                    browser_pool.release_by_email(
+                        account.email, browser_type=bt, close=True
+                    )
+                )
+
+    return {
+        "success": True,
+        "results": results,
+        "total": len(account_ids),
+        "succeeded": sum(1 for r in results if r.get("success")),
+    }
+
+
+@shared_task(bind=True, name="google_business.subscription_click_subscribe")
+def subscription_click_subscribe_task(
+    self,
+    account_ids: list,
+    user_id: int = None,
+    browser_type: str = None,
+):
+    """
+    点击订阅按钮任务
+    """
+    from .models import GoogleAccount
+    from .services import browser_pool
+    from .services.subscription_service import SubscriptionVerifyService
+    from apps.integrations.browser_base import BrowserType
+
+    logger.info(f"Starting click subscribe task for {len(account_ids)} accounts")
+
+    bt = BrowserType(browser_type) if browser_type else None
+    subscription_service = SubscriptionVerifyService()
+    results = []
+
+    for i, account_id in enumerate(account_ids):
+        try:
+            account = GoogleAccount.objects.get(id=account_id)
+            account_info = {
+                "email": account.email,
+                "password": account.password,
+                "totp_secret": account.totp_secret,
+            }
+
+            self.update_state(
+                state="PROGRESS",
+                meta={
+                    "current": i + 1,
+                    "total": len(account_ids),
+                    "email": account.email,
+                },
+            )
+
+            instance = asyncio.run(
+                browser_pool.acquire_by_email(
+                    email=account.email,
+                    task_id=str(self.request.id),
+                    account_info=account_info,
+                    browser_type=bt,
+                )
+            )
+
+            if not instance or not instance.page:
+                results.append(
+                    {
+                        "email": account.email,
+                        "success": False,
+                        "message": "无法获取浏览器实例",
+                    }
+                )
+                continue
+
+            async def run_click():
+                # 先点击订阅
+                ok, msg = await subscription_service.click_subscribe_button(
+                    instance.page,
+                    account_info,
+                )
+                if ok:
+                    # 验证结果
+                    (
+                        _,
+                        final_status,
+                        screenshot,
+                    ) = await subscription_service.verify_result(
+                        instance.page,
+                        account_info,
+                    )
+                    return ok, msg, final_status, screenshot
+                return ok, msg, None, None
+
+            ok, msg, final_status, screenshot = asyncio.run(run_click())
+
+            results.append(
+                {
+                    "email": account.email,
+                    "success": ok,
+                    "message": msg,
+                    "final_status": final_status,
+                    "screenshot": screenshot,
+                }
+            )
+
+        except Exception as e:
+            logger.error(
+                f"Click subscribe failed for account {account_id}: {e}", exc_info=True
+            )
+            results.append(
+                {
+                    "account_id": account_id,
+                    "success": False,
+                    "message": str(e),
+                }
+            )
+        finally:
+            if "account" in dir():
+                asyncio.run(
+                    browser_pool.release_by_email(
+                        account.email, browser_type=bt, close=True
+                    )
+                )
+
+    return {
+        "success": True,
+        "results": results,
+        "total": len(account_ids),
+        "succeeded": sum(1 for r in results if r.get("success")),
+    }
