@@ -1,0 +1,628 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Auto All System - 控制台</title>
+    <link rel="stylesheet" href="/static/css/style.css" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+  </head>
+  <body>
+    <div class="app">
+      <!-- 侧边栏 -->
+      <aside class="sidebar">
+        <div class="logo">
+          <span class="logo-icon">⚡</span>
+          <span class="logo-text">AutoSystem</span>
+        </div>
+
+        <nav class="nav">
+          <div class="nav-section">
+            <div class="nav-title">概览</div>
+            <a href="#" class="nav-item active" data-page="dashboard">
+              <span class="nav-icon">📊</span>
+              <span>仪表盘</span>
+            </a>
+          </div>
+
+          <div class="nav-section">
+            <div class="nav-title">业务管理</div>
+            <a href="#" class="nav-item" data-page="accounts">
+              <span class="nav-icon">👤</span>
+              <span>账号管理</span>
+              <span class="nav-badge" id="accounts-count">0</span>
+            </a>
+            <a href="#" class="nav-item" data-page="proxies">
+              <span class="nav-icon">🌐</span>
+              <span>代理管理</span>
+              <span class="nav-badge" id="proxies-count">0</span>
+            </a>
+            <a href="#" class="nav-item" data-page="cards">
+              <span class="nav-icon">💳</span>
+              <span>卡片管理</span>
+              <span class="nav-badge" id="cards-count">0</span>
+            </a>
+          </div>
+
+          <div class="nav-section">
+            <div class="nav-title">系统</div>
+            <a href="#" class="nav-item" data-page="logs">
+              <span class="nav-icon">📝</span>
+              <span>操作日志</span>
+            </a>
+            <a href="#" class="nav-item" data-page="settings">
+              <span class="nav-icon">⚙️</span>
+              <span>系统设置</span>
+            </a>
+          </div>
+        </nav>
+
+        <div class="sidebar-footer">
+          <div class="version">v2.0.0</div>
+        </div>
+      </aside>
+
+      <!-- 主内容区 -->
+      <main class="main">
+        <!-- 顶部栏 -->
+        <header class="header">
+          <div class="header-left">
+            <h1 class="page-title" id="page-title">仪表盘</h1>
+          </div>
+          <div class="header-right">
+            <button class="btn btn-ghost" id="toggle-secrets-btn" onclick="toggleSecrets()">
+              <span class="btn-icon" id="toggle-secrets-icon">👁️</span>
+              <span id="toggle-secrets-text">隐藏密码</span>
+            </button>
+            <button class="btn btn-ghost" onclick="refreshData()">
+              <span class="btn-icon">🔄</span>
+              刷新数据
+            </button>
+            <div class="status-indicator online">
+              <span class="status-dot"></span>
+              <span>在线</span>
+            </div>
+          </div>
+        </header>
+
+        <!-- 内容区 -->
+        <div class="content" id="content">
+          <!-- Dashboard Page -->
+          <div class="page active" id="page-dashboard">
+            <!-- 统计卡片 -->
+            <div class="stats-grid">
+              <div class="stat-card gradient-blue">
+                <div class="stat-icon">👤</div>
+                <div class="stat-info">
+                  <div class="stat-value" id="stat-accounts">0</div>
+                  <div class="stat-label">总账号数</div>
+                </div>
+              </div>
+              <div class="stat-card gradient-green">
+                <div class="stat-icon">✅</div>
+                <div class="stat-info">
+                  <div class="stat-value" id="stat-verified">0</div>
+                  <div class="stat-label">已验证</div>
+                </div>
+              </div>
+              <div class="stat-card gradient-purple">
+                <div class="stat-icon">🌐</div>
+                <div class="stat-info">
+                  <div class="stat-value" id="stat-proxies">0</div>
+                  <div class="stat-label">可用代理</div>
+                </div>
+              </div>
+              <div class="stat-card gradient-orange">
+                <div class="stat-icon">💳</div>
+                <div class="stat-info">
+                  <div class="stat-value" id="stat-cards">0</div>
+                  <div class="stat-label">可用卡片</div>
+                </div>
+              </div>
+            </div>
+
+            <!-- 状态分布 -->
+            <div class="panel">
+              <div class="panel-header">
+                <h2 class="panel-title">账号状态分布</h2>
+              </div>
+              <div class="panel-body">
+                <div class="status-bars" id="status-bars">
+                  <!-- 动态生成 -->
+                </div>
+              </div>
+            </div>
+
+            <!-- 快速操作 -->
+            <div class="panel">
+              <div class="panel-header">
+                <h2 class="panel-title">快速操作</h2>
+              </div>
+              <div class="panel-body">
+                <div class="quick-actions">
+                  <button
+                    class="action-card"
+                    onclick="showModal('import-accounts')"
+                  >
+                    <span class="action-icon">📥</span>
+                    <span class="action-text">导入账号</span>
+                  </button>
+                  <button
+                    class="action-card"
+                    onclick="showModal('import-proxies')"
+                  >
+                    <span class="action-icon">🌐</span>
+                    <span class="action-text">导入代理</span>
+                  </button>
+                  <button
+                    class="action-card"
+                    onclick="showModal('import-cards')"
+                  >
+                    <span class="action-icon">💳</span>
+                    <span class="action-text">导入卡片</span>
+                  </button>
+                  <button class="action-card" onclick="syncBrowsers()">
+                    <span class="action-icon">🔗</span>
+                    <span class="action-text">同步浏览器</span>
+                  </button>
+                  <button class="action-card" onclick="exportFiles()">
+                    <span class="action-icon">📤</span>
+                    <span class="action-text">导出文件</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Accounts Page -->
+          <div class="page" id="page-accounts">
+            <div class="page-toolbar">
+              <div class="toolbar-left">
+                <div class="filter-group">
+                  <select
+                    class="select"
+                    id="filter-status"
+                    onchange="filterAccounts()"
+                  >
+                    <option value="">全部状态</option>
+                    <option value="pending_check">待检查</option>
+                    <option value="link_ready">链接就绪</option>
+                    <option value="verified">已验证</option>
+                    <option value="subscribed">已订阅</option>
+                    <option value="ineligible">无资格</option>
+                    <option value="error">错误</option>
+                  </select>
+                  <input
+                    type="text"
+                    class="input search-input"
+                    id="search-accounts"
+                    placeholder="搜索邮箱..."
+                    oninput="searchAccounts()"
+                  />
+                </div>
+              </div>
+              <div class="toolbar-right">
+                <button
+                  class="btn btn-primary"
+                  onclick="showModal('import-accounts')"
+                >
+                  <span class="btn-icon">📥</span>
+                  导入账号
+                </button>
+                <button class="btn btn-secondary" onclick="showModal('export-accounts')">
+                  <span class="btn-icon">📤</span>
+                  导出
+                </button>
+                <button
+                  class="btn btn-danger"
+                  onclick="deleteSelectedAccounts()"
+                >
+                  <span class="btn-icon">🗑️</span>
+                  删除选中
+                </button>
+              </div>
+            </div>
+
+            <div class="table-container">
+              <table class="table">
+                <thead>
+                  <tr>
+                    <th>
+                      <input
+                        type="checkbox"
+                        id="select-all-accounts"
+                        onchange="toggleSelectAll('accounts')"
+                      />
+                    </th>
+                    <th>邮箱</th>
+                    <th>密码</th>
+                    <th>辅助邮箱</th>
+                    <th>2FA密钥</th>
+                    <th>状态</th>
+                    <th>更新时间</th>
+                    <th>操作</th>
+                  </tr>
+                </thead>
+                <tbody id="accounts-table-body">
+                  <!-- 动态生成 -->
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- Proxies Page -->
+          <div class="page" id="page-proxies">
+            <div class="page-toolbar">
+              <div class="toolbar-left">
+                <input
+                  type="text"
+                  class="input search-input"
+                  id="search-proxies"
+                  placeholder="搜索代理..."
+                  oninput="searchProxies()"
+                />
+              </div>
+              <div class="toolbar-right">
+                <button
+                  class="btn btn-primary"
+                  onclick="showModal('import-proxies')"
+                >
+                  <span class="btn-icon">📥</span>
+                  导入代理
+                </button>
+                <button class="btn btn-danger" onclick="clearProxies()">
+                  <span class="btn-icon">🗑️</span>
+                  清空全部
+                </button>
+              </div>
+            </div>
+
+            <div class="table-container">
+              <table class="table">
+                <thead>
+                  <tr>
+                    <th>
+                      <input
+                        type="checkbox"
+                        id="select-all-proxies"
+                        onchange="toggleSelectAll('proxies')"
+                      />
+                    </th>
+                    <th>类型</th>
+                    <th>地址</th>
+                    <th>端口</th>
+                    <th>用户名</th>
+                    <th>状态</th>
+                    <th>使用者</th>
+                    <th>操作</th>
+                  </tr>
+                </thead>
+                <tbody id="proxies-table-body">
+                  <!-- 动态生成 -->
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- Cards Page -->
+          <div class="page" id="page-cards">
+            <div class="page-toolbar">
+              <div class="toolbar-left">
+                <input
+                  type="text"
+                  class="input search-input"
+                  id="search-cards"
+                  placeholder="搜索卡号..."
+                  oninput="searchCards()"
+                />
+              </div>
+              <div class="toolbar-right">
+                <button
+                  class="btn btn-primary"
+                  onclick="showModal('import-cards')"
+                >
+                  <span class="btn-icon">📥</span>
+                  导入卡片
+                </button>
+                <button class="btn btn-danger" onclick="clearCards()">
+                  <span class="btn-icon">🗑️</span>
+                  清空全部
+                </button>
+              </div>
+            </div>
+
+            <div class="table-container">
+              <table class="table">
+                <thead>
+                  <tr>
+                    <th>
+                      <input
+                        type="checkbox"
+                        id="select-all-cards"
+                        onchange="toggleSelectAll('cards')"
+                      />
+                    </th>
+                    <th>卡号</th>
+                    <th>有效期</th>
+                    <th>CVV</th>
+                    <th>持卡人</th>
+                    <th>邮编</th>
+                    <th>使用次数</th>
+                    <th>状态</th>
+                    <th>操作</th>
+                  </tr>
+                </thead>
+                <tbody id="cards-table-body">
+                  <!-- 动态生成 -->
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- Logs Page -->
+          <div class="page" id="page-logs">
+            <div class="panel">
+              <div class="panel-header">
+                <h2 class="panel-title">最近操作日志</h2>
+                <button class="btn btn-ghost btn-sm" onclick="loadLogs()">
+                  刷新
+                </button>
+              </div>
+              <div class="panel-body">
+                <div class="logs-list" id="logs-list">
+                  <!-- 动态生成 -->
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Settings Page -->
+          <div class="page" id="page-settings">
+            <div class="settings-grid">
+              <div class="panel">
+                <div class="panel-header">
+                  <h2 class="panel-title">SheerID 配置</h2>
+                </div>
+                <div class="panel-body">
+                  <div class="form-group">
+                    <label class="label">API Key</label>
+                    <input
+                      type="password"
+                      class="input"
+                      id="setting-sheerid_api_key"
+                      placeholder="输入SheerID API Key"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div class="panel">
+                <div class="panel-header">
+                  <h2 class="panel-title">自动化配置</h2>
+                </div>
+                <div class="panel-body">
+                  <div class="form-group">
+                    <label class="label">批处理大小</label>
+                    <input
+                      type="number"
+                      class="input"
+                      id="setting-batch_size"
+                      value="5"
+                      min="1"
+                      max="20"
+                    />
+                  </div>
+                  <div class="form-row">
+                    <div class="form-group">
+                      <label class="label">最小延迟(秒)</label>
+                      <input
+                        type="number"
+                        class="input"
+                        id="setting-delay_min"
+                        value="2"
+                        min="1"
+                      />
+                    </div>
+                    <div class="form-group">
+                      <label class="label">最大延迟(秒)</label>
+                      <input
+                        type="number"
+                        class="input"
+                        id="setting-delay_max"
+                        value="5"
+                        min="1"
+                      />
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div class="panel full-width">
+                <div class="panel-body">
+                  <button class="btn btn-primary" onclick="saveSettings()">
+                    <span class="btn-icon">💾</span>
+                    保存设置
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </main>
+    </div>
+
+    <!-- 模态框 -->
+    <div class="modal-overlay" id="modal-overlay" onclick="closeModal()"></div>
+
+    <!-- 导入账号模态框 -->
+    <div class="modal" id="modal-import-accounts">
+      <div class="modal-header">
+        <h3 class="modal-title">导入账号</h3>
+        <button class="modal-close" onclick="closeModal()">×</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-group">
+          <label class="label">账号数据</label>
+          <textarea
+            class="textarea"
+            id="import-accounts-text"
+            rows="10"
+            placeholder="每行一个账号，格式：邮箱----密码----辅助邮箱----2FA密钥"
+          ></textarea>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label class="label">分隔符</label>
+            <input
+              type="text"
+              class="input"
+              id="import-accounts-separator"
+              value="----"
+            />
+          </div>
+          <div class="form-group">
+            <label class="label">初始状态</label>
+            <select class="select" id="import-accounts-status">
+              <option value="pending_check">待检查</option>
+              <option value="verified">已验证</option>
+            </select>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-ghost" onclick="closeModal()">取消</button>
+        <button class="btn btn-primary" onclick="importAccounts()">导入</button>
+      </div>
+    </div>
+
+    <!-- 导入代理模态框 -->
+    <div class="modal" id="modal-import-proxies">
+      <div class="modal-header">
+        <h3 class="modal-title">导入代理</h3>
+        <button class="modal-close" onclick="closeModal()">×</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-group">
+          <label class="label">代理数据</label>
+          <textarea
+            class="textarea"
+            id="import-proxies-text"
+            rows="10"
+            placeholder="每行一个代理，支持格式：
+socks5://user:pass@host:port
+host:port:user:pass
+host:port"
+          ></textarea>
+        </div>
+        <div class="form-group">
+          <label class="label">代理类型</label>
+          <select class="select" id="import-proxies-type">
+            <option value="socks5">SOCKS5</option>
+            <option value="http">HTTP</option>
+            <option value="https">HTTPS</option>
+          </select>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-ghost" onclick="closeModal()">取消</button>
+        <button class="btn btn-primary" onclick="importProxies()">导入</button>
+      </div>
+    </div>
+
+    <!-- 导入卡片模态框 -->
+    <div class="modal" id="modal-import-cards">
+      <div class="modal-header">
+        <h3 class="modal-title">导入卡片</h3>
+        <button class="modal-close" onclick="closeModal()">×</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-group">
+          <label class="label">卡片数据</label>
+          <textarea
+            class="textarea"
+            id="import-cards-text"
+            rows="10"
+            placeholder="每行一张卡，格式：卡号 月 年 CVV [持卡人] [邮编]
+持卡人含字母自动识别，邮编为纯数字自动识别"
+          ></textarea>
+        </div>
+        <div class="form-group">
+          <label class="label">最大使用次数</label>
+          <input
+            type="number"
+            class="input"
+            id="import-cards-max-usage"
+            value="1"
+            min="1"
+          />
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-ghost" onclick="closeModal()">取消</button>
+        <button class="btn btn-primary" onclick="importCards()">导入</button>
+      </div>
+    </div>
+
+    <!-- 导出账号模态框 -->
+    <div class="modal" id="modal-export-accounts">
+      <div class="modal-header">
+        <h3 class="modal-title">导出账号</h3>
+        <button class="modal-close" onclick="closeModal()">×</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-group">
+          <label class="label">筛选状态</label>
+          <select class="select" id="export-accounts-status">
+            <option value="">全部状态</option>
+            <option value="pending_check">待检查</option>
+            <option value="link_ready">链接就绪</option>
+            <option value="verified">已验证</option>
+            <option value="subscribed">已订阅</option>
+            <option value="ineligible">无资格</option>
+            <option value="error">错误</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label class="label">导出字段（可多选）</label>
+          <div class="checkbox-group">
+            <label class="checkbox-label">
+              <input type="checkbox" id="export-field-email" checked disabled> 邮箱
+            </label>
+            <label class="checkbox-label">
+              <input type="checkbox" id="export-field-password" checked> 密码
+            </label>
+            <label class="checkbox-label">
+              <input type="checkbox" id="export-field-recovery"> 辅助邮箱
+            </label>
+            <label class="checkbox-label">
+              <input type="checkbox" id="export-field-secret"> 2FA密钥
+            </label>
+            <label class="checkbox-label">
+              <input type="checkbox" id="export-field-link"> 验证链接
+            </label>
+            <label class="checkbox-label">
+              <input type="checkbox" id="export-field-status"> 状态
+            </label>
+          </div>
+        </div>
+        <div class="form-group">
+          <label class="label">分隔符</label>
+          <input type="text" class="input" id="export-accounts-separator" value="----">
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-ghost" onclick="closeModal()">取消</button>
+        <button class="btn btn-primary" onclick="exportAccounts()">导出</button>
+      </div>
+    </div>
+
+    <!-- Toast 通知 -->
+    <div class="toast-container" id="toast-container"></div>
+
+    <script src="/static/js/app.js"></script>
+  </body>
+</html>
