@@ -8,7 +8,10 @@ export default defineConfig({
   resolve: {
     alias: {
       '@': fileURLToPath(new URL('./src', import.meta.url))
-    }
+    },
+    // Prefer TS sources over any stray compiled JS files that may exist in src/.
+    // This keeps dev behavior consistent with the intended TypeScript code.
+    extensions: ['.ts', '.tsx', '.js', '.jsx', '.mjs', '.json']
   },
   server: {
     port: 3000,
@@ -20,4 +23,3 @@ export default defineConfig({
     }
   }
 })
-

@@ -26,3 +26,10 @@ dist-ssr
 # Environment variables
 .env.local
 .env.*.local
+
+# TypeScript/Vue generated artifacts (avoid committing emitted JS into src/)
+src/**/*.vue.js
+src/router/**/*.js
+src/stores/**/*.js
+src/types/**/*.js
+src/main.js
