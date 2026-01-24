@@ -383,20 +383,24 @@ class GoogleTaskViewSet(viewsets.ModelViewSet):
         ]
         GoogleTaskAccount.objects.bulk_create(task_accounts)
 
-        # TODO: 提交Celery异步任务
-        # from .tasks import batch_process_task
-        # celery_task = batch_process_task.delay(task.id, account_ids, task_type, config)
-        # task.celery_task_id = celery_task.id
-        # task.status = 'running'
-        # task.started_at = timezone.now()
-        # task.save()
+        # 提交Celery异步任务
+        from .tasks import batch_process_task
+
+        account_id_list = list(accounts.values_list("id", flat=True))
+        celery_task = batch_process_task.delay(
+            task.id, account_id_list, task_type, config
+        )
+        task.celery_task_id = celery_task.id
+        task.status = "running"
+        task.started_at = timezone.now()
+        task.save()
 
         return Response(
             {
                 "success": True,
                 "task_id": task.id,
                 "estimated_cost": estimated_cost,
-                "message": "任务已创建（Celery集成待完成）",
+                "message": "任务已创建并开始执行",
             },
             status=status.HTTP_201_CREATED,
         )
@@ -535,11 +539,15 @@ class StatisticsView(viewsets.ViewSet):
         """
         user = request.user
 
-        # 账号统计
-        accounts = GoogleAccount.objects.filter(user=user)
+        # 账号统计（按用户归属）
+        # GoogleAccount 模型使用 owner_user 字段关联所属用户。
+        accounts = GoogleAccount.objects.filter(owner_user=user)
+
+        # 状态值在不同模块/迁移版本里可能存在差异，这里做兼容统计。
         stats = {
             "total": accounts.count(),
-            "pending": accounts.filter(status="pending").count(),
+            # pending: 兼容 pending_check
+            "pending": accounts.filter(status__in=["pending", "pending_check"]).count(),
             "logged_in": accounts.filter(status="logged_in").count(),
             "link_ready": accounts.filter(status="link_ready").count(),
             "verified": accounts.filter(status="verified").count(),
@@ -687,6 +695,50 @@ class BrowserManagementViewSet(viewsets.ViewSet):
         stats = browser_pool.get_pool_stats()
         return Response(stats)
 
+    @action(detail=False, methods=["get"])
+    def status(self, request):
+        """
+        获取当前浏览器连接状态（用于前端展示/自检）
+
+        GET /api/v1/plugins/google-business/browser/status/
+
+        Returns:
+            {
+              "default": "geekez",
+              "engine_online": true,
+              "pool_connected": false,
+              "pool": {"total": 0, "busy": 0, "idle": 0, "max_size": 10},
+              "browsers": [{"type": "geekez", "online": true, "is_default": true}, ...]
+            }
+        """
+        from apps.integrations.browser_base import get_browser_manager
+        from .services import browser_pool
+
+        manager = get_browser_manager()
+        default_type = manager._default_type
+
+        try:
+            engine_online = manager.health_check(default_type)
+        except Exception:
+            engine_online = False
+
+        pool_stats = browser_pool.get_pool_stats()
+
+        return Response(
+            {
+                "default": default_type.value,
+                "engine_online": engine_online,
+                "pool_connected": bool(pool_stats.get("total", 0) > 0),
+                "pool": {
+                    "total": pool_stats.get("total", 0),
+                    "busy": pool_stats.get("busy", 0),
+                    "idle": pool_stats.get("idle", 0),
+                    "max_size": pool_stats.get("max_size", 0),
+                },
+                "browsers": manager.list_available(),
+            }
+        )
+
 
 # ==================== 安全设置 ====================
 
@@ -712,7 +764,13 @@ class SecurityViewSet(viewsets.ViewSet):
         }
         """
         account_ids = request.data.get("account_ids", [])
-        browser_type = request.data.get("browser_type")
+        # browser_type 可选；默认走系统默认浏览器（当前优先 GeekezBrowser）
+        from apps.integrations.browser_base import get_browser_manager
+
+        browser_type = (
+            request.data.get("browser_type")
+            or get_browser_manager()._default_type.value
+        )
 
         if not account_ids:
             return Response({"error": "请选择账号"}, status=status.HTTP_400_BAD_REQUEST)
@@ -748,7 +806,12 @@ class SecurityViewSet(viewsets.ViewSet):
         """
         account_ids = request.data.get("account_ids", [])
         new_email = request.data.get("new_email")
-        browser_type = request.data.get("browser_type")
+        from apps.integrations.browser_base import get_browser_manager
+
+        browser_type = (
+            request.data.get("browser_type")
+            or get_browser_manager()._default_type.value
+        )
 
         if not account_ids:
             return Response({"error": "请选择账号"}, status=status.HTTP_400_BAD_REQUEST)
@@ -787,7 +850,12 @@ class SecurityViewSet(viewsets.ViewSet):
         }
         """
         account_ids = request.data.get("account_ids", [])
-        browser_type = request.data.get("browser_type")
+        from apps.integrations.browser_base import get_browser_manager
+
+        browser_type = (
+            request.data.get("browser_type")
+            or get_browser_manager()._default_type.value
+        )
 
         if not account_ids:
             return Response({"error": "请选择账号"}, status=status.HTTP_400_BAD_REQUEST)
@@ -822,7 +890,12 @@ class SecurityViewSet(viewsets.ViewSet):
         """
         account_ids = request.data.get("account_ids", [])
         new_recovery_email = request.data.get("new_recovery_email")
-        browser_type = request.data.get("browser_type")
+        from apps.integrations.browser_base import get_browser_manager
+
+        browser_type = (
+            request.data.get("browser_type")
+            or get_browser_manager()._default_type.value
+        )
 
         if not account_ids:
             return Response({"error": "请选择账号"}, status=status.HTTP_400_BAD_REQUEST)
@@ -871,7 +944,12 @@ class SubscriptionViewSet(viewsets.ViewSet):
         """
         account_ids = request.data.get("account_ids", [])
         take_screenshot = request.data.get("take_screenshot", True)
-        browser_type = request.data.get("browser_type")
+        from apps.integrations.browser_base import get_browser_manager
+
+        browser_type = (
+            request.data.get("browser_type")
+            or get_browser_manager()._default_type.value
+        )
 
         if not account_ids:
             return Response({"error": "请选择账号"}, status=status.HTTP_400_BAD_REQUEST)
@@ -905,7 +983,12 @@ class SubscriptionViewSet(viewsets.ViewSet):
         }
         """
         account_ids = request.data.get("account_ids", [])
-        browser_type = request.data.get("browser_type")
+        from apps.integrations.browser_base import get_browser_manager
+
+        browser_type = (
+            request.data.get("browser_type")
+            or get_browser_manager()._default_type.value
+        )
 
         if not account_ids:
             return Response({"error": "请选择账号"}, status=status.HTTP_400_BAD_REQUEST)

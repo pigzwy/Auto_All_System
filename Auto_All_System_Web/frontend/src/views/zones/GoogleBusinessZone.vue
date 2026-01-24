@@ -55,7 +55,45 @@
         >
           <el-menu-item index="workstation">
             <el-icon><DataLine /></el-icon>
-            <template #title>工作台</template>
+            <template #title>
+              <div class="menu-item-content">
+                <span>工作台</span>
+                <el-tooltip
+                  v-if="!sidebarCollapsed"
+                  effect="dark"
+                  placement="right"
+                >
+                  <template #content>
+                    <div class="browser-status-tooltip">
+                      <div class="tooltip-row">
+                        <span>浏览器类型:</span>
+                        <span>{{ browserStatus?.default || 'Unknown' }}</span>
+                      </div>
+                      <div class="tooltip-row">
+                        <span>引擎状态:</span>
+                        <span :class="browserStatus?.engine_online ? 'status-online' : 'status-offline'">
+                          {{ browserStatus?.engine_online ? 'Online' : 'Offline' }}
+                        </span>
+                      </div>
+                      <div class="tooltip-row">
+                        <span>浏览器池:</span>
+                        <span>{{ browserStatus?.pool?.busy || 0 }} / {{ browserStatus?.pool?.total || 0 }}</span>
+                      </div>
+                      <div class="tooltip-hint">点击刷新状态</div>
+                    </div>
+                  </template>
+                  <div 
+                    class="browser-status-icon" 
+                    @click.stop="fetchBrowserStatus"
+                    :class="{ 'is-loading': isBrowserStatusLoading }"
+                  >
+                    <el-icon v-if="isBrowserStatusLoading" class="rotating"><Loading /></el-icon>
+                    <el-icon v-else-if="browserStatus?.engine_online" color="#67C23A"><CircleCheckFilled /></el-icon>
+                    <el-icon v-else color="#F56C6C"><CircleCloseFilled /></el-icon>
+                  </div>
+                </el-tooltip>
+              </div>
+            </template>
           </el-menu-item>
           <el-menu-item index="accounts">
             <el-icon><Avatar /></el-icon>
@@ -109,8 +147,9 @@ import { balanceApi } from '@/api/balance'
 import {
   Platform, User, ArrowDown, Check, CreditCard,
   Cpu, DataLine, Fold, Expand, Avatar, Link, Wallet,
-  Connection, Lock, Tickets
+  Connection, Lock, Tickets, CircleCheckFilled, CircleCloseFilled, Loading
 } from '@element-plus/icons-vue'
+import { googleBrowserApi } from '@/api/google'
 
 // 导入模块组件
 import WorkstationModule from './google-modules/WorkstationModule.vue'
@@ -129,6 +168,22 @@ const userStore = useUserStore()
 // 侧边栏状态
 const sidebarCollapsed = ref(false)
 const activeModule = ref('workstation')
+
+// 浏览器状态
+const browserStatus = ref<any>(null)
+const isBrowserStatusLoading = ref(false)
+
+const fetchBrowserStatus = async () => {
+  isBrowserStatusLoading.value = true
+  try {
+    const res = await googleBrowserApi.getStatus()
+    browserStatus.value = res
+  } catch (error) {
+    console.error('Failed to fetch browser status', error)
+  } finally {
+    isBrowserStatusLoading.value = false
+  }
+}
 
 // 用户余额（从余额API/用户信息获取）
 const userBalance = ref('0.00')
@@ -192,7 +247,11 @@ const handleCommand = (command: string) => {
 onMounted(async () => {
   // 确保用户信息是最新的
   await userStore.fetchUserProfile()
-  await refreshBalance()
+  // 并行加载
+  await Promise.all([
+    refreshBalance(),
+    fetchBrowserStatus()
+  ])
 })
 </script>
 
@@ -334,6 +393,34 @@ onMounted(async () => {
             color: #409eff;
             border-right: 3px solid #409eff;
           }
+
+          .menu-item-content {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            width: 100%;
+            padding-right: 10px;
+
+            .browser-status-icon {
+              display: flex;
+              align-items: center;
+              justify-content: center;
+              cursor: pointer;
+              transition: transform 0.3s;
+              margin-left: 8px;
+              
+              &:hover {
+                transform: scale(1.2);
+              }
+              
+              &.is-loading {
+                .rotating {
+                  animation: rotate 1s linear infinite;
+                  color: #409eff;
+                }
+              }
+            }
+          }
         }
       }
     }
@@ -350,6 +437,41 @@ onMounted(async () => {
         width: calc(100% - 64px);
       }
     }
+  }
+}
+
+@keyframes rotate {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.browser-status-tooltip {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  
+  .tooltip-row {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    
+    .status-online {
+      color: #67C23A;
+    }
+    
+    .status-offline {
+      color: #F56C6C;
+    }
+  }
+  
+  .tooltip-hint {
+    margin-top: 4px;
+    font-size: 10px;
+    color: #909399;
+    text-align: center;
+    border-top: 1px solid #4C4D4F;
+    padding-top: 4px;
   }
 }
 

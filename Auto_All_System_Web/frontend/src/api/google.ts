@@ -88,6 +88,11 @@ export const googleBrowserApi = {
     return request.get('/plugins/google-business/browser/available/')
   },
 
+  // 获取当前浏览器连接状态（用于前端展示/自检）
+  getStatus(): Promise<ApiResponse<any>> {
+    return request.get('/plugins/google-business/browser/status/')
+  },
+
   // 设置默认浏览器
   setDefault(data: { browser_type: string }): Promise<ApiResponse<any>> {
     return request.post('/plugins/google-business/browser/set_default/', data)
@@ -134,4 +139,3 @@ export const googleSubscriptionApi = {
     return request.post('/plugins/google-business/subscription/click_subscribe/', data)
   }
 }
-
