@@ -134,6 +134,18 @@
             </el-tag>
           </template>
         </el-table-column>
+
+        <el-table-column label="New-2FA" width="180" show-overflow-tooltip>
+          <template #default="{ row }">
+            <div class="flex flex-col items-start">
+              <code v-if="row.new_2fa" class="mono">{{ row.new_2fa }}</code>
+              <span v-else class="text-gray-500">-</span>
+              <span v-if="row.new_2fa_updated_at" class="text-xs text-gray-500 mt-1">
+                {{ formatDate(row.new_2fa_updated_at) }}
+              </span>
+            </div>
+          </template>
+        </el-table-column>
         <el-table-column label="Geek" width="110">
            <template #default="{ row }">
               <div class="flex flex-col items-start gap-1">
@@ -218,6 +230,16 @@
       </el-alert>
       
       <el-form :model="importForm" label-width="120px">
+        <el-form-item label="分组名称">
+          <el-input 
+            v-model="importForm.group_name" 
+            placeholder="可选，如：售后、2FA（留空则使用当前时间）"
+            clearable
+          />
+          <div class="text-xs text-gray-400 mt-1">
+            导入后自动创建分组，如"售后_10个"或"2025-01-25_1030_10个"
+          </div>
+        </el-form-item>
         <el-form-item label="账号列表">
           <el-input
             v-model="importText"
@@ -308,6 +330,18 @@
         <el-descriptions-item label="备注" :span="2">
           {{ selectedAccount.notes || '无' }}
         </el-descriptions-item>
+
+        <el-descriptions-item label="New-2FA" :span="2">
+          <template v-if="selectedAccount.new_2fa">
+            <code class="mono">{{ selectedAccount.new_2fa }}</code>
+            <span v-if="selectedAccount.new_2fa_updated_at" class="ml-2 text-xs text-gray-500">
+              {{ formatDate(selectedAccount.new_2fa_updated_at) }}
+            </span>
+          </template>
+          <template v-else>
+            -
+          </template>
+        </el-descriptions-item>
       </el-descriptions>
       <template #footer>
         <el-button @click="showViewDialog = false">关闭</el-button>
@@ -315,101 +349,108 @@
     </el-dialog>
 
     <!-- 任务日志抽屉 -->
-    <el-drawer v-model="showTasksDrawer" title="账号任务记录" size="800px">
+    <el-drawer v-model="showTasksDrawer" title="任务记录" size="900px">
       <div v-if="drawerLoading" class="p-4 text-center">
         <el-icon class="mr-1"><Loading /></el-icon> 加载中...
       </div>
       <div v-else class="drawer-content">
-          <el-tabs v-model="activeTaskTab">
-             <el-tab-pane label="Celery任务" name="celery">
-                <el-table :data="accountTasks.celery_actions" stripe border size="small">
-                   <el-table-column prop="celery_task_id" label="Task ID" width="280" show-overflow-tooltip />
-                   <el-table-column prop="kind" label="动作" width="200" show-overflow-tooltip />
-                   <el-table-column prop="state" label="状态" width="110">
-                      <template #default="{ row }">
-                        <el-tag
-                          v-if="row.state"
-                          :type="row.state === 'SUCCESS' ? 'success' : (row.state === 'FAILURE' ? 'danger' : (row.state === 'REVOKED' ? 'info' : 'warning'))"
-                          size="small"
-                        >
-                          {{ row.state }}
-                        </el-tag>
-                        <span v-else>-</span>
-                      </template>
-                   </el-table-column>
-                   <el-table-column prop="created_at" label="时间" width="160">
-                      <template #default="{ row }">
-                        {{ formatDate(row.created_at) }}
-                      </template>
-                   </el-table-column>
-                   <el-table-column label="操作" width="80" fixed="right">
-                     <template #default="{ row }">
-                       <el-button link type="primary" size="small" @click="checkCeleryTask(row.celery_task_id)">查看</el-button>
-                     </template>
-                   </el-table-column>
-                </el-table>
-             </el-tab-pane>
-             <el-tab-pane label="Google任务" name="google">
-                <el-table :data="accountTasks.google_tasks" stripe border size="small">
-                   <el-table-column prop="id" label="ID" width="70" />
-                   <el-table-column prop="task_type_display" label="类型" width="120" />
+          <el-table :data="accountTasks.tasks" stripe border size="small" row-key="record_id">
+            <el-table-column label="来源" width="90">
+              <template #default="{ row }">
+                <el-tag v-if="row.source === 'google'" type="primary" effect="light" size="small">任务</el-tag>
+                <el-tag v-else type="info" effect="light" size="small">任务</el-tag>
+              </template>
+            </el-table-column>
 
-                   <el-table-column label="当前步骤" width="140">
-                     <template #default="{ row }">
-                       <span v-if="row.task_type === 'one_click'">
-                         {{ row.main_flow_step_num ? `${row.main_flow_step_num}/6` : '-' }}
-                         <span class="ml-1 text-gray-500">{{ row.main_flow_step_title || '' }}</span>
-                       </span>
-                       <span v-else>-</span>
-                     </template>
-                   </el-table-column>
+            <el-table-column prop="name" label="类型" min-width="180" show-overflow-tooltip />
 
-                   <el-table-column label="增项" min-width="140" show-overflow-tooltip>
-                     <template #default="{ row }">
-                       <div v-if="row.task_type === 'one_click' && Array.isArray(row.main_flow_extras) && row.main_flow_extras.length > 0" class="flex gap-1 flex-wrap">
-                         <el-tag v-for="ex in row.main_flow_extras" :key="ex" type="warning" size="small" effect="light">{{ ex }}</el-tag>
-                       </div>
-                       <span v-else>-</span>
-                     </template>
-                   </el-table-column>
+            <el-table-column label="状态" width="120">
+              <template #default="{ row }">
+                <template v-if="row.source === 'google'">
+                  <el-tag
+                    :type="row.status === 'completed' ? 'success' : (row.status === 'failed' ? 'danger' : (row.status === 'cancelled' ? 'info' : 'warning'))"
+                    size="small"
+                  >
+                    {{ row.status_display || row.status }}
+                  </el-tag>
+                </template>
+                <template v-else>
+                  <el-tag
+                    v-if="row.state"
+                    :type="row.state === 'SUCCESS' ? 'success' : (row.state === 'FAILURE' ? 'danger' : (row.state === 'REVOKED' ? 'info' : 'warning'))"
+                    size="small"
+                  >
+                    {{ row.state }}
+                  </el-tag>
+                  <span v-else>-</span>
+                </template>
+              </template>
+            </el-table-column>
 
-                   <el-table-column prop="status_display" label="状态" width="110">
-                      <template #default="{ row }">
-                         <el-tag
-                           :type="row.status === 'completed' ? 'success' : (row.status === 'failed' ? 'danger' : (row.status === 'cancelled' ? 'info' : 'warning'))"
-                           size="small"
-                         >
-                           {{ row.status_display || row.status }}
-                         </el-tag>
-                      </template>
-                   </el-table-column>
-                   <el-table-column prop="progress_percentage" label="进度" width="90">
-                      <template #default="{ row }">
-                         {{ row.progress_percentage ?? 0 }}%
-                      </template>
-                   </el-table-column>
-                   <el-table-column prop="created_at" label="创建时间" width="170">
-                      <template #default="{ row }">
-                         {{ formatDate(row.created_at) }}
-                      </template>
-                   </el-table-column>
-                   <el-table-column label="操作" width="90" fixed="right">
-                      <template #default="{ row }">
-                         <el-button link type="primary" size="small" @click="viewTaskLog(row.id)">日志</el-button>
-                      </template>
-                   </el-table-column>
-                </el-table>
+            <el-table-column label="进度" width="90">
+              <template #default="{ row }">
+                <span v-if="row.source === 'google'">{{ row.progress_percentage ?? 0 }}%</span>
+                <span v-else>-</span>
+              </template>
+            </el-table-column>
 
-                <el-divider />
+            <el-table-column label="步骤" width="160">
+              <template #default="{ row }">
+                <span v-if="row.source === 'google' && row.task_type === 'one_click'">
+                  {{ row.main_flow_step_num ? `${row.main_flow_step_num}/6` : '-' }}
+                  <span class="ml-1 text-gray-500">{{ row.main_flow_step_title || '' }}</span>
+                </span>
+                <span v-else>-</span>
+              </template>
+            </el-table-column>
 
-                <el-table :data="accountTasks.task_accounts" stripe border size="small">
-                  <el-table-column prop="task_id" label="Task" width="80" />
-                  <el-table-column prop="status_display" label="账号状态" width="110" />
-                  <el-table-column prop="result_message" label="结果" min-width="220" show-overflow-tooltip />
-                  <el-table-column prop="error_message" label="错误" min-width="220" show-overflow-tooltip />
-                </el-table>
-             </el-tab-pane>
-          </el-tabs>
+            <el-table-column label="增项" min-width="140" show-overflow-tooltip>
+              <template #default="{ row }">
+                <div v-if="row.source === 'google' && row.task_type === 'one_click' && Array.isArray(row.main_flow_extras) && row.main_flow_extras.length > 0" class="flex gap-1 flex-wrap">
+                  <el-tag v-for="ex in row.main_flow_extras" :key="ex" type="warning" size="small" effect="light">{{ ex }}</el-tag>
+                </div>
+                <span v-else>-</span>
+              </template>
+            </el-table-column>
+
+            <el-table-column prop="created_at" label="时间" width="170">
+              <template #default="{ row }">
+                {{ formatDate(row.created_at) }}
+              </template>
+            </el-table-column>
+
+            <el-table-column label="操作" width="90" fixed="right">
+              <template #default="{ row }">
+                <el-button
+                  v-if="row.source === 'google'"
+                  link
+                  type="primary"
+                  size="small"
+                  @click="viewTaskLog(row.google_task_id)"
+                >
+                  日志
+                </el-button>
+                <el-button
+                  v-else
+                  link
+                  type="primary"
+                  size="small"
+                  @click="checkCeleryTask(row.celery_task_id)"
+                >
+                  查看
+                </el-button>
+              </template>
+            </el-table-column>
+          </el-table>
+
+          <el-divider />
+
+          <el-table :data="accountTasks.task_accounts" stripe border size="small">
+            <el-table-column prop="task_id" label="任务ID" width="90" />
+            <el-table-column prop="status_display" label="账号状态" width="110" />
+            <el-table-column prop="result_message" label="结果" min-width="220" show-overflow-tooltip />
+            <el-table-column prop="error_message" label="错误" min-width="220" show-overflow-tooltip />
+          </el-table>
       </div>
     </el-drawer>
 
@@ -564,10 +605,10 @@ const showOneClickDialog = ref(false)
 
 // Data for dialogs
 const drawerLoading = ref(false)
-const activeTaskTab = ref('celery')
 const accountTasks = reactive({
-  celery_actions: [] as any[],
-  google_tasks: [] as any[],
+  // 统一任务列表（后端 accounts/{id}/tasks/ 返回 tasks 字段）
+  tasks: [] as any[],
+  // 账号在 GoogleTask 中的执行明细
   task_accounts: [] as any[]
 })
 const currentLogContent = ref('')
@@ -611,7 +652,8 @@ const editForm = reactive({
 })
 
 const importForm = reactive({
-  overwrite_existing: false
+  overwrite_existing: false,
+  group_name: ''
 })
 
 const importCount = computed(() => {
@@ -882,33 +924,24 @@ const viewTasks = async (row: GoogleAccount) => {
   selectedAccount.value = row
   try {
     const res = await googleAccountsApi.getAccountTasks(row.id)
-    const rawCelery = Array.isArray(res.celery_actions) ? res.celery_actions : []
-    const rawGoogle = Array.isArray(res.google_tasks) ? res.google_tasks : []
+
+    const rawTasks = Array.isArray(res.tasks) ? res.tasks : []
     const rawTaskAccounts = Array.isArray(res.task_accounts) ? res.task_accounts : []
 
-    // celery_actions：追加一次状态查询（限制数量，避免频繁请求）
-    const lastActions = rawCelery.slice(-10).reverse()
-    const enriched: any[] = []
-    for (const a of lastActions) {
-      const item: any = {
-        kind: a.kind,
-        celery_task_id: a.celery_task_id,
-        created_at: a.created_at,
-        browser_type: a.browser_type,
-      }
+    // 对 celery 任务做一次轻量状态补全（仅最近 10 条，避免频繁请求）
+    const tasks = [...rawTasks]
+    const celeryTasks = tasks.filter(t => t?.source === 'celery' && t?.celery_task_id)
+    const recent = celeryTasks.slice(0, 10)
+    for (const t of recent) {
       try {
-        if (a.celery_task_id) {
-          const st = await googleCeleryTasksApi.getTask(String(a.celery_task_id))
-          item.state = st.state
-        }
+        const st = await googleCeleryTasksApi.getTask(String(t.celery_task_id))
+        t.state = st.state
       } catch {
         // ignore
       }
-      enriched.push(item)
     }
 
-    accountTasks.celery_actions = enriched
-    accountTasks.google_tasks = rawGoogle
+    accountTasks.tasks = tasks
     accountTasks.task_accounts = rawTaskAccounts
   } catch (e) {
     ElMessage.error('获取任务记录失败')
@@ -1046,18 +1079,22 @@ const handleImportAccounts = async () => {
     const response = await googleAccountsApi.importAccounts({
       accounts: lines,
       format: 'email----password----recovery----secret',
-      overwrite_existing: importForm.overwrite_existing
+      overwrite_existing: importForm.overwrite_existing,
+      group_name: importForm.group_name || undefined
     })
     
     if (response.success || (response.created_count !== undefined && response.created_count >= 0)) {
-      const created = response.created_count ?? response.data?.created_count ?? 0
+      const created = response.created_count ?? response.data?.created_count ?? response.imported_count ?? 0
       const updated = response.updated_count ?? response.data?.updated_count ?? 0
       const failed = response.failed_count ?? response.data?.failed_count ?? 0
+      const skipped = response.skipped_count ?? 0
+      const groupInfo = response.group ? ` [分组: ${response.group.name}]` : ''
       
-      ElMessage.success(`导入完成！成功创建 ${created} 个，更新 ${updated} 个，失败 ${failed} 个`)
+      ElMessage.success(`导入完成！成功 ${created} 个，跳过 ${skipped} 个，失败 ${failed} 个${groupInfo}`)
       showImportDialog.value = false
       importText.value = ''
       importForm.overwrite_existing = false
+      importForm.group_name = ''
       fetchAccounts()
     } else {
       ElMessage.error('导入失败: ' + (response.message || '未知错误'))
@@ -1270,6 +1307,11 @@ onMounted(() => {
     font-family: 'Courier New', monospace;
     font-size: 13px;
     color: #e96900;
+  }
+
+  .mono {
+    font-family: Consolas, Monaco, 'Courier New', monospace;
+    font-size: 12px;
   }
 }
 </style>

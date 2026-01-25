@@ -28,7 +28,14 @@ export const googleAccountsApi = {
   },
 
   // 批量导入账号
-  importAccounts(data: { accounts: string[]; format?: string; match_browser?: boolean; overwrite_existing?: boolean }): Promise<ApiResponse<any>> {
+  importAccounts(data: { 
+    accounts: string[]; 
+    format?: string; 
+    match_browser?: boolean; 
+    overwrite_existing?: boolean;
+    group_name?: string;
+    group_id?: number;
+  }): Promise<ApiResponse<any>> {
     return request.post('/plugins/google-business/accounts/import_accounts/', data)
   },
 
