@@ -185,6 +185,8 @@ export interface GoogleAccount {
   google_one_status?: string | null
   type_tag?: string
   type_display?: string
+  group_id?: number | null
+  group_name?: string | null
   geekez_profile_exists?: boolean
   geekez_env?: any
   new_2fa?: string | null

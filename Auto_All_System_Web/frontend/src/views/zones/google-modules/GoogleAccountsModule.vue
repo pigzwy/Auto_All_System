@@ -121,7 +121,13 @@
       >
         <el-table-column type="selection" width="55" />
         <el-table-column prop="id" label="ID" width="80" sortable />
-        <el-table-column prop="email" label="邮箱" width="250" show-overflow-tooltip />
+        <el-table-column prop="email" label="邮箱" width="280" show-overflow-tooltip>
+          <template #default="{ row }">
+            <el-link type="primary" :underline="false" @click="viewAccount(row)">
+              {{ row.email }}
+            </el-link>
+          </template>
+        </el-table-column>
         
         <el-table-column label="分组" width="130">
           <template #default="{ row }">
@@ -132,38 +138,12 @@
           </template>
         </el-table-column>
         
-        <el-table-column label="分类" width="100">
-          <template #default="{ row }">
-             <el-tag :type="getDerivedTypeTag(row.type_tag)" effect="dark" size="small">
-               {{ row.type_display || row.type_tag || '-' }}
-             </el-tag>
-          </template>
-        </el-table-column>
-
-        <el-table-column label="状态" width="100">
-          <template #default="{ row }">
-            <el-tag :type="getStatusType(row.status)" effect="plain">{{ row.status_display || row.status }}</el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column label="SheerID" width="100">
-          <template #default="{ row }">
-            <el-tag :type="row.sheerid_verified ? 'success' : 'info'" size="small" effect="light">
-              {{ row.sheerid_verified ? '已验证' : '未验证' }}
-            </el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column label="Gemini订阅" width="120">
-          <template #default="{ row }">
-            <el-tag :type="getGeminiStatusType(row.gemini_status || '')" size="small" effect="light">
-              {{ getGeminiStatusText(row.gemini_status || 'not_subscribed') }}
-            </el-tag>
-          </template>
-        </el-table-column>
+        <!-- 列表收敛：分类/状态/SheerID/Gemini订阅 移到详情弹窗展示 -->
 
         <el-table-column label="New-2FA" width="180" show-overflow-tooltip>
           <template #default="{ row }">
             <div class="flex flex-col items-start">
-              <code v-if="row.new_2fa_display || row.new_2fa" class="mono">{{ row.new_2fa_display || row.new_2fa }}</code>
+              <code v-if="row.new_2fa_display || row.new_2fa" class="mono">{{ format2fa(row.new_2fa_display || row.new_2fa) }}</code>
               <span v-else class="text-gray-500">-</span>
               <span v-if="row.new_2fa_updated_at" class="text-xs text-gray-500 mt-1">
                 {{ formatDate(row.new_2fa_updated_at) }}
@@ -198,7 +178,6 @@
           <template #default="{ row }">
             <el-button link type="primary" size="small" @click="handleLaunchGeekez(row)">{{ getGeekezActionLabel(row) }}</el-button>
             <el-button link type="primary" size="small" @click="openEditDialog(row)">编辑</el-button>
-            <el-button link type="primary" size="small" @click="viewAccount(row)">详情</el-button>
             <el-button link type="warning" size="small" @click="viewTasks(row)">任务日志</el-button>
             <el-button link type="danger" size="small" @click="deleteAccount(row)">删除</el-button>
           </template>
@@ -317,6 +296,18 @@
       <el-descriptions v-if="selectedAccount" :column="2" border>
         <el-descriptions-item label="ID">{{ selectedAccount.id }}</el-descriptions-item>
         <el-descriptions-item label="邮箱">{{ selectedAccount.email }}</el-descriptions-item>
+
+        <el-descriptions-item label="分组">
+          <el-tag v-if="selectedAccount.group_name" type="warning" effect="plain">
+            {{ selectedAccount.group_name }}
+          </el-tag>
+          <span v-else class="text-gray-500">未分组</span>
+        </el-descriptions-item>
+        <el-descriptions-item label="分类">
+          <el-tag :type="getDerivedTypeTag(selectedAccount.type_tag || '')" effect="dark" size="small">
+            {{ selectedAccount.type_display || selectedAccount.type_tag || '-' }}
+          </el-tag>
+        </el-descriptions-item>
         <el-descriptions-item label="状态">
           <el-tag :type="getStatusType(selectedAccount.status)">
             {{ selectedAccount.status_display || selectedAccount.status }}
@@ -358,7 +349,7 @@
 
         <el-descriptions-item label="New-2FA" :span="2">
           <template v-if="selectedAccount.new_2fa_display || selectedAccount.new_2fa">
-            <code class="mono">{{ selectedAccount.new_2fa_display || selectedAccount.new_2fa }}</code>
+            <code class="mono">{{ format2fa(selectedAccount.new_2fa_display || selectedAccount.new_2fa) }}</code>
             <span v-if="selectedAccount.new_2fa_updated_at" class="ml-2 text-xs text-gray-500">
               {{ formatDate(selectedAccount.new_2fa_updated_at) }}
             </span>
@@ -1539,6 +1530,11 @@ const formatDate = (dateStr: string) => {
     hour: '2-digit',
     minute: '2-digit'
   })
+}
+
+// New-2FA 展示：去除中间空格（Google 提示 spaces don't matter）
+const format2fa = (val?: string | null) => {
+  return String(val || '').replace(/\s+/g, '')
 }
 
 onMounted(() => {
