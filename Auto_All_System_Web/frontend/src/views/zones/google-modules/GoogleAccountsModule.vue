@@ -40,6 +40,22 @@
             <el-option label="成功" value="success" />
             <el-option label="其他" value="other" />
           </el-select>
+          <el-select 
+            v-model="filterGroup" 
+            placeholder="分组筛选" 
+            clearable 
+            @change="fetchAccounts" 
+            style="width: 180px; margin-left: 10px;"
+          >
+            <el-option label="全部分组" value="" />
+            <el-option label="未分组" value="null" />
+            <el-option 
+              v-for="group in groupList" 
+              :key="group.id" 
+              :label="`${group.name} (${group.account_count})`" 
+              :value="group.id" 
+            />
+          </el-select>
           <el-button @click="fetchAccounts" :icon="Refresh">刷新</el-button>
         </div>
         
@@ -107,6 +123,15 @@
         <el-table-column prop="id" label="ID" width="80" sortable />
         <el-table-column prop="email" label="邮箱" width="250" show-overflow-tooltip />
         
+        <el-table-column label="分组" width="130">
+          <template #default="{ row }">
+            <el-tag v-if="row.group_name" type="warning" effect="plain" size="small">
+              {{ row.group_name }}
+            </el-tag>
+            <span v-else class="text-gray-400">未分组</span>
+          </template>
+        </el-table-column>
+        
         <el-table-column label="分类" width="100">
           <template #default="{ row }">
              <el-tag :type="getDerivedTypeTag(row.type_tag)" effect="dark" size="small">
@@ -138,7 +163,7 @@
         <el-table-column label="New-2FA" width="180" show-overflow-tooltip>
           <template #default="{ row }">
             <div class="flex flex-col items-start">
-              <code v-if="row.new_2fa" class="mono">{{ row.new_2fa }}</code>
+              <code v-if="row.new_2fa_display || row.new_2fa" class="mono">{{ row.new_2fa_display || row.new_2fa }}</code>
               <span v-else class="text-gray-500">-</span>
               <span v-if="row.new_2fa_updated_at" class="text-xs text-gray-500 mt-1">
                 {{ formatDate(row.new_2fa_updated_at) }}
@@ -332,8 +357,8 @@
         </el-descriptions-item>
 
         <el-descriptions-item label="New-2FA" :span="2">
-          <template v-if="selectedAccount.new_2fa">
-            <code class="mono">{{ selectedAccount.new_2fa }}</code>
+          <template v-if="selectedAccount.new_2fa_display || selectedAccount.new_2fa">
+            <code class="mono">{{ selectedAccount.new_2fa_display || selectedAccount.new_2fa }}</code>
             <span v-if="selectedAccount.new_2fa_updated_at" class="ml-2 text-xs text-gray-500">
               {{ formatDate(selectedAccount.new_2fa_updated_at) }}
             </span>
@@ -435,9 +460,9 @@
                   link
                   type="primary"
                   size="small"
-                  @click="checkCeleryTask(row.celery_task_id)"
+                  @click="openCeleryTask(String(row.celery_task_id))"
                 >
-                  查看
+                  日志
                 </el-button>
               </template>
             </el-table-column>
@@ -466,8 +491,75 @@
          </div>
       </div>
 
-      <div class="log-container">
-         <pre>{{ currentLogContent }}</pre>
+       <div class="log-container">
+          <pre>{{ currentLogContent }}</pre>
+       </div>
+    </el-dialog>
+
+    <!-- Celery 任务：实时 trace 日志（滚动 + 轮询） -->
+    <el-dialog
+      v-model="showCeleryDialog"
+      :title="celeryDialogTitle"
+      width="980px"
+      @closed="onCeleryDialogClosed"
+    >
+      <div class="celery-status" v-loading="celeryStatusLoading">
+        <el-descriptions :column="2" border size="small">
+          <el-descriptions-item label="任务ID">{{ celeryTaskId }}</el-descriptions-item>
+          <el-descriptions-item label="账号">{{ celeryEmail }}</el-descriptions-item>
+          <el-descriptions-item label="state">
+            <el-tag size="small">{{ celeryState || '-' }}</el-tag>
+          </el-descriptions-item>
+          <el-descriptions-item label="trace_file">
+            <span class="trace-path">{{ traceFile || '-' }}</span>
+          </el-descriptions-item>
+        </el-descriptions>
+
+        <div class="mt-3 flex gap-2 justify-end">
+          <el-button size="small" @click="refreshCeleryStatus">刷新状态</el-button>
+          <el-button size="small" type="primary" @click="reloadTrace">重载日志</el-button>
+        </div>
+
+        <el-collapse class="mt-3">
+          <el-collapse-item title="状态详情" name="status">
+            <pre class="status-pre">{{ celeryStatusText }}</pre>
+          </el-collapse-item>
+        </el-collapse>
+      </div>
+
+      <el-divider />
+
+      <div class="trace-toolbar">
+        <div class="left">
+          <el-switch
+            v-model="traceFollowLatest"
+            active-text="跟随最新"
+            inactive-text="停止跟随"
+          />
+          <span class="trace-hint">向上滚动加载历史；滚动离开底部会自动停止跟随</span>
+        </div>
+        <div class="right">
+          <el-button size="small" @click="copyTrace">复制</el-button>
+          <el-button size="small" @click="clearTrace">清空</el-button>
+        </div>
+      </div>
+
+      <div
+        ref="traceScrollRef"
+        class="trace-container"
+        @scroll="onTraceScroll"
+      >
+        <div v-if="traceLoadingOlder" class="trace-loader">加载更早日志...</div>
+        <div v-else-if="traceHasMoreBackward" class="trace-loader trace-loader-idle">继续上滑加载更早日志</div>
+
+        <div class="trace-lines">
+          <div
+            v-for="ln in traceLines"
+            :key="ln.id"
+            class="trace-line"
+            :class="{ json: ln.isJson }"
+          >{{ ln.text }}</div>
+        </div>
       </div>
     </el-dialog>
 
@@ -566,7 +658,7 @@
 
 
 <script setup lang="ts">
-import { ref, reactive, onMounted, computed } from 'vue'
+import { ref, reactive, onMounted, computed, nextTick, watch, onBeforeUnmount } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { 
   Plus, Upload, Check, Close, Refresh, VideoPlay, CreditCard, Lock, 
@@ -574,7 +666,7 @@ import {
 } from '@element-plus/icons-vue'
 import { 
   googleAccountsApi, googleTasksApi, googleSecurityApi, 
-  googleSubscriptionApi, googleCeleryTasksApi 
+  googleSubscriptionApi, googleCeleryTasksApi, googleGroupsApi 
 } from '@/api/google'
 import type { GoogleAccount } from '@/types'
 
@@ -592,11 +684,14 @@ const showViewDialog = ref(false)
 const selectedAccount = ref<GoogleAccount | null>(null)
 const importText = ref('')
 const filterType = ref('')
+const filterGroup = ref<string | number>('')
+const groupList = ref<Array<{id: number | null, name: string, account_count: number}>>([])
 const selectedAccounts = ref<GoogleAccount[]>([])
 
 // Dialog visibility
 const showTasksDrawer = ref(false)
 const showLogDialog = ref(false)
+const showCeleryDialog = ref(false)
 const showSheerIDDialog = ref(false)
 const showBindCardDialog = ref(false)
 const showRecoveryEmailDialog = ref(false)
@@ -615,6 +710,71 @@ const currentLogContent = ref('')
 const currentSteps = ref<any[]>([])
 const currentLogExtras = ref<string[]>([])
 const activeStep = ref(0)
+
+type TraceLine = { id: number; text: string; isJson: boolean }
+
+const celeryTaskId = ref('')
+const celeryEmail = ref('')
+const celeryState = ref('')
+const celeryMeta = ref<any>(null)
+const celeryResult = ref<any>(null)
+const celeryError = ref('')
+const celeryTraceback = ref('')
+const celeryStatusLoading = ref(false)
+
+const traceLines = ref<TraceLine[]>([])
+const traceHasMoreBackward = ref(false)
+const traceCursorBackward = ref<number | null>(null)
+const traceCursorForward = ref<number | null>(null)
+const traceFollowLatest = ref(true)
+const traceLoadingOlder = ref(false)
+const tracePollingTimer = ref<number | null>(null)
+const traceFile = ref('')
+const traceSize = ref(0)
+const traceScrollRef = ref<HTMLElement | null>(null)
+let traceLineSeq = 0
+
+const celeryDialogTitle = computed(() => {
+  const id = celeryTaskId.value ? `#${celeryTaskId.value}` : ''
+  const mail = celeryEmail.value ? ` - ${celeryEmail.value}` : ''
+  return `Celery 任务日志 ${id}${mail}`
+})
+
+const celeryStatusText = computed(() => {
+  const parts: string[] = []
+  if (celeryState.value) parts.push(`state: ${celeryState.value}`)
+  if (celeryMeta.value) parts.push(`meta: ${JSON.stringify(celeryMeta.value, null, 2)}`)
+  if (celeryResult.value) parts.push(`result: ${JSON.stringify(celeryResult.value, null, 2)}`)
+  if (celeryError.value) parts.push(`error: ${celeryError.value}`)
+  if (celeryTraceback.value) parts.push(`traceback: ${celeryTraceback.value}`)
+  return parts.join('\n\n')
+})
+
+const stopTracePolling = () => {
+  if (tracePollingTimer.value) {
+    window.clearInterval(tracePollingTimer.value)
+    tracePollingTimer.value = null
+  }
+}
+
+const startTracePolling = () => {
+  stopTracePolling()
+  tracePollingTimer.value = window.setInterval(async () => {
+    if (!showCeleryDialog.value) return
+    if (!traceFollowLatest.value) return
+    await fetchTraceForward()
+  }, 1000)
+}
+
+watch(traceFollowLatest, (v) => {
+  if (!showCeleryDialog.value) return
+  if (v) startTracePolling()
+  else stopTracePolling()
+})
+
+onBeforeUnmount(() => {
+  stopTracePolling()
+})
 
 const sheerIDForm = reactive({
   student_name: '',
@@ -671,6 +831,13 @@ const fetchAccounts = async () => {
     if (filterType.value) {
       params.type_tag = filterType.value
     }
+    if (filterGroup.value !== '') {
+      if (filterGroup.value === 'null') {
+        params.group = 'null'  // 未分组
+      } else {
+        params.group = filterGroup.value
+      }
+    }
     
     const response = await googleAccountsApi.getAccounts(params)
     // 后端不分页，直接返回数组
@@ -690,6 +857,25 @@ const fetchAccounts = async () => {
     accounts.value = []
   } finally {
     loading.value = false
+  }
+}
+
+const fetchGroups = async () => {
+  try {
+    const response = await googleGroupsApi.getGroups()
+    console.log('fetchGroups response:', response)
+    if (Array.isArray(response)) {
+      // 过滤掉"未分组"项（前端自己处理）
+      groupList.value = response.filter((g: any) => g.id !== null)
+      console.log('groupList after filter:', groupList.value)
+    } else if (response.data && Array.isArray(response.data)) {
+      groupList.value = response.data.filter((g: any) => g.id !== null)
+      console.log('groupList after filter (from response.data):', groupList.value)
+    } else {
+      console.log('Unknown response format:', typeof response, response)
+    }
+  } catch (error) {
+    console.error('获取分组列表失败:', error)
   }
 }
 
@@ -994,21 +1180,191 @@ const viewTaskLog = async (taskId: number) => {
   }
 }
 
-const checkCeleryTask = async (taskId: string) => {
+const refreshCeleryStatus = async () => {
+  if (!celeryTaskId.value) return
+  celeryStatusLoading.value = true
   try {
-    const res = await googleCeleryTasksApi.getTask(taskId)
-    const content = [
-      `state: ${res.state}`,
-      res.meta ? `meta: ${JSON.stringify(res.meta, null, 2)}` : '',
-      res.result ? `result: ${JSON.stringify(res.result, null, 2)}` : '',
-      res.error ? `error: ${res.error}` : '',
-      res.traceback ? `traceback: ${res.traceback}` : ''
-    ].filter(Boolean).join('\n\n')
-    currentLogContent.value = content
-    showLogDialog.value = true
+    const res = await googleCeleryTasksApi.getTask(celeryTaskId.value)
+    celeryState.value = res?.state || ''
+    celeryMeta.value = res?.meta || null
+    celeryResult.value = res?.result || null
+    celeryError.value = res?.error || ''
+    celeryTraceback.value = res?.traceback || ''
   } catch (e) {
     ElMessage.error('查询任务状态失败')
+  } finally {
+    celeryStatusLoading.value = false
   }
+}
+
+const normalizeTraceLines = (raw: string[]): TraceLine[] => {
+  const out: TraceLine[] = []
+  for (const t of raw || []) {
+    const text = String(t ?? '')
+    if (!text) continue
+    out.push({
+      id: ++traceLineSeq,
+      text,
+      isJson: text.trim().startsWith('{')
+    })
+  }
+  return out
+}
+
+const fetchTraceBackward = async (opts?: { initial?: boolean }) => {
+  if (!celeryTaskId.value || !celeryEmail.value) return
+  if (traceLoadingOlder.value) return
+  traceLoadingOlder.value = true
+
+  const initial = Boolean(opts?.initial)
+  const scrollEl = traceScrollRef.value
+  const prevHeight = scrollEl?.scrollHeight || 0
+  const prevTop = scrollEl?.scrollTop || 0
+
+  try {
+    const params: any = {
+      email: celeryEmail.value,
+      direction: 'backward',
+      limit_bytes: 262144
+    }
+    if (!initial && traceCursorBackward.value !== null) {
+      params.cursor = traceCursorBackward.value
+    }
+    const res = await googleCeleryTasksApi.trace(celeryTaskId.value, params)
+
+    traceFile.value = res?.trace_file || traceFile.value
+    traceSize.value = typeof res?.size === 'number' ? res.size : traceSize.value
+    traceHasMoreBackward.value = Boolean(res?.has_more)
+    traceCursorBackward.value = typeof res?.cursor_out === 'number' ? res.cursor_out : traceCursorBackward.value
+
+    // 初次加载：forward cursor 直接定位到 EOF，后续轮询只拿新增
+    if (initial) {
+      traceCursorForward.value = traceSize.value
+    }
+
+    const newLines = normalizeTraceLines(Array.isArray(res?.lines) ? res.lines : [])
+    if (newLines.length > 0) {
+      traceLines.value = [...newLines, ...traceLines.value]
+    }
+
+    await nextTick()
+
+    if (scrollEl) {
+      if (initial) {
+        scrollEl.scrollTop = scrollEl.scrollHeight
+      } else {
+        const newHeight = scrollEl.scrollHeight
+        scrollEl.scrollTop = newHeight - prevHeight + prevTop
+      }
+    }
+  } catch (e) {
+    ElMessage.error('读取 trace 日志失败')
+  } finally {
+    traceLoadingOlder.value = false
+  }
+}
+
+const fetchTraceForward = async () => {
+  if (!celeryTaskId.value || !celeryEmail.value) return
+  const cursor = traceCursorForward.value
+  const params: any = {
+    email: celeryEmail.value,
+    direction: 'forward',
+    limit_bytes: 262144
+  }
+  if (typeof cursor === 'number') params.cursor = cursor
+
+  try {
+    const res = await googleCeleryTasksApi.trace(celeryTaskId.value, params)
+    traceFile.value = res?.trace_file || traceFile.value
+    traceSize.value = typeof res?.size === 'number' ? res.size : traceSize.value
+    traceCursorForward.value = typeof res?.cursor_out === 'number' ? res.cursor_out : traceCursorForward.value
+
+    const raw = Array.isArray(res?.lines) ? res.lines : []
+    if (raw.length === 0) return
+
+    const newLines = normalizeTraceLines(raw)
+    if (newLines.length === 0) return
+
+    traceLines.value = [...traceLines.value, ...newLines]
+    await nextTick()
+
+    const el = traceScrollRef.value
+    if (el && traceFollowLatest.value) {
+      el.scrollTop = el.scrollHeight
+    }
+  } catch {
+    // forward polling：失败不弹窗，避免刷屏
+  }
+}
+
+const clearTrace = () => {
+  traceLines.value = []
+}
+
+const copyTrace = async () => {
+  try {
+    const text = traceLines.value.map(x => x.text).join('\n')
+    await navigator.clipboard.writeText(text)
+    ElMessage.success('已复制')
+  } catch {
+    ElMessage.warning('复制失败（浏览器限制）')
+  }
+}
+
+const onTraceScroll = async () => {
+  const el = traceScrollRef.value
+  if (!el) return
+
+  // 顶部：加载更早
+  if (el.scrollTop <= 0 && traceHasMoreBackward.value) {
+    await fetchTraceBackward({ initial: false })
+  }
+
+  // 离开底部：自动停止跟随
+  const distanceToBottom = el.scrollHeight - (el.scrollTop + el.clientHeight)
+  if (distanceToBottom > 80 && traceFollowLatest.value) {
+    traceFollowLatest.value = false
+  }
+}
+
+const reloadTrace = async () => {
+  // 重置游标与内容
+  traceLines.value = []
+  traceHasMoreBackward.value = false
+  traceCursorBackward.value = null
+  traceCursorForward.value = null
+  traceFile.value = ''
+  traceSize.value = 0
+  await fetchTraceBackward({ initial: true })
+}
+
+const openCeleryTask = async (taskId: string) => {
+  const email = selectedAccount.value?.email
+  if (!email) {
+    ElMessage.error('未找到账号邮箱，无法读取 trace')
+    return
+  }
+
+  celeryTaskId.value = taskId
+  celeryEmail.value = email
+  showCeleryDialog.value = true
+
+  // 初始化状态
+  celeryState.value = ''
+  celeryMeta.value = null
+  celeryResult.value = null
+  celeryError.value = ''
+  celeryTraceback.value = ''
+
+  traceFollowLatest.value = true
+  await refreshCeleryStatus()
+  await reloadTrace()
+  startTracePolling()
+}
+
+const onCeleryDialogClosed = () => {
+  stopTracePolling()
 }
 
 const handleAddAccount = async () => {
@@ -1090,7 +1446,9 @@ const handleImportAccounts = async () => {
       const skipped = response.skipped_count ?? 0
       const groupInfo = response.group ? ` [分组: ${response.group.name}]` : ''
       
-      ElMessage.success(`导入完成！成功 ${created} 个，跳过 ${skipped} 个，失败 ${failed} 个${groupInfo}`)
+      ElMessage.success(
+        `导入完成！新增 ${created} 个，更新 ${updated} 个，跳过 ${skipped} 个，失败 ${failed} 个${groupInfo}`
+      )
       showImportDialog.value = false
       importText.value = ''
       importForm.overwrite_existing = false
@@ -1185,6 +1543,7 @@ const formatDate = (dateStr: string) => {
 
 onMounted(() => {
   fetchAccounts()
+  fetchGroups()
 })
 </script>
 
@@ -1297,6 +1656,93 @@ onMounted(() => {
       margin: 0;
       font-family: Consolas, Monaco, 'Courier New', monospace;
       font-size: 13px;
+    }
+  }
+
+  .trace-toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 10px;
+
+    .left {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+
+    .right {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+  }
+
+  .trace-hint {
+    font-size: 12px;
+    color: #909399;
+  }
+
+  .trace-path {
+    font-family: Consolas, Monaco, 'Courier New', monospace;
+    font-size: 12px;
+    color: #606266;
+  }
+
+  .status-pre {
+    max-height: 240px;
+    overflow: auto;
+    padding: 10px 12px;
+    background: #f7f9fc;
+    border: 1px solid #ebeef5;
+    border-radius: 8px;
+    font-family: Consolas, Monaco, 'Courier New', monospace;
+    font-size: 12px;
+    line-height: 1.45;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+
+  .trace-container {
+    height: 520px;
+    overflow: auto;
+    padding: 10px 12px;
+    border-radius: 10px;
+    border: 1px solid #ebeef5;
+    background: #0b1020;
+    color: #dbe7ff;
+  }
+
+  .trace-loader {
+    position: sticky;
+    top: 0;
+    padding: 6px 8px;
+    font-size: 12px;
+    color: rgba(219, 231, 255, 0.9);
+    background: rgba(11, 16, 32, 0.85);
+    border-bottom: 1px solid rgba(219, 231, 255, 0.12);
+    z-index: 1;
+  }
+
+  .trace-loader-idle {
+    opacity: 0.75;
+  }
+
+  .trace-lines {
+    font-family: Consolas, Monaco, 'Courier New', monospace;
+    font-size: 12px;
+    line-height: 1.5;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+
+  .trace-line {
+    padding: 1px 0;
+
+    &.json {
+      color: rgba(219, 231, 255, 0.55);
     }
   }
 

@@ -187,6 +187,9 @@ export interface GoogleAccount {
   type_display?: string
   geekez_profile_exists?: boolean
   geekez_env?: any
+  new_2fa?: string | null
+  new_2fa_display?: string | null
+  new_2fa_updated_at?: string | null
   sheerid_verified: boolean
   sheerid_link?: string
   gemini_status?: string

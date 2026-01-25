@@ -85,6 +85,34 @@ export const googleAccountsApi = {
   }
 }
 
+// 账号分组 API
+export const googleGroupsApi = {
+  // 获取分组列表（带账号数量）
+  getGroups(): Promise<any> {
+    return request.get('/plugins/google-business/groups/list_with_counts/')
+  },
+
+  // 创建分组
+  createGroup(data: { name: string; description?: string }): Promise<any> {
+    return request.post('/plugins/google-business/groups/', data)
+  },
+
+  // 删除分组
+  deleteGroup(id: number): Promise<any> {
+    return request.delete(`/plugins/google-business/groups/${id}/`)
+  },
+
+  // 将账号添加到分组
+  addAccountsToGroup(groupId: number, accountIds: number[]): Promise<any> {
+    return request.post(`/plugins/google-business/groups/${groupId}/add_accounts/`, { account_ids: accountIds })
+  },
+
+  // 从分组移除账号
+  removeAccountsFromGroup(groupId: number, accountIds: number[]): Promise<any> {
+    return request.post(`/plugins/google-business/groups/${groupId}/remove_accounts/`, { account_ids: accountIds })
+  }
+}
+
 // Google 任务管理 API（用于 OneClick/SheerID/BindCard 等模块）
 // 对应后端：/api/v1/plugins/google-business/tasks/
 export const googleTasksApi = {
@@ -217,6 +245,16 @@ export const googleSubscriptionApi = {
 export const googleCeleryTasksApi = {
   getTask(taskId: string): Promise<ApiResponse<any>> {
     return request.get(`/plugins/google-business/celery-tasks/${taskId}/`)
+  },
+
+  trace(taskId: string, params: {
+    email: string
+    account_id?: number
+    direction?: 'forward' | 'backward'
+    cursor?: number | null
+    limit_bytes?: number
+  }): Promise<ApiResponse<any>> {
+    return request.get(`/plugins/google-business/celery-tasks/${taskId}/trace/`, { params })
   },
 
   cancel(taskId: string): Promise<ApiResponse<any>> {
