@@ -41,6 +41,7 @@ INSTALLED_APPS = [
     "apps.integrations.google_accounts",
     "apps.integrations.bitbrowser",
     "apps.integrations.proxies",
+    "apps.integrations.email",  # 邮件服务
     # 插件系统
     "apps.plugins",  # 插件管理器
     # 业务插件
