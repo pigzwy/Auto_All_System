@@ -46,7 +46,12 @@ class BrowserInstance:
         if not self.browser:
             playwright = await async_playwright().start()
             self.browser = await playwright.chromium.connect_over_cdp(self.ws_endpoint)
-            self.context = self.browser.contexts[0]
+            # connect_over_cdp 可能返回 0 个 contexts；做兼容兜底
+            self.context = (
+                self.browser.contexts[0]
+                if self.browser.contexts
+                else await self.browser.new_context()
+            )
             self.page = (
                 self.context.pages[0]
                 if self.context.pages
@@ -343,8 +348,11 @@ class BrowserPool:
             api = self.browser_manager.get_api(bt)
 
             # 1. 创建/更新 Profile
+            # 注意：不要把明文账号密码/2FA 写入浏览器 Profile 文件（host 上的 profiles.json）。
+            # 这里只保留必要的非敏感信息用于备注/排查。
+            meta_account: Dict[str, Any] = {"email": email}
             profile = api.create_or_update_profile(
-                name=email, proxy=proxy, metadata={"account": account_info or {}}
+                name=email, proxy=proxy, metadata={"account": meta_account}
             )
 
             # 2. 启动浏览器

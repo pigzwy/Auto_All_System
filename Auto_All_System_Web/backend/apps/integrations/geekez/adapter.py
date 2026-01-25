@@ -27,7 +27,10 @@ class GeekezBrowserAdapter(BaseBrowserAPI):
 
     browser_type = BrowserType.GEEKEZ
 
-    def __init__(self, host: str = "127.0.0.1", port: int = 19527):
+    def __init__(self, host: Optional[str] = None, port: Optional[int] = None):
+        # When running in Docker, the GeekezBrowser control server is on the host machine,
+        # so we must respect env vars (GEEKEZ_API_HOST/GEEKEZ_API_PORT). Passing explicit
+        # defaults like 127.0.0.1 would incorrectly point to the container itself.
         self._api = GeekezBrowserAPI(host=host, port=port)
 
     def health_check(self) -> bool:

@@ -17,6 +17,15 @@ if errorlevel 1 (
 echo ✅ Docker 服务正常
 
 echo.
+echo [1.5/4] 准备后端运行环境...
+if not exist "backend\logs" mkdir "backend\logs"
+if not exist "backend\.env" (
+    echo [WARN] backend\.env 不存在，后端容器可能无法启动
+    echo        请在 Auto_All_System_Web\backend\ 下创建 .env（本地开发可用开发模式脚本生成）
+)
+echo ✅ 后端运行环境已准备
+
+echo.
 echo [2/4] 启动所有服务...
 docker-compose up -d
 if errorlevel 1 (

@@ -75,15 +75,17 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, onMounted, onUnmounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import { CreditCard } from '@element-plus/icons-vue'
-import { googleAccountsApi } from '@/api/google'
+import { googleAccountsApi, googleTasksApi } from '@/api/google'
 import type { GoogleAccount } from '@/types'
 
 const binding = ref(false)
 const verifiedAccounts = ref<GoogleAccount[]>([])
 const bindingResults = ref<any[]>([])
+const currentTaskId = ref<number | null>(null)
+const pollingTimer = ref<number | null>(null)
 
 const bindForm = reactive({
   accounts: [] as number[],
@@ -97,7 +99,14 @@ const fetchVerifiedAccounts = async () => {
       sheerid_verified: true,
       page_size: 100 
     })
-    verifiedAccounts.value = response.results
+    // 兼容后端返回数组或分页对象两种情况
+    if (Array.isArray(response)) {
+      verifiedAccounts.value = response
+    } else if (response.results) {
+      verifiedAccounts.value = response.results
+    } else {
+      verifiedAccounts.value = []
+    }
   } catch (error) {
     ElMessage.error('获取已验证账号失败')
   }
@@ -112,37 +121,90 @@ const startBinding = async () => {
   binding.value = true
   bindingResults.value = []
 
-  for (const accountId of bindForm.accounts) {
-    const account = verifiedAccounts.value.find(a => a.id === accountId)
-    if (!account) continue
-
-    // 模拟绑卡过程
-    await sleep(2000)
-
-    const success = Math.random() > 0.2 // 80% 成功率
-    const cardNumber = generateMockCardNumber()
-    
-    bindingResults.value.push({
-      email: account.email,
-      cardNumber: cardNumber,
-      success: success,
-      message: success ? '虚拟卡绑定成功，订阅已激活' : '绑卡失败，请检查卡片状态',
-      time: new Date().toLocaleTimeString()
+  try {
+    // 调用后端API创建绑卡任务
+    const response = await googleTasksApi.createTask({
+      task_type: 'bind_card',
+      account_ids: bindForm.accounts,
+      config: {
+        card_pool: bindForm.cardPool,
+        card_strategy: bindForm.strategy
+      }
     })
-  }
 
-  binding.value = false
-  ElMessage.success('绑卡完成')
+    if (response.success && response.task_id) {
+      currentTaskId.value = response.task_id
+      ElMessage.success(`任务已创建，任务ID: ${response.task_id}，预计费用: ${response.estimated_cost || 0} 积分`)
+      
+      // 开始轮询任务状态
+      startPolling(response.task_id)
+    } else {
+      throw new Error(response.error || response.message || '任务创建失败')
+    }
+  } catch (error: any) {
+    binding.value = false
+    const errorMsg = error.response?.data?.error || error.message || '任务创建失败'
+    ElMessage.error(errorMsg)
+  }
 }
 
-const generateMockCardNumber = () => {
-  const prefixes = ['4', '5']
-  const prefix = prefixes[Math.floor(Math.random() * prefixes.length)]
-  let number = prefix
-  for (let i = 0; i < 15; i++) {
-    number += Math.floor(Math.random() * 10)
+const startPolling = (taskId: number) => {
+  // 每2秒轮询一次任务状态
+  pollingTimer.value = window.setInterval(async () => {
+    try {
+      const taskInfo = await googleTasksApi.getTask(taskId)
+      
+      // 获取任务账号列表更新详细进度
+      const accountsInfo = await googleTasksApi.getTaskAccounts(taskId)
+      if (accountsInfo.accounts) {
+        for (const acc of accountsInfo.accounts) {
+          const accountId = acc.account ?? acc.account_id
+          const email = acc.account_email || verifiedAccounts.value.find(a => a.id === accountId)?.email || `账号${accountId}`
+
+          // 检查是否已经有这个账号的结果
+          const existingResult = bindingResults.value.find(r => r.email === email)
+          if (existingResult) continue
+
+          if (acc.status === 'success' || acc.status === 'failed' || acc.status === 'skipped') {
+            const last4 = typeof acc.result_message === 'string'
+              ? (acc.result_message.match(/\*\*\*\*(\d{4})/)?.[1] || '')
+              : ''
+
+            bindingResults.value.push({
+              email,
+              cardNumber: last4 || '****',
+              success: acc.status === 'success',
+              message: acc.result_message || (acc.status === 'success' ? '虚拟卡绑定成功，订阅已激活' : `绑卡失败: ${acc.error_message || '未知错误'}`),
+              time: new Date().toLocaleTimeString()
+            })
+          }
+        }
+      }
+
+      // 检查任务是否完成
+      if (taskInfo.status === 'completed' || taskInfo.status === 'failed' || taskInfo.status === 'cancelled') {
+        stopPolling()
+        binding.value = false
+        
+        if (taskInfo.status === 'completed') {
+          ElMessage.success(`绑卡完成！成功: ${taskInfo.success_count}, 失败: ${taskInfo.failed_count}`)
+        } else if (taskInfo.status === 'failed') {
+          ElMessage.error('任务执行失败')
+        } else {
+          ElMessage.warning('任务已取消')
+        }
+      }
+    } catch (error) {
+      console.error('轮询任务状态失败:', error)
+    }
+  }, 2000)
+}
+
+const stopPolling = () => {
+  if (pollingTimer.value) {
+    clearInterval(pollingTimer.value)
+    pollingTimer.value = null
   }
-  return number
 }
 
 const maskCardNumber = (cardNumber: string) => {
@@ -150,10 +212,12 @@ const maskCardNumber = (cardNumber: string) => {
   return `**** **** **** ${cardNumber.slice(-4)}`
 }
 
-const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
-
 onMounted(() => {
   fetchVerifiedAccounts()
+})
+
+onUnmounted(() => {
+  stopPolling()
 })
 </script>
 
@@ -185,4 +249,3 @@ onMounted(() => {
   }
 }
 </style>
-

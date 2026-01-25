@@ -9,11 +9,12 @@ import os
 import json
 import logging
 import platform
+import time
 import requests
 from pathlib import Path
 from typing import Optional, Dict, Any, List
 from dataclasses import dataclass, field
-from django.conf import settings
+from urllib.parse import urlparse, urlunparse
 
 logger = logging.getLogger(__name__)
 
@@ -50,7 +51,9 @@ class GeekezBrowserAPI:
     - 设置管理
     """
 
-    def __init__(self, host: str = None, port: int = None, timeout: int = 30):
+    def __init__(
+        self, host: str | None = None, port: int | None = None, timeout: int = 30
+    ):
         # 优先从环境变量读取，支持 Docker 环境
         self.host = host or os.environ.get("GEEKEZ_API_HOST", "127.0.0.1")
         self.port = port or int(os.environ.get("GEEKEZ_API_PORT", "19527"))
@@ -71,15 +74,16 @@ class GeekezBrowserAPI:
 
     def list_profiles(self) -> List[ProfileInfo]:
         """获取所有 Profile 列表"""
-        profiles_data = self._read_profiles_json()
+        profiles = self._read_profiles_json()
         return [
             ProfileInfo(
-                id=p.get("id", ""),
-                name=p.get("name", ""),
-                proxy=p.get("proxy"),
-                metadata=p.get("metadata", {}),
+                id=str(p.get("id", "")),
+                name=str(p.get("name", "")),
+                proxy=p.get("proxyStr") or None,
+                metadata=p.get("metadata", {}) or {},
             )
-            for p in profiles_data.get("profiles", [])
+            for p in profiles
+            if isinstance(p, dict)
         ]
 
     def get_profile_by_name(self, name: str) -> Optional[ProfileInfo]:
@@ -106,36 +110,41 @@ class GeekezBrowserAPI:
         """
         import uuid
 
-        profiles_data = self._read_profiles_json()
-        profiles_list = profiles_data.get("profiles", [])
+        profiles_list = self._read_profiles_json()
 
         # 查找是否已存在
-        existing = None
+        existing: Optional[Dict[str, Any]] = None
         for p in profiles_list:
-            if p.get("name") == name:
+            if isinstance(p, dict) and p.get("name") == name:
                 existing = p
                 break
 
-        if existing:
-            # 更新
+        if existing is not None:
+            # 更新（按 GeekezBrowser profiles.json 结构）
             if proxy is not None:
-                existing["proxy"] = proxy
+                existing["proxyStr"] = proxy
             if metadata is not None:
                 existing["metadata"] = metadata
-            profile_id = existing["id"]
+
+            profile_id = str(existing.get("id", ""))
         else:
             # 创建
             profile_id = str(uuid.uuid4())
             new_profile = {
                 "id": profile_id,
                 "name": name,
-                "proxy": proxy or "",
+                "proxyStr": proxy or "",
+                "tags": [],
+                "fingerprint": {"window": {"width": 1280, "height": 800}},
+                "preProxyOverride": "default",
+                "isSetup": False,
+                "debugPort": 0,
+                "createdAt": int(time.time() * 1000),
                 "metadata": metadata or {},
             }
             profiles_list.append(new_profile)
 
-        profiles_data["profiles"] = profiles_list
-        self._write_profiles_json(profiles_data)
+        self._write_profiles_json(profiles_list)
 
         return ProfileInfo(
             id=profile_id, name=name, proxy=proxy, metadata=metadata or {}
@@ -143,15 +152,16 @@ class GeekezBrowserAPI:
 
     def delete_profile(self, profile_id: str) -> bool:
         """删除 Profile"""
-        profiles_data = self._read_profiles_json()
-        profiles_list = profiles_data.get("profiles", [])
-
-        new_list = [p for p in profiles_list if p.get("id") != profile_id]
+        profiles_list = self._read_profiles_json()
+        new_list = [
+            p
+            for p in profiles_list
+            if isinstance(p, dict) and str(p.get("id")) != str(profile_id)
+        ]
         if len(new_list) == len(profiles_list):
             return False  # 未找到
 
-        profiles_data["profiles"] = new_list
-        self._write_profiles_json(profiles_data)
+        self._write_profiles_json(new_list)
         return True
 
     # ==================== 浏览器控制 ====================
@@ -163,27 +173,146 @@ class GeekezBrowserAPI:
         Returns:
             LaunchInfo 包含 cdp_endpoint 用于 Playwright 连接
         """
+        # GeekezBrowser 有概率返回 debugPort 但 Chromium 没有实际监听，
+        # 这里做启动 + 探活重试，提升稳定性。
         try:
-            resp = requests.post(
-                f"{self.base_url}/profiles/{profile_id}/launch", timeout=self.timeout
-            )
-            if resp.status_code != 200:
-                logger.error(f"Launch failed: {resp.text}")
-                return None
+            import socket
 
-            data = resp.json()
-            debug_port = data.get("debugPort", 0)
+            cdp_host = socket.gethostbyname(self.host)
+        except Exception:
+            cdp_host = self.host
 
-            return LaunchInfo(
-                profile_id=profile_id,
-                debug_port=debug_port,
-                cdp_endpoint=f"http://127.0.0.1:{debug_port}",
-                ws_endpoint=data.get("wsEndpoint"),
-                pid=data.get("pid"),
+        launch_payload = {
+            "debugPort": 0,
+            "enableRemoteDebugging": True,
+            # 关键：让 DevTools 端口对 Docker 容器可达
+            "remoteDebuggingAddress": "0.0.0.0",
+        }
+
+        for attempt in range(1, 4):
+            try:
+                resp = requests.post(
+                    f"{self.base_url}/profiles/{profile_id}/launch",
+                    json=launch_payload,
+                    timeout=self.timeout,
+                )
+                if resp.status_code != 200:
+                    logger.error(f"Launch failed (attempt {attempt}): {resp.text}")
+                    time.sleep(1)
+                    continue
+
+                data = resp.json() if resp.content else {}
+                debug_port = data.get("debugPort", 0)
+                if not isinstance(debug_port, int) or debug_port <= 0:
+                    logger.error(
+                        f"Launch returned invalid debugPort (attempt {attempt}): {debug_port}"
+                    )
+                    time.sleep(1)
+                    continue
+
+                cdp_endpoint = f"http://{cdp_host}:{debug_port}"
+
+                ws_endpoint: Optional[str] = None
+                ready = False
+                last_error: Optional[Exception] = None
+                deadline = time.monotonic() + 20
+
+                while time.monotonic() < deadline:
+                    try:
+                        v = requests.get(
+                            f"{cdp_endpoint}/json/version",
+                            timeout=2,
+                            headers={"Host": cdp_host},
+                        )
+                        if v.status_code == 200:
+                            payload = v.json() if v.content else {}
+                        raw_ws = payload.get("webSocketDebuggerUrl")
+                        if isinstance(raw_ws, str) and raw_ws:
+                            ws_endpoint = self._rewrite_ws_endpoint_host(
+                                raw_ws, cdp_host, debug_port
+                            )
+                            ready = True
+                            break
+                    except Exception as e:
+                        last_error = e
+
+                    time.sleep(0.6)
+
+                if not ready:
+                    if last_error is not None:
+                        logger.warning(
+                            f"DevTools not ready (attempt {attempt}) for {cdp_endpoint}: {last_error}"
+                        )
+                    else:
+                        logger.warning(
+                            f"DevTools not ready (attempt {attempt}) for {cdp_endpoint}"
+                        )
+
+                    # Best-effort close before retry
+                    try:
+                        self.close_profile(profile_id)
+                    except Exception:
+                        pass
+                    time.sleep(1)
+                    continue
+
+                if ws_endpoint is None:
+                    raw_ws = data.get("wsEndpoint")
+                    if isinstance(raw_ws, str) and raw_ws:
+                        ws_endpoint = self._rewrite_ws_endpoint_host(
+                            raw_ws, cdp_host, debug_port
+                        )
+
+                return LaunchInfo(
+                    profile_id=profile_id,
+                    debug_port=debug_port,
+                    cdp_endpoint=cdp_endpoint,
+                    ws_endpoint=ws_endpoint,
+                    pid=data.get("pid"),
+                )
+            except Exception as e:
+                logger.warning(f"Launch attempt {attempt} errored: {e}")
+                time.sleep(1)
+
+        return None
+
+    @staticmethod
+    def _rewrite_ws_endpoint_host(ws_endpoint: str, host: str, debug_port: int) -> str:
+        """将 wsEndpoint 的 host 强制改为可达的 IP/host，并补齐端口。
+
+        Geekez/Chrome 可能返回 ws://127.0.0.1:<port>/...，当后端在 Docker 中运行时不可达。
+        """
+
+        try:
+            parsed = urlparse(ws_endpoint)
+            if not parsed.scheme.startswith("ws"):
+                return ws_endpoint
+
+            if not parsed.netloc:
+                return ws_endpoint
+
+            # netloc = "host:port" or "host"
+            if ":" in parsed.netloc:
+                _, port = parsed.netloc.rsplit(":", 1)
+                netloc = f"{host}:{port}"
+            else:
+                # Geekez/Chrome 某些版本会返回不带端口的 ws url，例如:
+                # ws://192.168.65.254/devtools/browser/<id>
+                # 这种情况下需要补齐 debug_port。
+                netloc = f"{host}:{int(debug_port)}"
+
+            return urlunparse(
+                (
+                    parsed.scheme,
+                    netloc,
+                    parsed.path,
+                    parsed.params,
+                    parsed.query,
+                    parsed.fragment,
+                )
             )
-        except Exception as e:
-            logger.error(f"Launch profile failed: {e}")
-            return None
+        except Exception:
+            return ws_endpoint
 
     def close_profile(self, profile_id: str) -> bool:
         """关闭浏览器 Profile"""
@@ -219,29 +348,42 @@ class GeekezBrowserAPI:
 
     def _get_data_dir(self) -> Path:
         """获取 GeekezBrowser 数据目录"""
+        # Docker 场景：通过挂载把宿主机 GeekezBrowser Profiles 目录映射进容器
+        # 然后用环境变量指定映射后的容器内路径。
+        override = os.environ.get("GEEKEZ_DATA_DIR")
+        if override:
+            return Path(override)
+
         if platform.system() == "Windows":
             base = os.environ.get("APPDATA", os.path.expanduser("~"))
             return Path(base) / "geekez-browser" / "BrowserProfiles"
         else:
             return Path.home() / ".config" / "geekez-browser" / "BrowserProfiles"
 
-    def _read_profiles_json(self) -> Dict[str, Any]:
-        """读取 profiles.json"""
+    def _read_profiles_json(self) -> List[Dict[str, Any]]:
+        """读取 profiles.json
+
+        GeekezBrowser 的 profiles.json 格式为: List[Dict]
+        (与 2dev/geek/geek_browser_api.py 一致)
+        """
         path = self._get_data_dir() / "profiles.json"
         if path.exists():
             try:
-                return json.loads(path.read_text(encoding="utf-8"))
+                data = json.loads(path.read_text(encoding="utf-8"))
+                if isinstance(data, list):
+                    return data
+                # 兼容旧格式：{"profiles": [...]}（历史版本）
+                if isinstance(data, dict) and isinstance(data.get("profiles"), list):
+                    return data["profiles"]
             except Exception:
                 pass
-        return {"profiles": []}
+        return []
 
-    def _write_profiles_json(self, data: Dict[str, Any]) -> None:
+    def _write_profiles_json(self, profiles: List[Dict[str, Any]]) -> None:
         """写入 profiles.json"""
         path = self._get_data_dir() / "profiles.json"
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(
-            json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8"
-        )
+        path.write_text(json.dumps(profiles, ensure_ascii=False), encoding="utf-8")
 
     def _read_settings_json(self) -> Dict[str, Any]:
         """读取 settings.json"""

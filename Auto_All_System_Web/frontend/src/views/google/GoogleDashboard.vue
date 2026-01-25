@@ -5,6 +5,37 @@
       <h2>
         <el-icon style="vertical-align: middle; margin-right: 8px;"><Platform /></el-icon>
         Google 业务自动化工作台
+        <el-tooltip placement="bottom" :show-after="200" effect="dark">
+          <template #content>
+            <div v-if="browserStatus" style="line-height: 1.8; font-size: 13px;">
+              <div><strong>浏览器引擎:</strong> {{ browserStatus.default || '未知' }}</div>
+              <div>
+                <strong>状态:</strong> 
+                <span :style="{ color: browserStatus.engine_online ? '#67C23A' : '#F56C6C', fontWeight: 'bold' }">
+                  {{ browserStatus.engine_online ? '在线 (Online)' : '离线 (Offline)' }}
+                </span>
+              </div>
+              <div v-if="browserStatus.pool">
+                <strong>连接池:</strong> {{ browserStatus.pool.busy }} / {{ browserStatus.pool.total }} (忙/总)
+              </div>
+              <div style="margin-top: 6px; font-size: 12px; color: #909399; border-top: 1px solid #4C4D4F; padding-top: 4px;">
+                点击图标刷新状态
+              </div>
+            </div>
+            <div v-else>正在获取状态...</div>
+          </template>
+          <el-icon 
+            class="browser-status-icon"
+            :class="{ 
+              'is-online': browserStatus?.engine_online, 
+              'is-offline': !browserStatus?.engine_online,
+              'is-loading': isBrowserStatusLoading 
+            }"
+            @click="refreshBrowserStatus"
+          >
+            <Connection />
+          </el-icon>
+        </el-tooltip>
       </h2>
       <p class="subtitle">管理 Google 账号、SheerID 认证、自动绑卡订阅</p>
     </div>
@@ -157,9 +188,11 @@ import {
   UserFilled,
   Check,
   CreditCard,
-  MagicStick
+  MagicStick,
+  Connection
 } from '@element-plus/icons-vue'
 import { getGoogleStatistics } from '@/api/google_business'
+import { googleBrowserApi } from '@/api/google'
 
 // const router = useRouter()
 
@@ -181,8 +214,34 @@ const statistics = ref<Statistics>({
   status_breakdown: {},
   today_tasks: 0,
   success_rate: 0,
-  recent_activities: []
+    recent_activities: []
 })
+
+const browserStatus = ref<any>(null)
+const isBrowserStatusLoading = ref(false)
+
+const fetchBrowserStatus = async () => {
+  isBrowserStatusLoading.value = true
+  try {
+    const res = await googleBrowserApi.getStatus()
+    // request.ts interceptor returns raw data, not AxiosResponse
+    browserStatus.value = res
+  } catch (error) {
+    console.error('获取浏览器状态失败', error)
+    browserStatus.value = { engine_online: false, default: 'unknown' }
+  } finally {
+    isBrowserStatusLoading.value = false
+  }
+}
+
+const refreshBrowserStatus = async () => {
+  await fetchBrowserStatus()
+  if (browserStatus.value?.engine_online) {
+    ElMessage.success('浏览器引擎连接正常')
+  } else {
+    ElMessage.warning('浏览器引擎未连接')
+  }
+}
 
 const statusList = computed(() => {
   return Object.entries(statistics.value.status_breakdown).map(([status, count]) => ({
@@ -193,8 +252,23 @@ const statusList = computed(() => {
 
 const loadStatistics = async () => {
   try {
-    const response = await getGoogleStatistics()
-    statistics.value = response.data
+    const raw = await getGoogleStatistics()
+    // Adapt backend statistics/overview payload to the UI shape
+    const status_breakdown = {
+      pending_check: raw?.pending ?? 0,
+      link_ready: raw?.link_ready ?? 0,
+      verified: raw?.verified ?? 0,
+      subscribed: raw?.subscribed ?? 0,
+      ineligible: raw?.ineligible ?? 0,
+      error: raw?.error ?? 0,
+    }
+    statistics.value = {
+      total_accounts: raw?.total ?? 0,
+      status_breakdown,
+      today_tasks: 0,
+      success_rate: 0,
+      recent_activities: [],
+    }
   } catch (error: any) {
     console.error('加载统计数据失败:', error)
     ElMessage.error('加载统计数据失败')
@@ -260,6 +334,7 @@ const formatTime = (datetime: string) => {
 
 onMounted(() => {
   loadStatistics()
+  fetchBrowserStatus()
   // 每30秒刷新一次统计数据
   setInterval(loadStatistics, 30000)
 })
@@ -374,5 +449,35 @@ onMounted(() => {
       margin-bottom: 10px;
     }
   }
+}
+
+.browser-status-icon {
+  margin-left: 12px;
+  vertical-align: middle;
+  cursor: pointer;
+  font-size: 20px;
+  transition: all 0.3s;
+  outline: none;
+  
+  &.is-online {
+    color: #67C23A;
+    &:hover { color: #85ce61; transform: scale(1.1); }
+  }
+  
+  &.is-offline {
+    color: #F56C6C;
+    &:hover { color: #f78989; transform: scale(1.1); }
+  }
+  
+  &.is-loading {
+    animation: rotating 2s linear infinite;
+    cursor: wait;
+    color: #409EFF;
+  }
+}
+
+@keyframes rotating {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
 }
 </style>

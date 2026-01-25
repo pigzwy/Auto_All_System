@@ -1,18 +1,32 @@
 """
-Google账号登录服务
-处理Google账号的自动化登录流程，包括2FA处理
+Google账号登录服务 (统一健壮版本)
+
+整合 PyQt 和 Web 版本的优点：
+- PyQt 的循环检测机制和头像验证
+- Web 的机器人验证等待
+- 统一的错误处理
+
+@author Auto System
+@date 2026-01-24
 """
+
 import asyncio
 import logging
-import pyotp
-from typing import Dict, Any, Optional
-from django.utils import timezone
+import re
+from typing import Dict, Any, Optional, Tuple
 from playwright.async_api import Page, TimeoutError as PlaywrightTimeout
 
+try:
+    import pyotp
+except ImportError:
+    pyotp = None
+
+try:
+    from django.utils import timezone
+except ImportError:
+    timezone = None
+
 from .base import BaseBrowserService
-from .browser_pool import browser_pool
-from apps.integrations.google_accounts.models import GoogleAccount
-from ..models import GoogleTask
 from ..utils import TaskLogger
 
 logger = logging.getLogger(__name__)
@@ -20,296 +34,552 @@ logger = logging.getLogger(__name__)
 
 class GoogleLoginService(BaseBrowserService):
     """
-    Google登录服务
-    
-    提供Google账号的自动化登录功能，支持：
-    - 用户名/密码登录
-    - 2FA/TOTP验证
-    - 备用邮箱验证
-    - 登录状态检测
+    Google登录服务 (统一健壮版本)
+
+    整合 PyQt 和 Web 版本的优点：
+    - 循环检测各种验证步骤
+    - 头像检测确认登录成功
+    - 机器人验证等待
+    - 完整的错误处理
     """
-    
-    LOGIN_URL = "https://accounts.google.com/"
-    
+
+    LOGIN_URL = "https://accounts.google.com/signin"
+    MAX_VERIFICATION_ROUNDS = 10  # 最大验证轮次
+    CAPTCHA_WAIT_TIMEOUT = 120  # 机器人验证等待超时(秒)
+
     def __init__(self):
         """初始化服务"""
         super().__init__()
-        self.logger = logging.getLogger('plugin.google_business.login')
-    
+        self.logger = logging.getLogger("plugin.google_business.login")
+
+    # ==================== 核心登录函数 ====================
+
     async def login(
         self,
         page: Page,
         account_info: Dict[str, Any],
-        task_logger: Optional[TaskLogger] = None
+        task_logger: Optional[TaskLogger] = None,
     ) -> Dict[str, Any]:
         """
-        执行Google账号登录
-        
+        执行Google账号登录 (健壮版本)
+
         Args:
             page: Playwright页面对象
             account_info: 账号信息 {email, password, secret, backup_email}
             task_logger: 任务日志记录器
-            
+
         Returns:
             Dict: 登录结果 {success, message, error}
         """
-        email = account_info.get('email', '')
-        password = account_info.get('password', '')
-        secret = account_info.get('secret') or account_info.get('2fa_secret', '')
-        backup_email = account_info.get('backup') or account_info.get('backup_email', '')
-        
-        if task_logger:
-            task_logger.info(f"开始登录账号: {email}")
-        
+        email = account_info.get("email", "")
+        password = account_info.get("password", "")
+        secret = (
+            account_info.get("secret")
+            or account_info.get("2fa_secret")
+            or account_info.get("secret_key", "")
+        )
+        backup_email = (
+            account_info.get("backup")
+            or account_info.get("backup_email")
+            or account_info.get("recovery_email", "")
+        )
+
+        def log(msg: str):
+            self.logger.info(msg)
+            if task_logger:
+                task_logger.info(msg)
+
+        log(f"开始登录: {email}")
+
         try:
-            # 1. 导航到登录页面
-            self.logger.info(f"Navigating to Google login page for {email}...")
-            await page.goto(self.LOGIN_URL, wait_until='domcontentloaded', timeout=30000)
-            await asyncio.sleep(2)
-            
-            # 2. 输入邮箱
-            if task_logger:
-                task_logger.info("输入邮箱...")
-            
-            email_input = page.locator('input[type="email"]')
-            if await email_input.count() > 0:
-                await email_input.fill(email)
-                await asyncio.sleep(1)
-                
-                # 点击"下一步"
-                next_button = page.locator('button:has-text("Next"), button:has-text("下一步")')
+            # ========== 1. 导航到登录页 ==========
+            try:
+                current_url = page.url
+                if (
+                    "accounts.google.com" not in current_url
+                    and "myaccount.google.com" not in current_url
+                ):
+                    await page.goto(
+                        self.LOGIN_URL, wait_until="domcontentloaded", timeout=30000
+                    )
+                    await asyncio.sleep(2)
+            except Exception as e:
+                log(f"导航异常(可能已在页面): {e}")
+
+            # ========== 2. 输入邮箱 ==========
+            try:
+                email_input = page.locator('input[type="email"]')
+                if (
+                    await email_input.count() > 0
+                    and await email_input.first.is_visible()
+                ):
+                    log("输入邮箱...")
+                    await email_input.first.fill(email)
+                    await asyncio.sleep(0.5)
+
+                    # 点击下一步
+                    next_button = page.locator("#identifierNext >> button")
+                    if await next_button.count() > 0:
+                        await next_button.click()
+                    else:
+                        await email_input.first.press("Enter")
+
+                    await asyncio.sleep(2)
+                else:
+                    # 检查是否在账号选择页面
+                    if await page.locator('text="Choose an account"').count() > 0:
+                        log("检测到账号选择页面")
+                        account_link = page.locator(f'div:has-text("{email}")').first
+                        if await account_link.count() > 0:
+                            await account_link.click()
+                            await asyncio.sleep(2)
+            except Exception as e:
+                log(f"邮箱输入异常: {e}")
+
+            # ========== 3. 等待密码框（支持人工过验证）==========
+            log("等待密码输入框...")
+            password_ready, wait_msg = await self._wait_for_password_input(
+                page, task_logger
+            )
+
+            if not password_ready:
+                return {"success": False, "error": wait_msg}
+
+            # ========== 4. 输入密码 ==========
+            try:
+                log("输入密码...")
+                password_input = page.locator('input[type="password"]')
+                await password_input.first.fill(password)
+                await asyncio.sleep(0.5)
+
+                # 点击下一步
+                next_button = page.locator("#passwordNext >> button")
                 if await next_button.count() > 0:
                     await next_button.click()
-                    await asyncio.sleep(3)
                 else:
-                    # 尝试按Enter键
-                    await email_input.press('Enter')
-                    await asyncio.sleep(3)
-            else:
-                # 可能已经登录，检查是否需要重新登录
-                if await page.locator('text="Choose an account"').count() > 0:
-                    self.logger.info("Account selection page detected")
-                    account_link = page.locator(f'div:has-text("{email}")').first
-                    if await account_link.count() > 0:
-                        await account_link.click()
-                        await asyncio.sleep(2)
-            
-            # 3. 输入密码
-            if task_logger:
-                task_logger.info("输入密码...")
-            
-            password_input = page.locator('input[type="password"]')
-            if await password_input.count() > 0:
-                await password_input.fill(password)
-                await asyncio.sleep(1)
-                
-                # 点击"下一步"
-                next_button = page.locator('button:has-text("Next"), button:has-text("下一步")')
-                if await next_button.count() > 0:
-                    await next_button.click()
+                    await password_input.first.press("Enter")
+
+                await asyncio.sleep(3)
+            except Exception as e:
+                return {"success": False, "error": f"密码输入失败: {e}"}
+
+            # ========== 5. 循环处理各种验证步骤 (PyQt 风格) ==========
+            for i in range(self.MAX_VERIFICATION_ROUNDS):
+                log(f"检查验证步骤 ({i + 1}/{self.MAX_VERIFICATION_ROUNDS})...")
+
+                # 等待页面稳定
+                try:
+                    await page.wait_for_load_state("networkidle", timeout=3000)
+                except:
+                    pass
+
+                # A. 检测是否已登录成功 (头像检测)
+                if await self._check_login_by_avatar(page):
+                    log("✅ 登录成功（检测到头像）")
+                    return {"success": True, "message": "登录成功"}
+
+                # B. 检测错误消息
+                error_msg = await self._detect_error_message(page)
+                if error_msg:
+                    return {"success": False, "error": f"登录失败: {error_msg}"}
+
+                # C. 检测机器人验证
+                if await self._detect_captcha(page):
+                    log("⚠️ 检测到验证码，等待人工处理...")
                     await asyncio.sleep(5)
-                else:
-                    await password_input.press('Enter')
-                    await asyncio.sleep(5)
-            else:
-                return {
-                    'success': False,
-                    'error': 'Password input not found'
-                }
-            
-            # 4. 处理2FA验证（如果需要）
-            # 检查是否出现2FA页面
-            if await page.locator('text="2-Step Verification"').count() > 0 or \
-               await page.locator('text="验证您的身份"').count() > 0 or \
-               await page.locator('input[type="tel"]').count() > 0:
-                
-                if task_logger:
-                    task_logger.info("检测到2FA验证页面...")
-                
-                if secret:
-                    # 使用TOTP密钥生成验证码
-                    self.logger.info("Generating 2FA code from secret...")
-                    try:
-                        totp = pyotp.TOTP(secret)
-                        code = totp.now()
-                        
-                        if task_logger:
-                            task_logger.info(f"输入2FA验证码: {code[:3]}***")
-                        
-                        # 输入验证码
-                        code_input = page.locator('input[type="tel"]')
-                        if await code_input.count() > 0:
-                            await code_input.fill(code)
-                            await asyncio.sleep(1)
-                            
-                            # 点击"下一步"
-                            next_button = page.locator('button:has-text("Next"), button:has-text("下一步")')
-                            if await next_button.count() > 0:
-                                await next_button.click()
-                            else:
-                                await code_input.press('Enter')
-                            
-                            await asyncio.sleep(5)
-                        else:
-                            return {
-                                'success': False,
-                                'error': '2FA code input not found'
-                            }
-                    except Exception as e:
-                        self.logger.error(f"2FA code generation failed: {e}")
-                        return {
-                            'success': False,
-                            'error': f'2FA failed: {str(e)}'
-                        }
-                else:
-                    return {
-                        'success': False,
-                        'error': '2FA required but no secret provided'
-                    }
-            
-            # 5. 处理备用邮箱验证（如果需要）
-            if await page.locator('text="Confirm your recovery email"').count() > 0 or \
-               await page.locator('text="确认您的辅助邮箱"').count() > 0:
-                
-                if task_logger:
-                    task_logger.info("检测到备用邮箱验证...")
-                
-                if backup_email:
-                    recovery_input = page.locator('input[type="email"]')
-                    if await recovery_input.count() > 0:
-                        await recovery_input.fill(backup_email)
-                        await asyncio.sleep(1)
-                        
-                        next_button = page.locator('button:has-text("Next"), button:has-text("下一步")')
-                        if await next_button.count() > 0:
-                            await next_button.click()
-                        else:
-                            await recovery_input.press('Enter')
-                        
-                        await asyncio.sleep(3)
-                else:
-                    self.logger.warning("Backup email verification required but not provided")
-            
-            # 6. 处理"Don't ask again on this device"等选项
-            # 跳过"记住此设备"选项
-            skip_button = page.locator('text="Not now", text="以后再说"')
-            if await skip_button.count() > 0:
-                await skip_button.click()
+                    continue
+
+                # D. 检测 2FA (TOTP)
+                totp_handled = await self._handle_2fa(page, secret, task_logger)
+                if totp_handled == "handled":
+                    continue
+                elif totp_handled == "error":
+                    return {"success": False, "error": "2FA 验证失败或未提供密钥"}
+
+                # E. 检测辅助邮箱验证
+                recovery_handled = await self._handle_recovery_email(
+                    page, backup_email, task_logger
+                )
+                if recovery_handled == "handled":
+                    continue
+                elif recovery_handled == "error":
+                    return {"success": False, "error": "需要辅助邮箱验证但未提供"}
+
+                # F. 处理安全弹窗 ("Not now" 等)
+                await self._handle_security_prompts(page)
+
+                # G. 检查 URL 是否表明登录成功
+                current_url = page.url
+                if (
+                    "myaccount.google.com" in current_url
+                    or "google.com/search" in current_url
+                    or "one.google.com" in current_url
+                ):
+                    log("✅ 登录成功（URL 检测）")
+                    return {"success": True, "message": "登录成功"}
+
                 await asyncio.sleep(2)
-            
-            # 7. 验证登录是否成功
-            # 检查URL变化或特定元素
-            await asyncio.sleep(3)
+
+            # ========== 6. 最终检查 ==========
+            if await self._check_login_by_avatar(page, timeout=5):
+                log("✅ 登录成功")
+                return {"success": True, "message": "登录成功"}
+
             current_url = page.url
-            
-            # 如果URL中包含accounts.google.com/servicelogin或signin，说明可能失败
-            if 'servicelogin' in current_url or 'signin' in current_url:
-                # 检查是否有错误消息
-                error_elem = page.locator('[role="alert"], .error-msg, .Ekjuhf')
-                if await error_elem.count() > 0:
-                    error_text = await error_elem.first.inner_text()
-                    return {
-                        'success': False,
-                        'error': f'Login failed: {error_text}'
-                    }
-            
-            # 检查是否成功到达账号页面
-            if 'myaccount.google.com' in current_url or await page.locator('img[alt*="Profile"]').count() > 0:
-                self.logger.info(f"Login successful for {email}")
-                if task_logger:
-                    task_logger.info("✅ 登录成功")
-                
-                return {
-                    'success': True,
-                    'message': 'Login successful'
-                }
-            
-            # 默认情况：假设登录成功（某些情况下可能停留在其他页面）
-            self.logger.info(f"Login completed for {email} (assuming success)")
-            if task_logger:
-                task_logger.info("登录流程完成")
-            
-            return {
-                'success': True,
-                'message': 'Login process completed'
-            }
-            
+            if "myaccount.google.com" in current_url:
+                log("✅ 登录成功（URL）")
+                return {"success": True, "message": "登录成功"}
+
+            return {"success": False, "error": "登录超时或失败"}
+
         except PlaywrightTimeout as e:
             error_msg = f"Login timeout: {str(e)}"
             self.logger.error(error_msg)
             if task_logger:
                 task_logger.error(error_msg)
-            return {
-                'success': False,
-                'error': error_msg
-            }
+            return {"success": False, "error": error_msg}
         except Exception as e:
             error_msg = f"Login failed: {str(e)}"
             self.logger.error(error_msg, exc_info=True)
             if task_logger:
                 task_logger.error(error_msg)
-            return {
-                'success': False,
-                'error': error_msg
-            }
-    
-    async def check_login_status(
+            return {"success": False, "error": error_msg}
+
+    # ==================== 头像检测登录状态 (PyQt 风格) ====================
+
+    async def _check_login_by_avatar(self, page: Page, timeout: float = 3.0) -> bool:
+        """
+        通过检测头像按钮判断是否已登录 (PyQt 风格)
+
+        Args:
+            page: Playwright 页面对象
+            timeout: 超时时间(秒)
+
+        Returns:
+            True=已登录, False=未登录
+        """
+        try:
+            # 头像按钮选择器 (多个备选)
+            avatar_selectors = [
+                'a[aria-label*="Google Account"] img.gbii',
+                'a.gb_B[role="button"] img',
+                'a[href*="SignOutOptions"] img',
+                "img.gb_Q.gbii",
+                'a[aria-label*="Google 帐号"] img',
+                'a[aria-label*="Google 账号"] img',
+                'img[alt*="Profile"]',
+                "[data-ogsr-up]",
+            ]
+
+            # 快速检测
+            for selector in avatar_selectors:
+                try:
+                    locator = page.locator(selector).first
+                    if await locator.count() > 0 and await locator.is_visible():
+                        return True
+                except:
+                    continue
+
+            return False
+
+        except Exception as e:
+            self.logger.warning(f"登录检测异常: {e}")
+            return False
+
+    # ==================== 机器人验证检测 ====================
+
+    async def _detect_captcha(self, page: Page) -> bool:
+        """检测是否有机器人验证"""
+        captcha_indicators = [
+            'iframe[src*="recaptcha"]',
+            'iframe[title*="reCAPTCHA"]',
+            'text="Verify it\'s you"',
+            'text="验证您不是机器人"',
+            'text="Confirm you\'re not a robot"',
+            "#captchaimg",
+            'text="Before you continue"',
+            'text="Unusual traffic"',
+            "[data-recaptcha]",
+        ]
+
+        try:
+            for indicator in captcha_indicators:
+                if await page.locator(indicator).count() > 0:
+                    return True
+            return False
+        except:
+            return False
+
+    # ==================== 错误消息检测 ====================
+
+    async def _detect_error_message(self, page: Page) -> Optional[str]:
+        """检测登录错误消息"""
+        error_selectors = [
+            '[role="alert"]',
+            ".error-msg",
+            ".Ekjuhf",
+            'text="Wrong password"',
+            'text="密码错误"',
+            'text="Couldn\'t find your Google Account"',
+            'text="找不到您的 Google 帐号"',
+        ]
+
+        try:
+            for selector in error_selectors:
+                locator = page.locator(selector)
+                if await locator.count() > 0 and await locator.first.is_visible():
+                    return await locator.first.inner_text()
+            return None
+        except:
+            return None
+
+    # ==================== 等待密码输入框 ====================
+
+    async def _wait_for_password_input(
+        self, page: Page, task_logger: Optional[TaskLogger] = None
+    ) -> Tuple[bool, str]:
+        """等待密码输入框出现（支持人工过验证）"""
+        password_input = page.locator('input[type="password"]')
+        max_wait_seconds = self.CAPTCHA_WAIT_TIMEOUT
+        wait_interval = 2
+        waited = 0
+        captcha_warned = False
+
+        while waited < max_wait_seconds:
+            # 检查密码框是否出现
+            if (
+                await password_input.count() > 0
+                and await password_input.first.is_visible()
+            ):
+                return True, "密码框已出现"
+
+            # 检测错误消息
+            error_msg = await self._detect_error_message(page)
+            if error_msg:
+                return False, f"登录错误: {error_msg}"
+
+            # 检测机器人验证
+            if await self._detect_captcha(page):
+                if not captcha_warned:
+                    if task_logger:
+                        task_logger.warning("⚠️ 检测到机器人验证，请手动完成验证...")
+                    captcha_warned = True
+                self.logger.info(f"等待人工验证... ({waited}s/{max_wait_seconds}s)")
+            else:
+                if waited > 0 and waited % 10 == 0:
+                    if task_logger:
+                        task_logger.info(f"等待页面加载... ({waited}s)")
+
+            await asyncio.sleep(wait_interval)
+            waited += wait_interval
+
+        # 超时
+        if await self._detect_captcha(page):
+            return False, f"需要人工验证但超时未完成（等待了{max_wait_seconds}秒）"
+        else:
+            return False, "等待密码输入框超时"
+
+    # ==================== 2FA 处理 ====================
+
+    async def _handle_2fa(
         self,
-        page: Page
-    ) -> bool:
+        page: Page,
+        secret: str,
+        task_logger: Optional[TaskLogger] = None,
+    ) -> str:
+        """
+        处理 2FA 验证
+
+        Returns:
+            "handled" - 已处理
+            "not_needed" - 不需要
+            "error" - 处理失败
+        """
+        totp_selectors = [
+            'input[name="totpPin"]',
+            'input[id="totpPin"]',
+            'input[type="tel"][name="Pin"]',
+            'input[type="tel"]',
+        ]
+
+        for selector in totp_selectors:
+            totp_input = page.locator(selector)
+            if await totp_input.count() > 0 and await totp_input.first.is_visible():
+                if task_logger:
+                    task_logger.info("检测到 2FA 输入框")
+
+                if secret and pyotp:
+                    try:
+                        s = secret.replace(" ", "").strip()
+                        totp = pyotp.TOTP(s)
+                        code = totp.now()
+
+                        if task_logger:
+                            task_logger.info(f"输入 2FA 验证码: {code[:3]}***")
+
+                        await totp_input.first.fill(code)
+                        await asyncio.sleep(0.5)
+
+                        # 点击下一步
+                        next_btn = page.locator("#totpNext >> button")
+                        if await next_btn.count() > 0:
+                            await next_btn.click()
+                        else:
+                            await totp_input.first.press("Enter")
+
+                        await asyncio.sleep(3)
+                        return "handled"
+                    except Exception as e:
+                        self.logger.error(f"2FA 验证失败: {e}")
+                        return "error"
+                else:
+                    self.logger.warning("需要 2FA 验证但未提供密钥")
+                    return "error"
+
+        return "not_needed"
+
+    # ==================== 辅助邮箱验证处理 ====================
+
+    async def _handle_recovery_email(
+        self,
+        page: Page,
+        backup_email: str,
+        task_logger: Optional[TaskLogger] = None,
+    ) -> str:
+        """
+        处理辅助邮箱验证
+
+        Returns:
+            "handled" - 已处理
+            "not_needed" - 不需要
+            "error" - 处理失败
+        """
+        recovery_indicators = [
+            'text="Confirm your recovery email"',
+            'text="确认您的辅助邮箱"',
+            'text="Enter recovery email"',
+            'input[id="knowledge-preregistered-email-response"]',
+        ]
+
+        for indicator in recovery_indicators:
+            if await page.locator(indicator).count() > 0:
+                if task_logger:
+                    task_logger.info("检测到辅助邮箱验证")
+
+                if backup_email:
+                    try:
+                        # 先尝试点击选项
+                        option = page.locator(
+                            'div[role="link"]:has-text("Confirm your recovery email")'
+                        )
+                        if await option.count() > 0 and await option.first.is_visible():
+                            await option.first.click()
+                            await asyncio.sleep(2)
+
+                        # 输入辅助邮箱
+                        recovery_input = page.locator(
+                            'input[id="knowledge-preregistered-email-response"], '
+                            'input[name="knowledgePreregisteredEmailResponse"]'
+                        )
+                        if await recovery_input.count() > 0:
+                            if task_logger:
+                                task_logger.info(f"输入辅助邮箱: {backup_email}")
+                            await recovery_input.first.fill(backup_email)
+                            await asyncio.sleep(0.5)
+
+                            # 点击下一步
+                            next_btn = page.locator(
+                                'button:has-text("Next"), button:has-text("下一步")'
+                            )
+                            if await next_btn.count() > 0:
+                                await next_btn.first.click()
+                            else:
+                                await recovery_input.first.press("Enter")
+
+                            await asyncio.sleep(3)
+                            return "handled"
+                    except Exception as e:
+                        self.logger.error(f"辅助邮箱验证异常: {e}")
+                else:
+                    return "error"
+
+        return "not_needed"
+
+    # ==================== 安全弹窗处理 ====================
+
+    async def _handle_security_prompts(self, page: Page):
+        """处理安全弹窗 (Not now 等)"""
+        skip_buttons = [
+            'button:has-text("Not now")',
+            'button:has-text("Cancel")',
+            'button:has-text("No thanks")',
+            'button:has-text("暂不")',
+            'button:has-text("取消")',
+            'button:has-text("以后再说")',
+        ]
+
+        for btn_selector in skip_buttons:
+            btn = page.locator(btn_selector).first
+            try:
+                if await btn.count() > 0 and await btn.is_visible():
+                    self.logger.info("跳过安全提示弹窗...")
+                    await btn.click()
+                    await asyncio.sleep(1)
+                    break
+            except:
+                pass
+
+    # ==================== 登录状态检查 ====================
+
+    async def check_login_status(self, page: Page) -> bool:
         """
         检查是否已登录
-        
+
         Args:
             page: Playwright页面对象
-            
+
         Returns:
             bool: 是否已登录
         """
         try:
+            # 先用头像检测
+            if await self._check_login_by_avatar(page):
+                return True
+
             # 访问Google账号页面
-            await page.goto('https://myaccount.google.com/', timeout=15000)
+            await page.goto("https://myaccount.google.com/", timeout=15000)
             await asyncio.sleep(2)
-            
+
             # 检查是否需要登录
             current_url = page.url
-            if 'accounts.google.com/servicelogin' in current_url or \
-               'accounts.google.com/signin' in current_url:
+            if (
+                "accounts.google.com/servicelogin" in current_url
+                or "accounts.google.com/signin" in current_url
+            ):
                 return False
-            
-            # 检查是否有用户头像或名称
-            if await page.locator('img[alt*="Profile"]').count() > 0 or \
-               await page.locator('[data-ogsr-up]').count() > 0:
-                return True
-            
-            return False
-            
+
+            # 再次用头像检测
+            return await self._check_login_by_avatar(page)
+
         except Exception as e:
             self.logger.error(f"Error checking login status: {e}")
             return False
-    
-    async def logout(
-        self,
-        page: Page
-    ) -> bool:
+
+    async def logout(self, page: Page) -> bool:
         """
         退出登录
-        
+
         Args:
             page: Playwright页面对象
-            
+
         Returns:
             bool: 是否成功
         """
         try:
-            # 访问退出登录URL
-            await page.goto('https://accounts.google.com/Logout', timeout=15000)
+            await page.goto("https://accounts.google.com/Logout", timeout=15000)
             await asyncio.sleep(2)
-            
             self.logger.info("Logged out successfully")
             return True
-            
         except Exception as e:
             self.logger.error(f"Logout failed: {e}")
             return False
-

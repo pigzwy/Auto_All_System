@@ -182,6 +182,11 @@ export interface GoogleAccount {
   recovery_email?: string
   status: string
   status_display?: string
+  google_one_status?: string | null
+  type_tag?: string
+  type_display?: string
+  geekez_profile_exists?: boolean
+  geekez_env?: any
   sheerid_verified: boolean
   sheerid_link?: string
   gemini_status?: string
@@ -192,4 +197,3 @@ export interface GoogleAccount {
   created_at: string
   updated_at: string
 }
-

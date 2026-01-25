@@ -65,15 +65,17 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, onMounted, onUnmounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Check } from '@element-plus/icons-vue'
-import { googleAccountsApi } from '@/api/google'
+import { googleAccountsApi, googleTasksApi } from '@/api/google'
 import type { GoogleAccount } from '@/types'
 
 const verifying = ref(false)
 const availableAccounts = ref<GoogleAccount[]>([])
 const verificationResults = ref<any[]>([])
+const currentTaskId = ref<number | null>(null)
+const pollingTimer = ref<number | null>(null)
 
 const sheeridForm = reactive({
   accounts: [] as number[],
@@ -85,7 +87,14 @@ const sheeridForm = reactive({
 const fetchAvailableAccounts = async () => {
   try {
     const response = await googleAccountsApi.getAccounts({ page_size: 100 })
-    availableAccounts.value = response.results
+    // 兼容后端返回数组或分页对象两种情况
+    if (Array.isArray(response)) {
+      availableAccounts.value = response
+    } else if (response.results) {
+      availableAccounts.value = response.results
+    } else {
+      availableAccounts.value = []
+    }
   } catch (error) {
     ElMessage.error('获取账号列表失败')
   }
@@ -105,30 +114,94 @@ const startVerification = async () => {
   verifying.value = true
   verificationResults.value = []
 
-  for (const accountId of sheeridForm.accounts) {
-    const account = availableAccounts.value.find(a => a.id === accountId)
-    if (!account) continue
-
-    // 模拟验证过程
-    await sleep(2000)
-
-    const success = Math.random() > 0.3 // 70% 成功率
-    verificationResults.value.push({
-      email: account.email,
-      success: success,
-      message: success ? 'SheerID验证通过' : 'SheerID验证失败，请检查学生信息',
-      time: new Date().toLocaleTimeString()
+  try {
+    // 调用后端API创建SheerID验证任务
+    const response = await googleTasksApi.createTask({
+      task_type: 'verify',
+      account_ids: sheeridForm.accounts,
+      config: {
+        student_name: sheeridForm.studentName,
+        student_email: sheeridForm.studentEmail,
+        school_name: sheeridForm.schoolName
+      }
     })
-  }
 
-  verifying.value = false
-  ElMessage.success('验证完成')
+    if (response.success && response.task_id) {
+      currentTaskId.value = response.task_id
+      ElMessage.success(`任务已创建，任务ID: ${response.task_id}`)
+      
+      // 开始轮询任务状态
+      startPolling(response.task_id)
+    } else {
+      throw new Error(response.error || response.message || '任务创建失败')
+    }
+  } catch (error: any) {
+    verifying.value = false
+    const errorMsg = error.response?.data?.error || error.message || '任务创建失败'
+    ElMessage.error(errorMsg)
+  }
 }
 
-const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
+const startPolling = (taskId: number) => {
+  // 每2秒轮询一次任务状态
+  pollingTimer.value = window.setInterval(async () => {
+    try {
+      const taskInfo = await googleTasksApi.getTask(taskId)
+      
+      // 获取任务账号列表更新详细进度
+      const accountsInfo = await googleTasksApi.getTaskAccounts(taskId)
+      if (accountsInfo.accounts) {
+        for (const acc of accountsInfo.accounts) {
+          const accountId = acc.account ?? acc.account_id
+          const email = acc.account_email || availableAccounts.value.find(a => a.id === accountId)?.email || `账号${accountId}`
+
+          // 检查是否已经有这个账号的最终结果
+          const existingResult = verificationResults.value.find(r => r.email === email)
+          if (existingResult) continue
+
+          if (acc.status === 'success' || acc.status === 'failed' || acc.status === 'skipped') {
+            verificationResults.value.push({
+              email,
+              success: acc.status === 'success',
+              message: acc.result_message || (acc.status === 'success' ? 'SheerID验证通过' : `验证失败: ${acc.error_message || '未知错误'}`),
+              time: new Date().toLocaleTimeString()
+            })
+          }
+        }
+      }
+
+      // 检查任务是否完成
+      if (taskInfo.status === 'completed' || taskInfo.status === 'failed' || taskInfo.status === 'cancelled') {
+        stopPolling()
+        verifying.value = false
+        
+        if (taskInfo.status === 'completed') {
+          ElMessage.success(`验证完成！成功: ${taskInfo.success_count}, 失败: ${taskInfo.failed_count}`)
+        } else if (taskInfo.status === 'failed') {
+          ElMessage.error('任务执行失败')
+        } else {
+          ElMessage.warning('任务已取消')
+        }
+      }
+    } catch (error) {
+      console.error('轮询任务状态失败:', error)
+    }
+  }, 2000)
+}
+
+const stopPolling = () => {
+  if (pollingTimer.value) {
+    clearInterval(pollingTimer.value)
+    pollingTimer.value = null
+  }
+}
 
 onMounted(() => {
   fetchAvailableAccounts()
+})
+
+onUnmounted(() => {
+  stopPolling()
 })
 </script>
 
@@ -168,4 +241,3 @@ onMounted(() => {
   }
 }
 </style>
-

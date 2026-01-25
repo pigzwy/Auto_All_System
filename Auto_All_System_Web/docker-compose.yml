@@ -40,6 +40,9 @@ services:
       - ./backend:/app
       - static_volume:/app/staticfiles
       - media_volume:/app/media
+      # Mount GeekezBrowser profile storage from host (Windows default).
+      # If your Windows username differs, update this path.
+      - C:/Users/pig/AppData/Roaming/geekez-browser/BrowserProfiles:/geekez-browser/BrowserProfiles
     ports:
       - "8000:8000"
     env_file:
@@ -55,6 +58,7 @@ services:
       # Redis配置
       - REDIS_URL=redis://redis:6379/1
       - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/1
       # HTTP配置
       - ENABLE_HTTPS=false
       - ALLOWED_HOSTS=localhost,127.0.0.1,backend
@@ -63,6 +67,8 @@ services:
       # GeekezBrowser API（使用host.docker.internal访问宿主机）
       - GEEKEZ_API_HOST=host.docker.internal
       - GEEKEZ_API_PORT=19527
+      # GeekezBrowser profiles.json/settings.json directory inside container
+      - GEEKEZ_DATA_DIR=/geekez-browser/BrowserProfiles
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:
@@ -87,6 +93,7 @@ services:
       - "host.docker.internal:host-gateway"
     volumes:
       - ./backend:/app
+      - C:/Users/pig/AppData/Roaming/geekez-browser/BrowserProfiles:/geekez-browser/BrowserProfiles
     env_file:
       - ./backend/.env
     environment:
@@ -100,11 +107,13 @@ services:
       # Redis配置
       - REDIS_URL=redis://redis:6379/1
       - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/1
       # 比特浏览器API
       - BITBROWSER_API_URL=http://host.docker.internal:54345
       # GeekezBrowser API
       - GEEKEZ_API_HOST=host.docker.internal
       - GEEKEZ_API_PORT=19527
+      - GEEKEZ_DATA_DIR=/geekez-browser/BrowserProfiles
     depends_on:
       - db
       - redis
@@ -121,6 +130,7 @@ services:
       - "host.docker.internal:host-gateway"
     volumes:
       - ./backend:/app
+      - C:/Users/pig/AppData/Roaming/geekez-browser/BrowserProfiles:/geekez-browser/BrowserProfiles
     env_file:
       - ./backend/.env
     environment:
@@ -134,11 +144,13 @@ services:
       # Redis配置
       - REDIS_URL=redis://redis:6379/1
       - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/1
       # 比特浏览器API
       - BITBROWSER_API_URL=http://host.docker.internal:54345
       # GeekezBrowser API
       - GEEKEZ_API_HOST=host.docker.internal
       - GEEKEZ_API_PORT=19527
+      - GEEKEZ_DATA_DIR=/geekez-browser/BrowserProfiles
     depends_on:
       - db
       - redis
@@ -161,4 +173,3 @@ volumes:
   postgres_data:
   static_volume:
   media_volume:
-

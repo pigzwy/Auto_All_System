@@ -50,6 +50,64 @@ export const googleAccountsApi = {
   // 一键自动化
   automate(accountId: number): Promise<ApiResponse<any>> {
     return request.post(`/plugins/google-business/accounts/${accountId}/automate/`)
+  },
+
+  // 获取账号关联任务/操作历史（账号管理页使用）
+  getAccountTasks(accountId: number): Promise<ApiResponse<any>> {
+    return request.get(`/plugins/google-business/accounts/${accountId}/tasks/`)
+  },
+
+  // 启动 Geekez 浏览器环境
+  launchGeekez(accountId: number): Promise<ApiResponse<any>> {
+    return request.post(`/plugins/google-business/accounts/${accountId}/launch_geekez/`)
+  },
+
+  // 编辑账号（支持密码/2FA/恢复邮箱/备注）
+  editAccount(accountId: number, data: any): Promise<ApiResponse<any>> {
+    return request.patch(`/plugins/google-business/accounts/${accountId}/edit/`, data)
+  },
+
+  // 导出 TXT（Blob）
+  exportTxt(ids?: number[]): Promise<any> {
+    return request.post('/plugins/google-business/accounts/export_txt/', { ids: ids || [] }, { responseType: 'blob' })
+  },
+
+  // 导出 CSV（Blob）
+  exportCsv(ids?: number[]): Promise<any> {
+    return request.post('/plugins/google-business/accounts/export_csv/', { ids: ids || [] }, { responseType: 'blob' })
+  }
+}
+
+// Google 任务管理 API（用于 OneClick/SheerID/BindCard 等模块）
+// 对应后端：/api/v1/plugins/google-business/tasks/
+export const googleTasksApi = {
+  // 创建任务
+  createTask(data: {
+    task_type: string
+    account_ids: number[]
+    config?: Record<string, any>
+  }): Promise<any> {
+    return request.post('/plugins/google-business/tasks/', data)
+  },
+
+  // 获取任务详情
+  getTask(taskId: number | string): Promise<any> {
+    return request.get(`/plugins/google-business/tasks/${taskId}/`)
+  },
+
+  // 获取任务日志
+  getTaskLog(taskId: number | string): Promise<any> {
+    return request.get(`/plugins/google-business/tasks/${taskId}/log/`)
+  },
+
+  // 获取任务账号执行明细
+  getTaskAccounts(taskId: number | string, params?: any): Promise<any> {
+    return request.get(`/plugins/google-business/tasks/${taskId}/accounts/`, { params })
+  },
+
+  // 取消任务（如后端支持）
+  cancelTask(taskId: number | string): Promise<any> {
+    return request.post(`/plugins/google-business/tasks/${taskId}/cancel/`)
   }
 }
 
@@ -137,5 +195,24 @@ export const googleSubscriptionApi = {
   // 点击订阅按钮
   clickSubscribe(data: { account_ids: number[]; browser_type?: string }): Promise<ApiResponse<any>> {
     return request.post('/plugins/google-business/subscription/click_subscribe/', data)
+  },
+
+  // 获取订阅验证截图（需要鉴权，返回 Blob）
+  getScreenshot(file: string): Promise<any> {
+    return request.get('/plugins/google-business/subscription/screenshot/', {
+      params: { file },
+      responseType: 'blob',
+    })
+  }
+}
+
+// Google Celery 任务查询 API（用于 security/subscription 的 task_id 轮询）
+export const googleCeleryTasksApi = {
+  getTask(taskId: string): Promise<ApiResponse<any>> {
+    return request.get(`/plugins/google-business/celery-tasks/${taskId}/`)
+  },
+
+  cancel(taskId: string): Promise<ApiResponse<any>> {
+    return request.post(`/plugins/google-business/celery-tasks/${taskId}/cancel/`)
   }
 }

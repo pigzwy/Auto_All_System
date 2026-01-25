@@ -12,9 +12,6 @@
         class="mb-4"
       />
 
-      <!-- 浏览器选择 -->
-      <BrowserSelector v-model="selectedBrowser" class="mb-4" />
-
       <el-form :model="securityForm" label-width="120px">
         <el-form-item label="选择账号">
           <el-select v-model="securityForm.accounts" multiple placeholder="请选择账号" style="width: 100%">
@@ -103,17 +100,16 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, onMounted, onBeforeUnmount } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Lock } from '@element-plus/icons-vue'
-import { googleAccountsApi, googleSecurityApi } from '@/api/google'
-import BrowserSelector from '@/components/BrowserSelector.vue'
+import { googleAccountsApi, googleSecurityApi, googleCeleryTasksApi } from '@/api/google'
 import type { GoogleAccount } from '@/types'
 
 const processing = ref(false)
 const availableAccounts = ref<GoogleAccount[]>([])
 const taskResults = ref<any[]>([])
-const selectedBrowser = ref('bitbrowser')
+const pollingTimer = ref<number | null>(null)
 
 const secretDialogVisible = ref(false)
 const codesDialogVisible = ref(false)
@@ -130,10 +126,25 @@ onMounted(async () => {
   await loadAccounts()
 })
 
+onBeforeUnmount(() => {
+  if (pollingTimer.value) {
+    window.clearInterval(pollingTimer.value)
+    pollingTimer.value = null
+  }
+})
+
 async function loadAccounts() {
   try {
-    const response = await googleAccountsApi.getAccounts()
-    availableAccounts.value = response.results || []
+    const response = await googleAccountsApi.getAccounts({ page_size: 100 })
+
+    // 兼容后端返回数组或分页对象两种情况
+    if (Array.isArray(response)) {
+      availableAccounts.value = response
+    } else if (response?.results) {
+      availableAccounts.value = response.results
+    } else {
+      availableAccounts.value = []
+    }
   } catch (error) {
     console.error('Failed to load accounts:', error)
     ElMessage.error('加载账号列表失败')
@@ -157,7 +168,6 @@ async function startSecurityTask() {
   try {
     const params = {
       account_ids: securityForm.accounts,
-      browser_type: selectedBrowser.value,
       new_email: securityForm.newEmail,
     }
 
@@ -177,30 +187,84 @@ async function startSecurityTask() {
         break
     }
 
-    if (response) {
-      ElMessage.success(`任务已提交，任务ID: ${response.data.task_id}`)
-      
-      // 轮询任务状态
-      pollTaskStatus(response.data.task_id)
+    if (!response || !response.task_id) {
+      throw new Error(response?.error || response?.message || '任务提交失败')
     }
+
+    ElMessage.success(`任务已提交，任务ID: ${response.task_id}`)
+
+    // 轮询任务状态
+    pollTaskStatus(String(response.task_id))
   } catch (error: any) {
     ElMessage.error(error.response?.data?.error || '任务提交失败')
-  } finally {
     processing.value = false
+  } finally {
+    // processing 在轮询结束时置回 false
   }
 }
 
-async function pollTaskStatus(_taskId: string) {
-  // TODO: 实现任务状态轮询
-  // 临时模拟
-  setTimeout(() => {
-    taskResults.value = securityForm.accounts.map(id => ({
-      email: availableAccounts.value.find(a => a.id === id)?.email || 'unknown',
-      success: true,
-      message: '操作完成',
-      new_secret: securityForm.action === 'change_2fa' ? 'NEWBASE32SECRET' : null,
-      backup_codes: securityForm.action === 'get_backup_codes' ? ['12345678', '87654321'] : null,
-    }))
+async function pollTaskStatus(taskId: string) {
+  if (pollingTimer.value) {
+    window.clearInterval(pollingTimer.value)
+    pollingTimer.value = null
+  }
+
+  const pollOnce = async () => {
+    const status = await googleCeleryTasksApi.getTask(taskId)
+
+    if (status.state === 'PROGRESS') {
+      // 可选：这里可以展示进度（当前代码先不改 UI，只保留真实轮询）
+      return
+    }
+
+    if (status.state === 'SUCCESS') {
+      const res = status.result || {}
+      const rawResults: any[] = Array.isArray(res.results) ? res.results : []
+
+      // 兼容 one_click 返回 data 字段：把常用字段拍平到表格可展示的 new_secret / backup_codes
+      taskResults.value = rawResults.map((r) => {
+        const data = r.data || {}
+        return {
+          ...r,
+          new_secret: r.new_secret || data.new_2fa_secret || null,
+          backup_codes: r.backup_codes || data.backup_codes || [],
+        }
+      })
+
+      if (pollingTimer.value) {
+        window.clearInterval(pollingTimer.value)
+        pollingTimer.value = null
+      }
+      processing.value = false
+      return
+    }
+
+    if (status.state === 'FAILURE') {
+      if (pollingTimer.value) {
+        window.clearInterval(pollingTimer.value)
+        pollingTimer.value = null
+      }
+      processing.value = false
+      ElMessage.error(status.error || '任务执行失败')
+    }
+  }
+
+  // 立即拉一次，避免首屏空等
+  try {
+    await pollOnce()
+  } catch (e: any) {
+    processing.value = false
+    ElMessage.error(e?.message || '任务状态查询失败')
+    return
+  }
+
+  pollingTimer.value = window.setInterval(async () => {
+    try {
+      await pollOnce()
+    } catch (e: any) {
+      // 网络抖动：继续轮询
+      console.error('pollTaskStatus failed:', e)
+    }
   }, 2000)
 }
 

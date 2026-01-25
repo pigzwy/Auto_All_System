@@ -126,8 +126,11 @@ export function getAccountStats() {
  * 获取Google统计信息（别名）
  */
 export function getGoogleStatistics() {
-  return request({
-    url: '/plugins/google-business/accounts/stats/',
+  // NOTE: request.ts interceptor returns response.data (not AxiosResponse).
+  // Use Axios generics so TS infers the resolved type as the payload.
+  return request.request<any, any>({
+    // Backend provides statistics under statistics/overview/
+    url: '/plugins/google-business/statistics/overview/',
     method: 'get'
   })
 }
@@ -541,4 +544,3 @@ export default {
   getWebSocketUrl,
   subscribeTaskProgress
 }
-

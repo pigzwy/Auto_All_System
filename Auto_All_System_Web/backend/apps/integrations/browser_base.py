@@ -100,6 +100,9 @@ class BrowserManager:
 
     def __init__(self):
         self._apis: Dict[BrowserType, BaseBrowserAPI] = {}
+        # NOTE: Prefer GeekezBrowser as default when available.
+        # We still register BitBrowser and keep all its code paths untouched.
+        # If GeekezBrowser is not registered/available, fallback remains BitBrowser.
         self._default_type: BrowserType = BrowserType.BITBROWSER
 
     def register(self, api: BaseBrowserAPI) -> None:
@@ -169,11 +172,17 @@ def _init_default_browsers():
     """初始化默认浏览器"""
     global _browser_manager
 
+    if _browser_manager is None:
+        # 正常情况下不会发生（由 get_browser_manager 初始化）
+        _browser_manager = BrowserManager()
+
+    manager = _browser_manager
+
     # 注册比特浏览器
     try:
         from apps.integrations.bitbrowser.adapter import BitBrowserAdapter
 
-        _browser_manager.register(BitBrowserAdapter())
+        manager.register(BitBrowserAdapter())
     except Exception:
         pass
 
@@ -181,6 +190,16 @@ def _init_default_browsers():
     try:
         from apps.integrations.geekez.adapter import GeekezBrowserAdapter
 
-        _browser_manager.register(GeekezBrowserAdapter())
+        manager.register(GeekezBrowserAdapter())
     except Exception:
+        pass
+
+    # 默认浏览器选择策略：优先 GeekezBrowser
+    # 这样新增功能（安全设置/订阅验证等）默认走 GeekezBrowser，
+    # 同时保留 BitBrowser 的所有功能且不需要改动其实现。
+    try:
+        if BrowserType.GEEKEZ in manager._apis:
+            manager.set_default(BrowserType.GEEKEZ)
+    except Exception:
+        # 保持现有默认值即可
         pass

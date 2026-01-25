@@ -12,9 +12,6 @@
         class="mb-4"
       />
 
-      <!-- 浏览器选择 -->
-      <BrowserSelector v-model="selectedBrowser" class="mb-4" />
-
       <el-form :model="subscriptionForm" label-width="120px">
         <el-form-item label="选择账号">
           <el-select v-model="subscriptionForm.accounts" multiple placeholder="请选择账号" style="width: 100%">
@@ -89,21 +86,22 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, onMounted, onBeforeUnmount } from 'vue'
 import { ElMessage } from 'element-plus'
 import { View, CircleCheck } from '@element-plus/icons-vue'
-import { googleAccountsApi, googleSubscriptionApi } from '@/api/google'
-import BrowserSelector from '@/components/BrowserSelector.vue'
+import { googleAccountsApi, googleSubscriptionApi, googleCeleryTasksApi } from '@/api/google'
 import type { GoogleAccount } from '@/types'
 
 const processing = ref(false)
 const subscribing = ref(false)
 const availableAccounts = ref<GoogleAccount[]>([])
 const verifyResults = ref<any[]>([])
-const selectedBrowser = ref('bitbrowser')
+const pollingTimer = ref<number | null>(null)
+const currentTaskId = ref<string>('')
 
 const screenshotDialogVisible = ref(false)
 const currentScreenshot = ref('')
+const currentScreenshotObjectUrl = ref<string | null>(null)
 
 const subscriptionForm = reactive({
   accounts: [] as number[],
@@ -114,10 +112,30 @@ onMounted(async () => {
   await loadAccounts()
 })
 
+onBeforeUnmount(() => {
+  if (pollingTimer.value) {
+    window.clearInterval(pollingTimer.value)
+    pollingTimer.value = null
+  }
+
+  if (currentScreenshotObjectUrl.value) {
+    URL.revokeObjectURL(currentScreenshotObjectUrl.value)
+    currentScreenshotObjectUrl.value = null
+  }
+})
+
 async function loadAccounts() {
   try {
-    const response = await googleAccountsApi.getAccounts()
-    availableAccounts.value = response.results || []
+    const response = await googleAccountsApi.getAccounts({ page_size: 100 })
+
+    // 兼容后端返回数组或分页对象两种情况
+    if (Array.isArray(response)) {
+      availableAccounts.value = response
+    } else if (response?.results) {
+      availableAccounts.value = response.results
+    } else {
+      availableAccounts.value = []
+    }
   } catch (error) {
     console.error('Failed to load accounts:', error)
     ElMessage.error('加载账号列表失败')
@@ -137,17 +155,19 @@ async function verifyStatus() {
     const response = await googleSubscriptionApi.verifyStatus({
       account_ids: subscriptionForm.accounts,
       take_screenshot: subscriptionForm.takeScreenshot,
-      browser_type: selectedBrowser.value,
     })
 
-    ElMessage.success(`验证任务已提交，任务ID: ${response.data.task_id}`)
-    
-    // TODO: 实现任务状态轮询
-    pollTaskStatus(response.data.task_id, 'verify')
+    if (!response || !response.task_id) {
+      throw new Error(response?.error || response?.message || '任务提交失败')
+    }
+
+    ElMessage.success(`验证任务已提交，任务ID: ${response.task_id}`)
+    pollTaskStatus(String(response.task_id))
   } catch (error: any) {
     ElMessage.error(error.response?.data?.error || '任务提交失败')
-  } finally {
     processing.value = false
+  } finally {
+    // processing 在轮询结束时置回 false
   }
 }
 
@@ -162,28 +182,91 @@ async function clickSubscribe() {
   try {
     const response = await googleSubscriptionApi.clickSubscribe({
       account_ids: subscriptionForm.accounts,
-      browser_type: selectedBrowser.value,
     })
 
-    ElMessage.success(`订阅任务已提交，任务ID: ${response.data.task_id}`)
-    
-    pollTaskStatus(response.data.task_id, 'subscribe')
+    if (!response || !response.task_id) {
+      throw new Error(response?.error || response?.message || '任务提交失败')
+    }
+
+    ElMessage.success(`订阅任务已提交，任务ID: ${response.task_id}`)
+    pollTaskStatus(String(response.task_id))
   } catch (error: any) {
     ElMessage.error(error.response?.data?.error || '任务提交失败')
-  } finally {
     subscribing.value = false
+  } finally {
+    // subscribing 在轮询结束时置回 false
   }
 }
 
-function pollTaskStatus(_taskId: string, type: string) {
-  // 临时模拟
-  setTimeout(() => {
-    verifyResults.value = subscriptionForm.accounts.map(id => ({
-      email: availableAccounts.value.find(a => a.id === id)?.email || 'unknown',
-      success: true,
-      status: { status: type === 'subscribe' ? 'subscribed' : 'verified' },
-      screenshot: subscriptionForm.takeScreenshot ? '/screenshots/example.png' : null,
-    }))
+async function pollTaskStatus(taskId: string) {
+  currentTaskId.value = taskId
+
+  if (pollingTimer.value) {
+    window.clearInterval(pollingTimer.value)
+    pollingTimer.value = null
+  }
+
+  const pollOnce = async () => {
+    const status = await googleCeleryTasksApi.getTask(taskId)
+
+    if (status.state === 'PROGRESS') {
+      return
+    }
+
+    if (status.state === 'SUCCESS') {
+      const res = status.result || {}
+      const rawResults: any[] = Array.isArray(res.results) ? res.results : []
+
+      verifyResults.value = rawResults.map((r) => {
+        const statusObj = r.status || (r.final_status ? { status: r.final_status } : null)
+        const screenshot = r.screenshot || null
+
+        return {
+          email: r.email || 'unknown',
+          success: Boolean(r.success),
+          message: r.message || '',
+          status: statusObj,
+          screenshot,
+        }
+      })
+
+      if (pollingTimer.value) {
+        window.clearInterval(pollingTimer.value)
+        pollingTimer.value = null
+      }
+
+      processing.value = false
+      subscribing.value = false
+      return
+    }
+
+    if (status.state === 'FAILURE') {
+      if (pollingTimer.value) {
+        window.clearInterval(pollingTimer.value)
+        pollingTimer.value = null
+      }
+
+      processing.value = false
+      subscribing.value = false
+      ElMessage.error(status.error || '任务执行失败')
+    }
+  }
+
+  try {
+    await pollOnce()
+  } catch (e: any) {
+    processing.value = false
+    subscribing.value = false
+    ElMessage.error(e?.message || '任务状态查询失败')
+    return
+  }
+
+  pollingTimer.value = window.setInterval(async () => {
+    try {
+      await pollOnce()
+    } catch (e: any) {
+      console.error('pollTaskStatus failed:', e)
+    }
   }, 2000)
 }
 
@@ -212,8 +295,27 @@ function getStatusLabel(status: string): string {
 }
 
 function viewScreenshot(path: string) {
-  currentScreenshot.value = path
-  screenshotDialogVisible.value = true
+  ;(async () => {
+    try {
+      const parts = String(path).split(/[\\/]/)
+      const filename = parts[parts.length - 1]
+
+      // 清理旧的 object url
+      if (currentScreenshotObjectUrl.value) {
+        URL.revokeObjectURL(currentScreenshotObjectUrl.value)
+        currentScreenshotObjectUrl.value = null
+      }
+
+      const blob = await googleSubscriptionApi.getScreenshot(filename)
+      const objectUrl = URL.createObjectURL(blob)
+      currentScreenshotObjectUrl.value = objectUrl
+      currentScreenshot.value = objectUrl
+      screenshotDialogVisible.value = true
+    } catch (e: any) {
+      console.error('viewScreenshot failed:', e)
+      ElMessage.error(e?.message || '截图加载失败')
+    }
+  })()
 }
 </script>
 

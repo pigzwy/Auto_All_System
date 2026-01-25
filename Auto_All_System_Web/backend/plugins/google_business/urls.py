@@ -9,6 +9,7 @@ from .views import (
     GoogleAccountViewSet,
     GoogleCardInfoViewSet,
     GoogleTaskViewSet,
+    CeleryTaskViewSet,
     StatisticsView,
     SettingsViewSet,
     BrowserManagementViewSet,
@@ -23,6 +24,7 @@ router = DefaultRouter()
 router.register(r"accounts", GoogleAccountViewSet, basename="google-account")
 router.register(r"cards", GoogleCardInfoViewSet, basename="google-card")
 router.register(r"tasks", GoogleTaskViewSet, basename="google-task")
+router.register(r"celery-tasks", CeleryTaskViewSet, basename="google-celery-task")
 router.register(r"statistics", StatisticsView, basename="google-statistics")
 router.register(r"settings", SettingsViewSet, basename="google-settings")
 router.register(r"browser", BrowserManagementViewSet, basename="google-browser")

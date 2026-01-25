@@ -10,6 +10,7 @@ from rest_framework.permissions import IsAuthenticated
 from django.shortcuts import get_object_or_404
 from django.db.models import Count, Q
 from django.utils import timezone
+from django.http import FileResponse
 import logging
 
 from apps.integrations.google_accounts.models import GoogleAccount
@@ -31,6 +32,60 @@ from .serializers import (
 from .utils import EncryptionUtil, calculate_task_cost
 
 logger = logging.getLogger(__name__)
+
+
+class CeleryTaskViewSet(viewsets.ViewSet):
+    """Celery 任务状态查询（用于前端轮询）。
+
+    说明：Security / Subscription 相关接口目前返回的是 celery task_id（不是 GoogleTask 主表 id）。
+    这里提供一个统一的查询入口，让前端不再用 setTimeout 模拟。
+    """
+
+    permission_classes = [IsAuthenticated]
+
+    def retrieve(self, request, pk=None):
+        from celery.result import AsyncResult
+
+        if not pk:
+            return Response(
+                {"error": "task_id required"}, status=status.HTTP_400_BAD_REQUEST
+            )
+
+        res = AsyncResult(pk)
+        state = res.state
+
+        payload: dict = {
+            "task_id": pk,
+            "state": state,
+        }
+
+        # res.info 在不同 state 下类型不同：
+        # - PROGRESS: 通常为 dict meta
+        # - FAILURE: 通常为 Exception
+        # - SUCCESS: result 在 res.result
+        if state == "PROGRESS":
+            info = res.info
+            payload["meta"] = info if isinstance(info, dict) else {"info": str(info)}
+        elif state == "SUCCESS":
+            payload["result"] = res.result
+        elif state == "FAILURE":
+            payload["error"] = str(res.result)
+            # traceback 可能较长，必要时前端只展示 error 即可
+            payload["traceback"] = res.traceback
+
+        return Response(payload)
+
+    @action(detail=True, methods=["post"])
+    def cancel(self, request, pk=None):
+        from celery.result import AsyncResult
+
+        if not pk:
+            return Response(
+                {"error": "task_id required"}, status=status.HTTP_400_BAD_REQUEST
+            )
+
+        AsyncResult(pk).revoke(terminate=False)
+        return Response({"success": True, "task_id": pk})
 
 
 # ==================== 账号管理 ====================
@@ -55,6 +110,34 @@ class GoogleAccountViewSet(viewsets.ModelViewSet):
     serializer_class = GoogleAccountSerializer
     pagination_class = None  # 禁用分页，直接返回数组
 
+    def list(self, request, *args, **kwargs):
+        """账号列表。
+
+        额外注入 geekez_profile_names，用于前端展示“Geek 环境是否存在”。
+        为避免每个账号都单独读取 profiles.json，这里只读一次。
+        """
+
+        queryset = self.filter_queryset(self.get_queryset())
+
+        geekez_names = set()
+        try:
+            from apps.integrations.browser_base import get_browser_manager, BrowserType
+
+            manager = get_browser_manager()
+            api = manager.get_api(BrowserType.GEEKEZ)
+            # list_profiles 会读取本地 profiles.json（或挂载目录），只调用一次
+            geekez_names = {
+                p.name for p in api.list_profiles() if getattr(p, "name", None)
+            }
+        except Exception:
+            geekez_names = set()
+
+        context = self.get_serializer_context()
+        context["geekez_profile_names"] = geekez_names
+
+        serializer = self.get_serializer(queryset, many=True, context=context)
+        return Response(serializer.data)
+
     def get_queryset(self):
         """只返回当前用户的账号"""
         queryset = GoogleAccount.objects.filter(owner_user=self.request.user)
@@ -69,7 +152,172 @@ class GoogleAccountViewSet(viewsets.ModelViewSet):
         if search:
             queryset = queryset.filter(email__icontains=search)
 
+        # 过滤派生类型标签（前端展示用：无资格/未绑卡/成功）
+        type_tag = self.request.query_params.get(
+            "type_tag"
+        ) or self.request.query_params.get("type")
+        if type_tag:
+            if type_tag == "ineligible":
+                queryset = queryset.filter(
+                    Q(metadata__google_one_status="ineligible") | Q(status="ineligible")
+                )
+            elif type_tag == "unbound_card":
+                queryset = queryset.filter(
+                    Q(card_bound=False)
+                    & (
+                        Q(sheerid_verified=True)
+                        | Q(metadata__google_one_status="verified")
+                        | Q(status="verified")
+                    )
+                )
+            elif type_tag == "success":
+                queryset = queryset.filter(
+                    Q(gemini_status="active")
+                    | Q(metadata__google_one_status="subscribed")
+                    | Q(status="subscribed")
+                )
+            elif type_tag == "other":
+                # other: 排除已知类型
+                queryset = queryset.exclude(
+                    Q(metadata__google_one_status="ineligible")
+                    | Q(status="ineligible")
+                    | (
+                        Q(card_bound=False)
+                        & (
+                            Q(sheerid_verified=True)
+                            | Q(metadata__google_one_status="verified")
+                            | Q(status="verified")
+                        )
+                    )
+                    | Q(gemini_status="active")
+                    | Q(metadata__google_one_status="subscribed")
+                    | Q(status="subscribed")
+                )
+
         return queryset.order_by("-created_at")
+
+    @action(detail=True, methods=["get"])
+    def tasks(self, request, pk=None):
+        """获取单个账号关联的任务/日志概览。
+
+        返回：
+        - google_tasks: 通过 GoogleTaskAccount 关联到的 GoogleTask 列表（含进度/状态）
+        - task_accounts: 该账号在每个任务中的执行状态与结果
+
+        注：Security/Subscription 目前是 celery task_id 轮询，不在 GoogleTask 表里；
+        如需展示，可从账号 metadata 中的 google_one_status/google_one_status_info/screenshot 等获取。
+        """
+
+        account = get_object_or_404(GoogleAccount, id=pk, owner_user=request.user)
+
+        from .models import GoogleTaskAccount
+
+        rels = (
+            GoogleTaskAccount.objects.filter(account=account)
+            .select_related("task")
+            .order_by("-task__created_at")
+        )
+
+        import re
+
+        step_titles = {
+            1: "登录账号",
+            2: "打开 Google One",
+            3: "检查学生资格",
+            4: "学生验证",
+            5: "订阅服务",
+            6: "完成处理",
+        }
+
+        def parse_main_flow(log_text: str):
+            if not isinstance(log_text, str) or not log_text:
+                return {"step_num": 0, "step_title": None, "extras": []}
+
+            # 取最后一次出现的 "步骤 x/6:" 作为最近步骤
+            last_num = 0
+            for m in re.finditer(r"步骤\s*(\d+)\/6", log_text):
+                try:
+                    last_num = max(last_num, int(m.group(1)))
+                except Exception:
+                    continue
+
+            extras: list[str] = []
+            for m in re.finditer(r"增项:\s*([^\r\n]+)", log_text):
+                val = (m.group(1) or "").strip()
+                if val and val not in extras:
+                    extras.append(val)
+
+            return {
+                "step_num": last_num,
+                "step_title": step_titles.get(last_num),
+                "extras": extras,
+            }
+
+        google_tasks = []
+        task_accounts = []
+
+        for rel in rels:
+            task = rel.task
+
+            main_flow = {
+                "step_num": 0,
+                "step_title": None,
+                "extras": [],
+            }
+            if task.task_type == "one_click":
+                try:
+                    main_flow = parse_main_flow(task.log or "")
+                except Exception:
+                    main_flow = {
+                        "step_num": 0,
+                        "step_title": None,
+                        "extras": [],
+                    }
+
+            google_tasks.append(
+                {
+                    "id": task.id,
+                    "task_type": task.task_type,
+                    "task_type_display": task.get_task_type_display(),
+                    "status": task.status,
+                    "status_display": task.get_status_display(),
+                    "progress_percentage": task.progress_percentage,
+                    "main_flow_step_num": main_flow.get("step_num"),
+                    "main_flow_step_title": main_flow.get("step_title"),
+                    "main_flow_extras": main_flow.get("extras"),
+                    "created_at": task.created_at,
+                    "started_at": task.started_at,
+                    "completed_at": task.completed_at,
+                }
+            )
+            task_accounts.append(
+                {
+                    "task_id": task.id,
+                    "status": rel.status,
+                    "status_display": rel.get_status_display(),
+                    "result_message": rel.result_message,
+                    "error_message": rel.error_message,
+                    "started_at": rel.started_at,
+                    "completed_at": rel.completed_at,
+                    "duration": rel.duration,
+                }
+            )
+
+        meta = account.metadata or {}
+
+        return Response(
+            {
+                "account_id": account.id,
+                "email": account.email,
+                "google_one_status": meta.get("google_one_status"),
+                "google_one_status_info": meta.get("google_one_status_info"),
+                "google_one_screenshot": meta.get("google_one_screenshot"),
+                # Security/Subscription 等动作的历史记录（由 ViewSet 在提交 celery task 时写入）
+                "celery_actions": meta.get("google_zone_actions") or [],
+                "google_tasks": google_tasks,
+                "task_accounts": task_accounts,
+            }
+        )
 
     def create(self, request):
         """创建单个账号"""
@@ -95,6 +343,279 @@ class GoogleAccountViewSet(viewsets.ModelViewSet):
 
         return Response(
             GoogleAccountSerializer(account).data, status=status.HTTP_201_CREATED
+        )
+
+    @action(detail=True, methods=["patch"])
+    def edit(self, request, pk=None):
+        """编辑账号（支持修改密码/2FA/恢复邮箱/备注）。
+
+        PATCH /api/v1/plugins/google-business/accounts/{id}/edit/
+        {
+          "email": "optional",
+          "password": "optional",
+          "recovery_email": "optional",
+          "secret_key": "optional",  # 2FA secret
+          "notes": "optional"
+        }
+        """
+
+        from .serializers import GoogleAccountEditSerializer
+
+        account = get_object_or_404(GoogleAccount, id=pk, owner_user=request.user)
+        serializer = GoogleAccountEditSerializer(data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+
+        data = serializer.validated_data
+        update_fields = []
+
+        # email
+        if "email" in data and data["email"] and data["email"] != account.email:
+            if (
+                GoogleAccount.objects.filter(email=data["email"])
+                .exclude(id=account.id)
+                .exists()
+            ):
+                return Response(
+                    {"error": "该邮箱已存在"}, status=status.HTTP_400_BAD_REQUEST
+                )
+            account.email = data["email"]
+            update_fields.append("email")
+
+        # password
+        if "password" in data and data["password"] is not None:
+            # 允许清空：空字符串表示不修改
+            if str(data["password"]).strip():
+                account.password = EncryptionUtil.encrypt(str(data["password"]))
+                update_fields.append("password")
+
+        # recovery_email
+        if "recovery_email" in data:
+            account.recovery_email = str(data.get("recovery_email") or "")
+            update_fields.append("recovery_email")
+
+        # 2FA secret
+        if "secret_key" in data and data["secret_key"] is not None:
+            secret = str(data.get("secret_key") or "")
+            if secret.strip():
+                account.two_fa_secret = EncryptionUtil.encrypt(secret)
+                account.two_fa_enabled = True
+                update_fields.extend(["two_fa_secret", "two_fa_enabled"])
+            else:
+                # 空字符串表示不修改（避免误把 2FA 清掉）
+                pass
+
+        # notes
+        if "notes" in data:
+            account.notes = str(data.get("notes") or "")
+            update_fields.append("notes")
+
+        if update_fields:
+            account.save(update_fields=list(set(update_fields)))
+
+        return Response(GoogleAccountSerializer(account).data)
+
+    @action(detail=False, methods=["post"])
+    def export_csv(self, request):
+        """导出账号为 CSV（包含敏感字段：密码/2FA，会解密）。
+
+        POST /api/v1/plugins/google-business/accounts/export_csv/
+        {"ids": [1,2,3]}  # 可选，不传则导出当前用户全部
+        """
+
+        import csv
+        import io
+        from django.http import HttpResponse
+
+        ids = request.data.get("ids")
+        qs = GoogleAccount.objects.filter(owner_user=request.user)
+        if isinstance(ids, list) and ids:
+            qs = qs.filter(id__in=ids)
+
+        buf = io.StringIO()
+        writer = csv.writer(buf)
+        # 英文表头避免编码兼容问题
+        writer.writerow(
+            [
+                "email",
+                "password",
+                "recovery_email",
+                "two_fa_secret",
+                "status",
+                "sheerid_verified",
+                "gemini_status",
+                "card_bound",
+                "notes",
+            ]
+        )
+
+        for a in qs.order_by("-created_at"):
+            try:
+                pwd = EncryptionUtil.decrypt(a.password)
+            except Exception:
+                pwd = a.password
+
+            try:
+                secret = (
+                    EncryptionUtil.decrypt(a.two_fa_secret) if a.two_fa_secret else ""
+                )
+            except Exception:
+                secret = a.two_fa_secret or ""
+
+            writer.writerow(
+                [
+                    a.email,
+                    pwd,
+                    a.recovery_email or "",
+                    secret,
+                    a.status,
+                    "1" if a.sheerid_verified else "0",
+                    a.gemini_status,
+                    "1" if a.card_bound else "0",
+                    (a.notes or "").replace("\n", " ").replace("\r", " "),
+                ]
+            )
+
+        content = buf.getvalue()
+        resp = HttpResponse(content, content_type="text/csv; charset=utf-8")
+        resp["Content-Disposition"] = 'attachment; filename="google_accounts.csv"'
+        return resp
+
+    @action(detail=False, methods=["post"])
+    def export_txt(self, request):
+        """导出账号为 TXT（包含敏感字段：密码/2FA，会解密）。
+
+        POST /api/v1/plugins/google-business/accounts/export_txt/
+        {"ids": [1,2,3]}  # 可选，不传则导出当前用户全部
+
+        每行格式：email----password----recovery_email----two_fa_secret
+        """
+
+        from django.http import HttpResponse
+
+        ids = request.data.get("ids")
+        qs = GoogleAccount.objects.filter(owner_user=request.user)
+        if isinstance(ids, list) and ids:
+            qs = qs.filter(id__in=ids)
+
+        lines = []
+        for a in qs.order_by("-created_at"):
+            try:
+                pwd = EncryptionUtil.decrypt(a.password)
+            except Exception:
+                pwd = a.password
+
+            try:
+                secret = (
+                    EncryptionUtil.decrypt(a.two_fa_secret) if a.two_fa_secret else ""
+                )
+            except Exception:
+                secret = a.two_fa_secret or ""
+
+            recovery = a.recovery_email or ""
+            lines.append(f"{a.email}----{pwd}----{recovery}----{secret}")
+
+        content = "\n".join(lines)
+        resp = HttpResponse(content, content_type="text/plain; charset=utf-8")
+        resp["Content-Disposition"] = 'attachment; filename="google_accounts.txt"'
+        return resp
+
+    @action(detail=True, methods=["post"])
+    def launch_geekez(self, request, pk=None):
+        """创建/打开 GeekezBrowser 的账号环境。
+
+        统一语义：
+        - 若 Geekez 中不存在对应邮箱的 profile：创建环境（profile）后再打开。
+        - 若已存在：直接打开（不再创建）。
+        - 同时把 profile 信息与启动信息写入账号 metadata，便于后续在系统内展示/追踪。
+
+        POST /api/v1/plugins/google-business/accounts/{id}/launch_geekez/
+
+        Returns:
+            {
+              "success": true,
+              "created_profile": true,
+              "browser_type": "geekez",
+              "profile_id": "...",
+              "debug_port": 12345,
+              "cdp_endpoint": "http://...",
+              "ws_endpoint": "ws://...",
+              "pid": 1234,
+              "saved": true
+            }
+        """
+
+        from apps.integrations.browser_base import get_browser_manager, BrowserType
+
+        account = get_object_or_404(GoogleAccount, id=pk, owner_user=request.user)
+
+        manager = get_browser_manager()
+        try:
+            api = manager.get_api(BrowserType.GEEKEZ)
+        except Exception:
+            return Response(
+                {"error": "GeekezBrowser 未配置或不可用"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if not api.health_check():
+            return Response(
+                {"error": "GeekezBrowser 服务不在线"},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+
+        # 优先复用已有 profile（避免“重复创建环境”）
+        created_profile = False
+        profile = api.get_profile_by_name(account.email)
+        if not profile:
+            created_profile = True
+            # 创建 profile。不要写入明文敏感信息到 profile metadata。
+            profile = api.create_or_update_profile(
+                name=account.email,
+                proxy=None,
+                metadata={"account": {"email": account.email}},
+            )
+
+        launch_info = api.launch_profile(profile.id)
+        if not launch_info:
+            return Response(
+                {"error": "启动 Geekez profile 失败"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+
+        meta = account.metadata or {}
+        # 持久化“环境已创建”的信息（即使浏览器没开着，也能知道 profile 已存在）
+        meta["geekez_profile"] = {
+            "browser_type": BrowserType.GEEKEZ.value,
+            "profile_id": profile.id,
+            "profile_name": profile.name,
+            "created_by_system": True,
+            "created_at": (meta.get("geekez_profile") or {}).get("created_at")
+            or timezone.now().isoformat(),
+        }
+        meta["geekez_env"] = {
+            "browser_type": BrowserType.GEEKEZ.value,
+            "profile_id": launch_info.profile_id,
+            "debug_port": launch_info.debug_port,
+            "cdp_endpoint": launch_info.cdp_endpoint,
+            "ws_endpoint": launch_info.ws_endpoint,
+            "pid": launch_info.pid,
+            "launched_at": timezone.now().isoformat(),
+        }
+        account.metadata = meta
+        account.save(update_fields=["metadata"])
+
+        return Response(
+            {
+                "success": True,
+                "created_profile": created_profile,
+                "browser_type": BrowserType.GEEKEZ.value,
+                "profile_id": launch_info.profile_id,
+                "debug_port": launch_info.debug_port,
+                "cdp_endpoint": launch_info.cdp_endpoint,
+                "ws_endpoint": launch_info.ws_endpoint,
+                "pid": launch_info.pid,
+                "saved": True,
+            }
         )
 
     @action(detail=False, methods=["post"])
@@ -144,9 +665,17 @@ class GoogleAccountViewSet(viewsets.ModelViewSet):
 
         for line in accounts_data:
             try:
-                parts = line.split("----")
-                if len(parts) < 2:
-                    errors.append(f"Invalid format: {line}")
+                # 智能检测分隔符：支持 ---- (4个), --- (3个), --, |, \t
+                parts = None
+                for separator in ["----", "---", "--", "|", "\t"]:
+                    if separator in line:
+                        parts = line.split(separator)
+                        break
+
+                if parts is None or len(parts) < 2:
+                    errors.append(
+                        f"Invalid format (no valid separator found): {line[:50]}..."
+                    )
                     continue
 
                 email = parts[0].strip()
@@ -161,6 +690,9 @@ class GoogleAccountViewSet(viewsets.ModelViewSet):
                         # 更新
                         existing.password = EncryptionUtil.encrypt(password)
                         existing.recovery_email = recovery
+                        if secret:
+                            existing.two_fa_secret = EncryptionUtil.encrypt(secret)
+                            existing.two_fa_enabled = True
                         existing.save()
                         accounts_list.append(existing)
                         imported_count += 1
@@ -174,6 +706,8 @@ class GoogleAccountViewSet(viewsets.ModelViewSet):
                         email=email,
                         password=EncryptionUtil.encrypt(password),
                         recovery_email=recovery,
+                        two_fa_secret=EncryptionUtil.encrypt(secret) if secret else "",
+                        two_fa_enabled=bool(secret),
                     )
                     accounts_list.append(account)
                     imported_count += 1
@@ -784,6 +1318,25 @@ class SecurityViewSet(viewsets.ViewSet):
             browser_type=browser_type,
         )
 
+        # 记录到账号 metadata（用于账号管理页展示最近操作历史）
+        now_iso = timezone.now().isoformat()
+        for acc in GoogleAccount.objects.filter(
+            id__in=account_ids, owner_user=request.user
+        ):
+            meta = acc.metadata or {}
+            actions = meta.get("google_zone_actions") or []
+            actions.append(
+                {
+                    "kind": "security_change_2fa",
+                    "celery_task_id": task.id,
+                    "created_at": now_iso,
+                    "browser_type": browser_type,
+                }
+            )
+            meta["google_zone_actions"] = actions[-50:]
+            acc.metadata = meta
+            acc.save(update_fields=["metadata"])
+
         return Response(
             {
                 "success": True,
@@ -830,6 +1383,25 @@ class SecurityViewSet(viewsets.ViewSet):
             browser_type=browser_type,
         )
 
+        now_iso = timezone.now().isoformat()
+        for acc in GoogleAccount.objects.filter(
+            id__in=account_ids, owner_user=request.user
+        ):
+            meta = acc.metadata or {}
+            actions = meta.get("google_zone_actions") or []
+            actions.append(
+                {
+                    "kind": "security_change_recovery_email",
+                    "celery_task_id": task.id,
+                    "created_at": now_iso,
+                    "browser_type": browser_type,
+                    "new_email": new_email,
+                }
+            )
+            meta["google_zone_actions"] = actions[-50:]
+            acc.metadata = meta
+            acc.save(update_fields=["metadata"])
+
         return Response(
             {
                 "success": True,
@@ -868,6 +1440,24 @@ class SecurityViewSet(viewsets.ViewSet):
             browser_type=browser_type,
         )
 
+        now_iso = timezone.now().isoformat()
+        for acc in GoogleAccount.objects.filter(
+            id__in=account_ids, owner_user=request.user
+        ):
+            meta = acc.metadata or {}
+            actions = meta.get("google_zone_actions") or []
+            actions.append(
+                {
+                    "kind": "security_get_backup_codes",
+                    "celery_task_id": task.id,
+                    "created_at": now_iso,
+                    "browser_type": browser_type,
+                }
+            )
+            meta["google_zone_actions"] = actions[-50:]
+            acc.metadata = meta
+            acc.save(update_fields=["metadata"])
+
         return Response(
             {
                 "success": True,
@@ -889,7 +1479,10 @@ class SecurityViewSet(viewsets.ViewSet):
         }
         """
         account_ids = request.data.get("account_ids", [])
-        new_recovery_email = request.data.get("new_recovery_email")
+        # 兼容前端历史字段名：new_email
+        new_recovery_email = request.data.get("new_recovery_email") or request.data.get(
+            "new_email"
+        )
         from apps.integrations.browser_base import get_browser_manager
 
         browser_type = (
@@ -908,6 +1501,25 @@ class SecurityViewSet(viewsets.ViewSet):
             user_id=request.user.id,
             browser_type=browser_type,
         )
+
+        now_iso = timezone.now().isoformat()
+        for acc in GoogleAccount.objects.filter(
+            id__in=account_ids, owner_user=request.user
+        ):
+            meta = acc.metadata or {}
+            actions = meta.get("google_zone_actions") or []
+            actions.append(
+                {
+                    "kind": "security_one_click",
+                    "celery_task_id": task.id,
+                    "created_at": now_iso,
+                    "browser_type": browser_type,
+                    "new_recovery_email": new_recovery_email,
+                }
+            )
+            meta["google_zone_actions"] = actions[-50:]
+            acc.metadata = meta
+            acc.save(update_fields=["metadata"])
 
         return Response(
             {
@@ -963,6 +1575,25 @@ class SubscriptionViewSet(viewsets.ViewSet):
             browser_type=browser_type,
         )
 
+        now_iso = timezone.now().isoformat()
+        for acc in GoogleAccount.objects.filter(
+            id__in=account_ids, owner_user=request.user
+        ):
+            meta = acc.metadata or {}
+            actions = meta.get("google_zone_actions") or []
+            actions.append(
+                {
+                    "kind": "subscription_verify_status",
+                    "celery_task_id": task.id,
+                    "created_at": now_iso,
+                    "browser_type": browser_type,
+                    "take_screenshot": bool(take_screenshot),
+                }
+            )
+            meta["google_zone_actions"] = actions[-50:]
+            acc.metadata = meta
+            acc.save(update_fields=["metadata"])
+
         return Response(
             {
                 "success": True,
@@ -1001,6 +1632,24 @@ class SubscriptionViewSet(viewsets.ViewSet):
             browser_type=browser_type,
         )
 
+        now_iso = timezone.now().isoformat()
+        for acc in GoogleAccount.objects.filter(
+            id__in=account_ids, owner_user=request.user
+        ):
+            meta = acc.metadata or {}
+            actions = meta.get("google_zone_actions") or []
+            actions.append(
+                {
+                    "kind": "subscription_click_subscribe",
+                    "celery_task_id": task.id,
+                    "created_at": now_iso,
+                    "browser_type": browser_type,
+                }
+            )
+            meta["google_zone_actions"] = actions[-50:]
+            acc.metadata = meta
+            acc.save(update_fields=["metadata"])
+
         return Response(
             {
                 "success": True,
@@ -1008,3 +1657,58 @@ class SubscriptionViewSet(viewsets.ViewSet):
                 "message": "点击订阅任务已提交",
             }
         )
+
+    @action(detail=False, methods=["get"])
+    def screenshot(self, request):
+        """读取订阅验证生成的截图文件。
+
+        订阅验证任务会把截图写入 backend 工作目录下的 `screenshots/`。
+        前端通过文件名进行访问，避免路径穿越。
+
+        GET /api/v1/plugins/google-business/subscription/screenshot/?file=xxx.png
+        """
+
+        import os
+        from pathlib import Path
+        from django.conf import settings
+
+        filename = request.query_params.get("file")
+        if not filename:
+            return Response(
+                {"error": "file required"}, status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # 基本的路径穿越防护：只允许文件名
+        filename = os.path.basename(filename)
+        if not filename.lower().endswith(".png"):
+            return Response(
+                {"error": "invalid file"}, status=status.HTTP_400_BAD_REQUEST
+            )
+
+        screenshots_dir = (
+            Path(getattr(settings, "BASE_DIR", Path.cwd())) / "screenshots"
+        )
+        file_path = (screenshots_dir / filename).resolve()
+
+        try:
+            if not file_path.is_file():
+                return Response(
+                    {"error": "file not found"},
+                    status=status.HTTP_404_NOT_FOUND,
+                )
+        except Exception:
+            return Response(
+                {"error": "file not found"},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        # 额外校验：必须在 screenshots_dir 下
+        try:
+            if str(file_path).find(str(screenshots_dir.resolve())) != 0:
+                return Response(
+                    {"error": "invalid file"}, status=status.HTTP_400_BAD_REQUEST
+                )
+        except Exception:
+            pass
+
+        return FileResponse(open(file_path, "rb"), content_type="image/png")
