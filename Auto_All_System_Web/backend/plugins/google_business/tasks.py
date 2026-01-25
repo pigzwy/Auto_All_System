@@ -20,7 +20,7 @@ from .services import (
     SheerIDVerifyService,
     GoogleOneBindCardService,
 )
-from .utils import TaskLogger, EncryptionUtil
+from .utils import TaskLogger, EncryptionUtil, attach_playwright_trace
 
 logger = logging.getLogger(__name__)
 
@@ -92,8 +92,14 @@ def process_single_account(
 
     sheerid_link_snapshot = getattr(account, "sheerid_link", "") or ""
 
-    # 创建任务日志记录器（写入 task.log）
-    task_logger = TaskLogger(task)
+    # 创建任务日志记录器（DB: GoogleTask.log + 文件: logs/trace/trace_<celery>_<email>.log）
+    task_logger = TaskLogger(
+        task,
+        celery_task_id=getattr(self.request, "id", None),
+        account_id=account_id,
+        email=account.email,
+        kind=f"google_{task_type}",
+    )
 
     try:
         task_logger.info(
@@ -132,6 +138,9 @@ def process_single_account(
 
                 page = context.pages[0] if context.pages else await context.new_page()
 
+                # 自动记录页面导航/console/pageerror（尽量少侵入业务代码）
+                attach_playwright_trace(page, task_logger)
+
                 try:
                     result: Dict[str, Any]
 
@@ -144,18 +153,51 @@ def process_single_account(
 
                     elif task_type == "login":
                         login_service = GoogleLoginService()
+                        task_logger.event(
+                            step="login",
+                            action="start",
+                            message="start login",
+                            url=getattr(page, "url", ""),
+                        )
                         result = await login_service.login(
                             page, account_info, task_logger
+                        )
+                        task_logger.event(
+                            step="login",
+                            action="result",
+                            message="login finished",
+                            url=getattr(page, "url", ""),
+                            result={
+                                "success": result.get("success"),
+                                "message": result.get("message") or result.get("error"),
+                            },
                         )
 
                     elif task_type == "get_link":
                         link_service = GoogleOneLinkService()
+                        task_logger.event(
+                            step="get_link",
+                            action="start",
+                            message="start get_verification_link",
+                            url=getattr(page, "url", ""),
+                        )
                         (
                             status,
                             link,
                             message,
                         ) = await link_service.get_verification_link(
                             page, account_info, task_logger
+                        )
+                        task_logger.event(
+                            step="get_link",
+                            action="result",
+                            message="get_verification_link finished",
+                            url=getattr(page, "url", ""),
+                            result={
+                                "status": status,
+                                "has_link": bool(link),
+                                "message": message,
+                            },
                         )
                         result = {
                             "success": status
@@ -189,6 +231,12 @@ def process_single_account(
                             "data": verify_result,
                             "account_updates": {"sheerid_verified": True} if ok else {},
                         }
+                        task_logger.event(
+                            step="verify",
+                            action="result",
+                            message="sheerid verify finished",
+                            result={"success": ok, "message": result.get("message")},
+                        )
 
                     elif task_type == "bind_card":
                         bind_service = GoogleOneBindCardService()
@@ -218,6 +266,18 @@ def process_single_account(
                             f" (****{card.card_number[-4:]})"
                             if card.card_number
                             else ""
+                        )
+
+                        task_logger.event(
+                            step="bind_card",
+                            action="result",
+                            message="bind_and_subscribe finished",
+                            url=getattr(page, "url", ""),
+                            result={
+                                "success": ok,
+                                "message": message,
+                                "card": suffix.strip(),
+                            },
                         )
                         result = {
                             "success": ok,
@@ -429,6 +489,25 @@ def process_single_account(
 
         # 运行异步函数（只做浏览器自动化，不做 ORM 写入）
         result = asyncio.run(_process())
+
+        # 把 trace 文件路径附加到结果，方便前端/排查定位
+        trace_file = task_logger.trace_rel_path or (
+            str(task_logger.trace_file) if task_logger.trace_file else ""
+        )
+        if isinstance(result, dict) and trace_file:
+            result.setdefault("trace_file", trace_file)
+
+        task_logger.event(
+            step="task",
+            action="result",
+            message="process_single_account finished",
+            level="info" if result.get("success") else "error",
+            result={
+                "success": bool(result.get("success")),
+                "message": result.get("message"),
+                "trace_file": trace_file,
+            },
+        )
 
         # === 以下为同步 ORM 更新（避免 SynchronousOnlyOperation） ===
         account_updates = result.pop("account_updates", None)
@@ -861,6 +940,19 @@ def security_change_2fa_task(
         try:
             account = GoogleAccount.objects.get(id=account_id)
 
+            task_logger = TaskLogger(
+                None,
+                celery_task_id=str(self.request.id),
+                account_id=account_id,
+                email=account.email,
+                kind="security_change_2fa",
+            )
+            task_logger.event(
+                step="task",
+                action="start",
+                message="start security_change_2fa",
+            )
+
             try:
                 password = EncryptionUtil.decrypt(account.password)
             except Exception:
@@ -900,9 +992,17 @@ def security_change_2fa_task(
                     browser_type=bt,
                 )
                 if not instance or not instance.page:
+                    task_logger.event(
+                        step="browser",
+                        action="acquire",
+                        level="error",
+                        message="failed to acquire browser instance",
+                    )
                     return False, "无法获取浏览器实例", None
 
                 try:
+                    attach_playwright_trace(instance.page, task_logger)
+
                     login_service = GoogleLoginService()
                     try:
                         logged_in = await login_service.check_login_status(
@@ -912,6 +1012,12 @@ def security_change_2fa_task(
                         logged_in = False
 
                     if not logged_in:
+                        task_logger.event(
+                            step="login",
+                            action="start",
+                            message="start login",
+                            url=getattr(instance.page, "url", ""),
+                        )
                         login_res = await login_service.login(
                             instance.page,
                             {
@@ -920,16 +1026,33 @@ def security_change_2fa_task(
                                 "secret": totp_secret,
                                 "backup": account.recovery_email or "",
                             },
+                            task_logger,
                         )
                         if not login_res.get("success"):
                             err = (
                                 login_res.get("error") or login_res.get("message") or ""
                             )
+                            task_logger.event(
+                                step="login",
+                                action="result",
+                                level="error",
+                                message="login failed",
+                                url=getattr(instance.page, "url", ""),
+                                result={"error": err},
+                            )
                             return False, f"登录失败: {err}", None
+
+                        task_logger.event(
+                            step="login",
+                            action="result",
+                            message="login ok",
+                            url=getattr(instance.page, "url", ""),
+                        )
 
                     return await security_service.change_2fa_secret(
                         instance.page,
                         account_info,
+                        task_logger=task_logger,
                     )
                 finally:
                     try:
@@ -957,11 +1080,51 @@ def security_change_2fa_task(
             except asyncio.TimeoutError:
                 ok, msg, new_secret = False, "任务超时", None
 
+            # 把 trace 文件路径回传给前端，方便按账号排查
+            trace_file = task_logger.trace_rel_path or (
+                str(task_logger.trace_file) if task_logger.trace_file else ""
+            )
+
+            task_logger.event(
+                step="task",
+                action="result",
+                message="security_change_2fa finished",
+                level="info" if ok else "error",
+                result={
+                    "success": ok,
+                    "message": msg,
+                    "new_secret_masked": TaskLogger._mask_secret(new_secret)
+                    if new_secret
+                    else "",
+                    "trace_file": trace_file,
+                },
+            )
+
             if ok and new_secret:
                 # 更新数据库
                 account.two_fa_secret = EncryptionUtil.encrypt(new_secret)
                 account.two_fa_enabled = True
-                account.save(update_fields=["two_fa_secret", "two_fa_enabled"])
+
+                # 同时把“新2FA”写入账号 metadata，方便在账号列表直接查看/复制
+                # 注意：这里存的是明文，属于敏感信息。
+                # 后续如需增强安全性，可改为只保存掩码或保存加密值。
+                meta = account.metadata or {}
+                meta["new_2fa_secret"] = new_secret
+                # 额外保存一份“Google 展示风格”的 2FA（小写 + 每 4 位一组空格）
+                # 例：e2cv z6er 5v55 zfox ...（spaces don't matter）
+                try:
+                    s = (new_secret or "").replace(" ", "").strip().lower()
+                    meta["new_2fa_secret_display"] = " ".join(
+                        [s[i : i + 4] for i in range(0, len(s), 4)]
+                    )
+                except Exception:
+                    meta["new_2fa_secret_display"] = None
+                meta["new_2fa_updated_at"] = timezone.now().isoformat()
+                account.metadata = meta
+
+                account.save(
+                    update_fields=["two_fa_secret", "two_fa_enabled", "metadata"]
+                )
 
             results.append(
                 {
@@ -969,6 +1132,7 @@ def security_change_2fa_task(
                     "success": ok,
                     "message": msg,
                     "new_secret": new_secret if ok else None,
+                    "trace_file": trace_file,
                 }
             )
 
@@ -1025,6 +1189,19 @@ def security_change_recovery_email_task(
         try:
             account = GoogleAccount.objects.get(id=account_id)
 
+            task_logger = TaskLogger(
+                None,
+                celery_task_id=str(self.request.id),
+                account_id=account_id,
+                email=account.email,
+                kind="security_change_recovery_email",
+            )
+            task_logger.event(
+                step="task",
+                action="start",
+                message=f"start security_change_recovery_email -> {new_email}",
+            )
+
             try:
                 password = EncryptionUtil.decrypt(account.password)
             except Exception:
@@ -1064,9 +1241,17 @@ def security_change_recovery_email_task(
                     browser_type=bt,
                 )
                 if not instance or not instance.page:
+                    task_logger.event(
+                        step="browser",
+                        action="acquire",
+                        level="error",
+                        message="failed to acquire browser instance",
+                    )
                     return False, "无法获取浏览器实例"
 
                 try:
+                    attach_playwright_trace(instance.page, task_logger)
+
                     login_service = GoogleLoginService()
                     try:
                         logged_in = await login_service.check_login_status(
@@ -1076,6 +1261,12 @@ def security_change_recovery_email_task(
                         logged_in = False
 
                     if not logged_in:
+                        task_logger.event(
+                            step="login",
+                            action="start",
+                            message="start login",
+                            url=getattr(instance.page, "url", ""),
+                        )
                         login_res = await login_service.login(
                             instance.page,
                             {
@@ -1084,17 +1275,34 @@ def security_change_recovery_email_task(
                                 "secret": totp_secret,
                                 "backup": account.recovery_email or "",
                             },
+                            task_logger,
                         )
                         if not login_res.get("success"):
                             err = (
                                 login_res.get("error") or login_res.get("message") or ""
                             )
+                            task_logger.event(
+                                step="login",
+                                action="result",
+                                level="error",
+                                message="login failed",
+                                url=getattr(instance.page, "url", ""),
+                                result={"error": err},
+                            )
                             return False, f"登录失败: {err}"
+
+                        task_logger.event(
+                            step="login",
+                            action="result",
+                            message="login ok",
+                            url=getattr(instance.page, "url", ""),
+                        )
 
                     return await security_service.change_recovery_email(
                         instance.page,
                         account_info,
                         new_email,
+                        task_logger=task_logger,
                     )
                 finally:
                     try:
@@ -1122,6 +1330,17 @@ def security_change_recovery_email_task(
             except asyncio.TimeoutError:
                 ok, msg = False, "任务超时"
 
+            trace_file = task_logger.trace_rel_path or (
+                str(task_logger.trace_file) if task_logger.trace_file else ""
+            )
+            task_logger.event(
+                step="task",
+                action="result",
+                message="security_change_recovery_email finished",
+                level="info" if ok else "error",
+                result={"success": ok, "message": msg, "trace_file": trace_file},
+            )
+
             if ok:
                 account.recovery_email = new_email
                 account.save(update_fields=["recovery_email"])
@@ -1131,6 +1350,7 @@ def security_change_recovery_email_task(
                     "email": account.email,
                     "success": ok,
                     "message": msg,
+                    "trace_file": trace_file,
                 }
             )
 
@@ -1189,6 +1409,19 @@ def security_get_backup_codes_task(
             account = GoogleAccount.objects.get(id=account_id)
             email_for_release = account.email
 
+            task_logger = TaskLogger(
+                None,
+                celery_task_id=str(self.request.id),
+                account_id=account_id,
+                email=account.email,
+                kind="security_get_backup_codes",
+            )
+            task_logger.event(
+                step="task",
+                action="start",
+                message="start security_get_backup_codes",
+            )
+
             try:
                 password = EncryptionUtil.decrypt(account.password)
             except Exception:
@@ -1228,9 +1461,17 @@ def security_get_backup_codes_task(
                     browser_type=bt,
                 )
                 if not instance or not instance.page:
+                    task_logger.event(
+                        step="browser",
+                        action="acquire",
+                        level="error",
+                        message="failed to acquire browser instance",
+                    )
                     return False, "无法获取浏览器实例", []
 
                 try:
+                    attach_playwright_trace(instance.page, task_logger)
+
                     login_service = GoogleLoginService()
                     try:
                         logged_in = await login_service.check_login_status(
@@ -1240,6 +1481,12 @@ def security_get_backup_codes_task(
                         logged_in = False
 
                     if not logged_in:
+                        task_logger.event(
+                            step="login",
+                            action="start",
+                            message="start login",
+                            url=getattr(instance.page, "url", ""),
+                        )
                         login_res = await login_service.login(
                             instance.page,
                             {
@@ -1248,16 +1495,33 @@ def security_get_backup_codes_task(
                                 "secret": totp_secret,
                                 "backup": account.recovery_email or "",
                             },
+                            task_logger,
                         )
                         if not login_res.get("success"):
                             err = (
                                 login_res.get("error") or login_res.get("message") or ""
                             )
+                            task_logger.event(
+                                step="login",
+                                action="result",
+                                level="error",
+                                message="login failed",
+                                url=getattr(instance.page, "url", ""),
+                                result={"error": err},
+                            )
                             return False, f"登录失败: {err}", []
+
+                        task_logger.event(
+                            step="login",
+                            action="result",
+                            message="login ok",
+                            url=getattr(instance.page, "url", ""),
+                        )
 
                     return await security_service.get_backup_codes(
                         instance.page,
                         account_info,
+                        task_logger=task_logger,
                     )
                 finally:
                     try:
@@ -1285,12 +1549,29 @@ def security_get_backup_codes_task(
             except asyncio.TimeoutError:
                 ok, msg, codes = False, "任务超时", []
 
+            trace_file = task_logger.trace_rel_path or (
+                str(task_logger.trace_file) if task_logger.trace_file else ""
+            )
+            task_logger.event(
+                step="task",
+                action="result",
+                message="security_get_backup_codes finished",
+                level="info" if ok else "error",
+                result={
+                    "success": ok,
+                    "message": msg,
+                    "codes_count": len(codes or []),
+                    "trace_file": trace_file,
+                },
+            )
+
             results.append(
                 {
                     "email": account.email,
                     "success": ok,
                     "message": msg,
                     "backup_codes": codes if ok else [],
+                    "trace_file": trace_file,
                 }
             )
 
@@ -1386,9 +1667,17 @@ def security_one_click_task(
                     browser_type=bt,
                 )
                 if not instance or not instance.page:
+                    task_logger.event(
+                        step="browser",
+                        action="acquire",
+                        level="error",
+                        message="failed to acquire browser instance",
+                    )
                     return False, "无法获取浏览器实例", None
 
                 try:
+                    attach_playwright_trace(instance.page, task_logger)
+
                     login_service = GoogleLoginService()
                     try:
                         logged_in = await login_service.check_login_status(
@@ -1398,6 +1687,12 @@ def security_one_click_task(
                         logged_in = False
 
                     if not logged_in:
+                        task_logger.event(
+                            step="login",
+                            action="start",
+                            message="start login",
+                            url=getattr(instance.page, "url", ""),
+                        )
                         login_res = await login_service.login(
                             instance.page,
                             {
@@ -1406,17 +1701,34 @@ def security_one_click_task(
                                 "secret": totp_secret,
                                 "backup": account.recovery_email or "",
                             },
+                            task_logger,
                         )
                         if not login_res.get("success"):
                             err = (
                                 login_res.get("error") or login_res.get("message") or ""
                             )
+                            task_logger.event(
+                                step="login",
+                                action="result",
+                                level="error",
+                                message="login failed",
+                                url=getattr(instance.page, "url", ""),
+                                result={"error": err},
+                            )
                             return False, f"登录失败: {err}", None
+
+                        task_logger.event(
+                            step="login",
+                            action="result",
+                            message="login ok",
+                            url=getattr(instance.page, "url", ""),
+                        )
 
                     return await security_service.one_click_security_update(
                         instance.page,
                         account_info,
                         new_recovery_email,
+                        task_logger=task_logger,
                     )
                 finally:
                     try:
@@ -1444,6 +1756,22 @@ def security_one_click_task(
             except asyncio.TimeoutError:
                 ok, msg, data = False, "任务超时", None
 
+            trace_file = task_logger.trace_rel_path or (
+                str(task_logger.trace_file) if task_logger.trace_file else ""
+            )
+            task_logger.event(
+                step="task",
+                action="result",
+                message="security_one_click finished",
+                level="info" if ok else "error",
+                result={
+                    "success": ok,
+                    "message": msg,
+                    "has_data": bool(data),
+                    "trace_file": trace_file,
+                },
+            )
+
             # 更新数据库
             if ok and data:
                 update_fields = []
@@ -1465,6 +1793,7 @@ def security_one_click_task(
                     "success": ok,
                     "message": msg,
                     "data": data if ok else None,
+                    "trace_file": trace_file,
                 }
             )
 
@@ -1526,6 +1855,20 @@ def subscription_verify_status_task(
             account = GoogleAccount.objects.get(id=account_id)
             email_for_release = account.email
 
+            task_logger = TaskLogger(
+                None,
+                celery_task_id=str(self.request.id),
+                account_id=account_id,
+                email=account.email,
+                kind="subscription_verify_status",
+            )
+            task_logger.event(
+                step="task",
+                action="start",
+                message="start subscription_verify_status",
+                result={"take_screenshot": bool(take_screenshot)},
+            )
+
             try:
                 password = EncryptionUtil.decrypt(account.password)
             except Exception:
@@ -1566,9 +1909,17 @@ def subscription_verify_status_task(
                     browser_type=bt,
                 )
                 if not instance or not instance.page:
+                    task_logger.event(
+                        step="browser",
+                        action="acquire",
+                        level="error",
+                        message="failed to acquire browser instance",
+                    )
                     return False, {"error": "无法获取浏览器实例"}, None
 
                 try:
+                    attach_playwright_trace(instance.page, task_logger)
+
                     login_service = GoogleLoginService()
                     try:
                         logged_in = await login_service.check_login_status(
@@ -1578,6 +1929,12 @@ def subscription_verify_status_task(
                         logged_in = False
 
                     if not logged_in:
+                        task_logger.event(
+                            step="login",
+                            action="start",
+                            message="start login",
+                            url=getattr(instance.page, "url", ""),
+                        )
                         login_res = await login_service.login(
                             instance.page,
                             {
@@ -1586,12 +1943,28 @@ def subscription_verify_status_task(
                                 "secret": totp_secret,
                                 "backup": account.recovery_email or "",
                             },
+                            task_logger,
                         )
                         if not login_res.get("success"):
                             err = (
                                 login_res.get("error") or login_res.get("message") or ""
                             )
+                            task_logger.event(
+                                step="login",
+                                action="result",
+                                level="error",
+                                message="login failed",
+                                url=getattr(instance.page, "url", ""),
+                                result={"error": err},
+                            )
                             return False, {"error": f"登录失败: {err}"}, None
+
+                        task_logger.event(
+                            step="login",
+                            action="result",
+                            message="login ok",
+                            url=getattr(instance.page, "url", ""),
+                        )
 
                     return await subscription_service.verify_subscription_status(
                         instance.page,
@@ -1624,6 +1997,24 @@ def subscription_verify_status_task(
             except asyncio.TimeoutError:
                 ok, status_info, screenshot_path = False, {"error": "任务超时"}, None
 
+            trace_file = task_logger.trace_rel_path or (
+                str(task_logger.trace_file) if task_logger.trace_file else ""
+            )
+            task_logger.event(
+                step="task",
+                action="result",
+                message="subscription_verify_status finished",
+                level="info" if ok else "error",
+                result={
+                    "success": ok,
+                    "status": status_info.get("status")
+                    if isinstance(status_info, dict)
+                    else None,
+                    "screenshot": screenshot_path or "",
+                    "trace_file": trace_file,
+                },
+            )
+
             # 更新账号元信息（不要写到 account.status 字段：该字段是账号生命周期状态，choices 不兼容）
             if ok and isinstance(status_info, dict) and status_info.get("status"):
                 status_value = status_info.get("status")
@@ -1649,6 +2040,7 @@ def subscription_verify_status_task(
                     "success": ok,
                     "status": status_info,
                     "screenshot": screenshot_path,
+                    "trace_file": trace_file,
                 }
             )
 
@@ -1706,6 +2098,19 @@ def subscription_click_subscribe_task(
             account = GoogleAccount.objects.get(id=account_id)
             email_for_release = account.email
 
+            task_logger = TaskLogger(
+                None,
+                celery_task_id=str(self.request.id),
+                account_id=account_id,
+                email=account.email,
+                kind="subscription_click_subscribe",
+            )
+            task_logger.event(
+                step="task",
+                action="start",
+                message="start subscription_click_subscribe",
+            )
+
             try:
                 password = EncryptionUtil.decrypt(account.password)
             except Exception:
@@ -1745,9 +2150,17 @@ def subscription_click_subscribe_task(
                     browser_type=bt,
                 )
                 if not instance or not instance.page:
+                    task_logger.event(
+                        step="browser",
+                        action="acquire",
+                        level="error",
+                        message="failed to acquire browser instance",
+                    )
                     return False, "无法获取浏览器实例", None, None
 
                 try:
+                    attach_playwright_trace(instance.page, task_logger)
+
                     login_service = GoogleLoginService()
                     try:
                         logged_in = await login_service.check_login_status(
@@ -1757,6 +2170,12 @@ def subscription_click_subscribe_task(
                         logged_in = False
 
                     if not logged_in:
+                        task_logger.event(
+                            step="login",
+                            action="start",
+                            message="start login",
+                            url=getattr(instance.page, "url", ""),
+                        )
                         login_res = await login_service.login(
                             instance.page,
                             {
@@ -1765,12 +2184,28 @@ def subscription_click_subscribe_task(
                                 "secret": totp_secret,
                                 "backup": account.recovery_email or "",
                             },
+                            task_logger,
                         )
                         if not login_res.get("success"):
                             err = (
                                 login_res.get("error") or login_res.get("message") or ""
                             )
+                            task_logger.event(
+                                step="login",
+                                action="result",
+                                level="error",
+                                message="login failed",
+                                url=getattr(instance.page, "url", ""),
+                                result={"error": err},
+                            )
                             return False, f"登录失败: {err}", None, None
+
+                        task_logger.event(
+                            step="login",
+                            action="result",
+                            message="login ok",
+                            url=getattr(instance.page, "url", ""),
+                        )
 
                     ok, msg = await subscription_service.click_subscribe_button(
                         instance.page,
@@ -1813,6 +2248,23 @@ def subscription_click_subscribe_task(
             except asyncio.TimeoutError:
                 ok, msg, final_status, screenshot = False, "任务超时", None, None
 
+            trace_file = task_logger.trace_rel_path or (
+                str(task_logger.trace_file) if task_logger.trace_file else ""
+            )
+            task_logger.event(
+                step="task",
+                action="result",
+                message="subscription_click_subscribe finished",
+                level="info" if ok else "error",
+                result={
+                    "success": ok,
+                    "message": msg,
+                    "final_status": final_status,
+                    "screenshot": screenshot or "",
+                    "trace_file": trace_file,
+                },
+            )
+
             if ok and final_status:
                 meta = account.metadata or {}
                 meta["google_one_status"] = final_status
@@ -1836,6 +2288,7 @@ def subscription_click_subscribe_task(
                     "message": msg,
                     "final_status": final_status,
                     "screenshot": screenshot,
+                    "trace_file": trace_file,
                 }
             )
 

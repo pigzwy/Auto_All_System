@@ -11,6 +11,9 @@ from django.shortcuts import get_object_or_404
 from django.db.models import Count, Q
 from django.utils import timezone
 from django.http import FileResponse
+from django.conf import settings
+from pathlib import Path
+import os
 import logging
 
 from apps.integrations.google_accounts.models import GoogleAccount, AccountGroup
@@ -88,6 +91,142 @@ class CeleryTaskViewSet(viewsets.ViewSet):
 
         AsyncResult(pk).revoke(terminate=False)
         return Response({"success": True, "task_id": pk})
+
+    @action(detail=True, methods=["get"], url_path="trace")
+    def trace(self, request, pk=None):
+        """读取某个 celery task + 某个账号的 trace 日志（用于前端滚动/轮询）。
+
+        Query Params:
+        - email: 账号邮箱（推荐）
+        - account_id: 账号ID（可选，优先级低于 email）
+        - direction: forward | backward
+          - backward: 向上翻历史（从 cursor 往前读）
+          - forward: 追日志（从 cursor 往后读，适合轮询）
+        - cursor: 文件字节偏移（int）。
+          - backward: cursor 默认文件末尾
+          - forward: cursor 默认 0
+        - limit_bytes: 单次读取最大字节数，默认 262144（256KB）
+
+        Response:
+        - trace_file: 相对路径 logs/trace/...
+        - cursor_in / cursor_out / has_more
+        - lines: 文本行数组（包含 json line + human line）
+        """
+
+        if not pk:
+            return Response(
+                {"error": "task_id required"}, status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # 1) 鉴权：必须确认 email/account 属于当前用户
+        email = (request.query_params.get("email") or "").strip()
+        account_id = (request.query_params.get("account_id") or "").strip()
+        account: GoogleAccount | None = None
+        if email:
+            account = GoogleAccount.objects.filter(
+                owner_user=request.user, email=email
+            ).first()
+        elif account_id:
+            try:
+                account = GoogleAccount.objects.filter(
+                    owner_user=request.user, id=int(account_id)
+                ).first()
+            except Exception:
+                account = None
+
+        if not account:
+            return Response(
+                {"error": "account not found"}, status=status.HTTP_404_NOT_FOUND
+            )
+
+        # 2) 解析读取参数
+        direction = (request.query_params.get("direction") or "backward").strip()
+        if direction not in ("backward", "forward"):
+            direction = "backward"
+
+        try:
+            limit_bytes = int(request.query_params.get("limit_bytes") or 262144)
+        except Exception:
+            limit_bytes = 262144
+        limit_bytes = max(4096, min(limit_bytes, 1024 * 1024))  # 4KB - 1MB
+
+        cursor_raw = request.query_params.get("cursor")
+        cursor_in: int | None
+        try:
+            cursor_in = int(cursor_raw) if cursor_raw is not None else None
+        except Exception:
+            cursor_in = None
+
+        # 3) 定位 trace 文件（与 TaskLogger 的命名规则保持一致）
+        safe_email = (account.email or "").replace("@", "_").replace(".", "_")
+        trace_rel = str(Path("logs") / "trace" / f"trace_{pk}_{safe_email}.log")
+
+        base_dir = Path(getattr(settings, "BASE_DIR", "."))
+        trace_dir = (base_dir / "logs" / "trace").resolve()
+        abs_path = (base_dir / trace_rel).resolve()
+
+        # 防路径穿越
+        try:
+            abs_path.relative_to(trace_dir)
+        except Exception:
+            return Response(
+                {"error": "invalid trace path"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if not abs_path.exists() or not abs_path.is_file():
+            return Response(
+                {
+                    "error": "trace file not found",
+                    "trace_file": trace_rel,
+                },
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        # 4) 读取（byte offset）
+        size = os.path.getsize(abs_path)
+
+        if direction == "backward":
+            end = size if cursor_in is None else max(0, min(cursor_in, size))
+            start = max(0, end - limit_bytes)
+            with open(abs_path, "rb") as f:
+                f.seek(start)
+                data = f.read(end - start)
+            # 为避免截断第一行（partial line），backward 模式丢弃第一行的残片
+            text = data.decode("utf-8", errors="ignore")
+            lines = text.splitlines()
+            if start > 0 and lines:
+                lines = lines[1:]
+            cursor_out = start
+            has_more = start > 0
+        else:
+            start = 0 if cursor_in is None else max(0, min(cursor_in, size))
+            end = min(size, start + limit_bytes)
+            with open(abs_path, "rb") as f:
+                f.seek(start)
+                data = f.read(end - start)
+            text = data.decode("utf-8", errors="ignore")
+            lines = text.splitlines()
+            cursor_out = end
+            has_more = end < size
+
+        # 限制最大行数，避免极端情况下返回过大
+        if len(lines) > 5000:
+            lines = lines[-5000:] if direction == "backward" else lines[:5000]
+
+        return Response(
+            {
+                "task_id": pk,
+                "email": account.email,
+                "direction": direction,
+                "trace_file": trace_rel,
+                "cursor_in": cursor_in,
+                "cursor_out": cursor_out,
+                "has_more": has_more,
+                "size": size,
+                "lines": lines,
+            }
+        )
 
 
 # ==================== 账号管理 ====================
