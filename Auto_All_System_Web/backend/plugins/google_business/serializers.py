@@ -54,6 +54,7 @@ class GoogleAccountSerializer(serializers.ModelSerializer):
     geekez_profile_exists = serializers.SerializerMethodField()
     geekez_env = serializers.SerializerMethodField()
     new_2fa = serializers.SerializerMethodField()
+    new_2fa_display = serializers.SerializerMethodField()
     new_2fa_updated_at = serializers.SerializerMethodField()
     group_name = serializers.SerializerMethodField()
     group_id = serializers.SerializerMethodField()
@@ -73,6 +74,7 @@ class GoogleAccountSerializer(serializers.ModelSerializer):
             "geekez_profile_exists",
             "geekez_env",
             "new_2fa",
+            "new_2fa_display",
             "new_2fa_updated_at",
             "sheerid_link",
             "sheerid_verified",
@@ -191,6 +193,25 @@ class GoogleAccountSerializer(serializers.ModelSerializer):
         meta = getattr(obj, "metadata", None) or {}
         val = meta.get("new_2fa_secret")
         return val if isinstance(val, str) and val.strip() else None
+
+    def get_new_2fa_display(self, obj: GoogleAccount):
+        """最近一次“修改2FA”生成的新密钥（Google 展示风格）。
+
+        Google 通常展示为：小写 + 每 4 位一组空格。
+        该值与 new_2fa 等价，仅表现形式不同，便于对照网页。
+        """
+
+        meta = getattr(obj, "metadata", None) or {}
+        val = meta.get("new_2fa_secret_display")
+        if isinstance(val, str) and val.strip():
+            return val
+
+        # fallback：如果历史数据没有 display 字段，按 new_2fa 动态拼一份
+        raw = meta.get("new_2fa_secret")
+        if not (isinstance(raw, str) and raw.strip()):
+            return None
+        s = raw.replace(" ", "").strip().lower()
+        return " ".join([s[i : i + 4] for i in range(0, len(s), 4)])
 
     def get_new_2fa_updated_at(self, obj: GoogleAccount):
         meta = getattr(obj, "metadata", None) or {}
