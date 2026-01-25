@@ -193,6 +193,9 @@ debug_*.html
 step*.png
 error*.png
 
+# 后端自动化截图（运行产物，不入库）
+Auto_All_System_Web/backend/screenshots/
+
 # Playwright 相关
 .playwright/
 **/playwright/.auth/
