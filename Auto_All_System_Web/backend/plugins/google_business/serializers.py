@@ -3,7 +3,7 @@ Google Business插件序列化器
 """
 
 from rest_framework import serializers
-from apps.integrations.google_accounts.models import GoogleAccount
+from apps.integrations.google_accounts.models import GoogleAccount, AccountGroup
 from .models import (
     GoogleBusinessConfig,
     BusinessTaskLog,
@@ -12,6 +12,33 @@ from .models import (
     GoogleTaskAccount,
 )
 from .utils import mask_card_number
+
+
+# ==================== 账号分组相关 ====================
+
+
+class AccountGroupSerializer(serializers.ModelSerializer):
+    """账号分组序列化器"""
+
+    class Meta:
+        model = AccountGroup
+        fields = [
+            "id",
+            "name",
+            "description",
+            "account_count",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = ["id", "account_count", "created_at", "updated_at"]
+
+
+class AccountGroupCreateSerializer(serializers.ModelSerializer):
+    """创建账号分组序列化器"""
+
+    class Meta:
+        model = AccountGroup
+        fields = ["name", "description"]
 
 
 # ==================== Google账号相关 ====================
@@ -26,6 +53,12 @@ class GoogleAccountSerializer(serializers.ModelSerializer):
     type_display = serializers.SerializerMethodField()
     geekez_profile_exists = serializers.SerializerMethodField()
     geekez_env = serializers.SerializerMethodField()
+    group_name = serializers.CharField(
+        source="group.name", read_only=True, allow_null=True
+    )
+    group_id = serializers.IntegerField(
+        source="group.id", read_only=True, allow_null=True
+    )
     # 不返回敏感字段（密码、密钥）
 
     class Meta:
@@ -46,6 +79,8 @@ class GoogleAccountSerializer(serializers.ModelSerializer):
             "gemini_status",
             "card_bound",
             "notes",
+            "group_id",
+            "group_name",
             "created_at",
             "updated_at",
             "last_login_at",
@@ -182,6 +217,17 @@ class GoogleAccountImportSerializer(serializers.Serializer):
     )
     overwrite_existing = serializers.BooleanField(
         default=False, help_text="是否覆盖已存在的账号"
+    )
+    # 分组相关
+    group_name = serializers.CharField(
+        required=False,
+        allow_blank=True,
+        help_text="分组名称前缀，如'售后'、'2FA'。留空则使用当前时间作为前缀",
+    )
+    group_id = serializers.IntegerField(
+        required=False,
+        allow_null=True,
+        help_text="已存在的分组ID，如果提供则直接加入该分组",
     )
 
 
