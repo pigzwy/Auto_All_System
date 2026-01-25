@@ -749,29 +749,38 @@ class GoogleAccountViewSet(viewsets.ModelViewSet):
                     status=status.HTTP_400_BAD_REQUEST,
                 )
         else:
-            # 创建新分组，先预计算账号数量
-            valid_account_count = 0
-            for line in accounts_data:
-                parts = None
-                for separator in ["----", "---", "--", "|", "\t"]:
-                    if separator in line:
-                        parts = line.split(separator)
-                        break
-                if parts and len(parts) >= 2 and "@" in parts[0]:
-                    valid_account_count += 1
+            # 检查 group 字段是否存在（兼容迁移前）
+            group_field_exists = False
+            try:
+                GoogleAccount._meta.get_field("group")
+                group_field_exists = True
+            except Exception:
+                pass
 
-            if valid_account_count > 0:
-                # 生成分组名称
-                group_full_name = AccountGroup.generate_default_name(
-                    prefix=group_name_prefix if group_name_prefix else None,
-                    count=valid_account_count,
-                )
-                account_group = AccountGroup.objects.create(
-                    name=group_full_name,
-                    description=f"批量导入 {valid_account_count} 个账号",
-                    owner_user=request.user,
-                    account_count=0,  # 稍后更新
-                )
+            if group_field_exists:
+                # 创建新分组，先预计算账号数量
+                valid_account_count = 0
+                for line in accounts_data:
+                    parts = None
+                    for separator in ["----", "---", "--", "|", "\t"]:
+                        if separator in line:
+                            parts = line.split(separator)
+                            break
+                    if parts and len(parts) >= 2 and "@" in parts[0]:
+                        valid_account_count += 1
+
+                if valid_account_count > 0:
+                    # 生成分组名称
+                    group_full_name = AccountGroup.generate_default_name(
+                        prefix=group_name_prefix if group_name_prefix else None,
+                        count=valid_account_count,
+                    )
+                    account_group = AccountGroup.objects.create(
+                        name=group_full_name,
+                        description=f"批量导入 {valid_account_count} 个账号",
+                        owner_user=request.user,
+                        account_count=0,  # 稍后更新
+                    )
 
         # 如果需要匹配浏览器，获取所有浏览器窗口
         browser_map = {}
@@ -820,7 +829,8 @@ class GoogleAccountViewSet(viewsets.ModelViewSet):
                         if secret:
                             existing.two_fa_secret = EncryptionUtil.encrypt(secret)
                             existing.two_fa_enabled = True
-                        if account_group:
+                        # 兼容迁移前后：只有 group 字段存在时才设置
+                        if account_group and hasattr(existing, "group"):
                             existing.group = account_group
                         existing.save()
                         accounts_list.append(existing)
@@ -830,15 +840,26 @@ class GoogleAccountViewSet(viewsets.ModelViewSet):
                         continue
                 else:
                     # 创建新账号
-                    account = GoogleAccount.objects.create(
-                        owner_user=request.user,
-                        email=email,
-                        password=EncryptionUtil.encrypt(password),
-                        recovery_email=recovery,
-                        two_fa_secret=EncryptionUtil.encrypt(secret) if secret else "",
-                        two_fa_enabled=bool(secret),
-                        group=account_group,
-                    )
+                    create_kwargs = {
+                        "owner_user": request.user,
+                        "email": email,
+                        "password": EncryptionUtil.encrypt(password),
+                        "recovery_email": recovery,
+                        "two_fa_secret": EncryptionUtil.encrypt(secret)
+                        if secret
+                        else "",
+                        "two_fa_enabled": bool(secret),
+                    }
+                    # 兼容迁移前后：只有 group 字段存在时才添加
+                    if account_group:
+                        try:
+                            # 检查模型是否有 group 字段
+                            GoogleAccount._meta.get_field("group")
+                            create_kwargs["group"] = account_group
+                        except Exception:
+                            pass
+
+                    account = GoogleAccount.objects.create(**create_kwargs)
                     accounts_list.append(account)
                     imported_count += 1
 

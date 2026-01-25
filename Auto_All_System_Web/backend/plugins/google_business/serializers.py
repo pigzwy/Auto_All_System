@@ -53,12 +53,10 @@ class GoogleAccountSerializer(serializers.ModelSerializer):
     type_display = serializers.SerializerMethodField()
     geekez_profile_exists = serializers.SerializerMethodField()
     geekez_env = serializers.SerializerMethodField()
-    group_name = serializers.CharField(
-        source="group.name", read_only=True, allow_null=True
-    )
-    group_id = serializers.IntegerField(
-        source="group.id", read_only=True, allow_null=True
-    )
+    new_2fa = serializers.SerializerMethodField()
+    new_2fa_updated_at = serializers.SerializerMethodField()
+    group_name = serializers.SerializerMethodField()
+    group_id = serializers.SerializerMethodField()
     # 不返回敏感字段（密码、密钥）
 
     class Meta:
@@ -74,6 +72,8 @@ class GoogleAccountSerializer(serializers.ModelSerializer):
             "type_display",
             "geekez_profile_exists",
             "geekez_env",
+            "new_2fa",
+            "new_2fa_updated_at",
             "sheerid_link",
             "sheerid_verified",
             "gemini_status",
@@ -86,6 +86,22 @@ class GoogleAccountSerializer(serializers.ModelSerializer):
             "last_login_at",
         ]
         read_only_fields = ["id", "created_at", "updated_at"]
+
+    def get_group_id(self, obj: GoogleAccount):
+        """获取分组ID（兼容迁移前后）"""
+        try:
+            group = getattr(obj, "group", None)
+            return group.id if group else None
+        except Exception:
+            return None
+
+    def get_group_name(self, obj: GoogleAccount):
+        """获取分组名称（兼容迁移前后）"""
+        try:
+            group = getattr(obj, "group", None)
+            return group.name if group else None
+        except Exception:
+            return None
 
     def get_google_one_status(self, obj: GoogleAccount):
         meta = getattr(obj, "metadata", None) or {}
@@ -161,6 +177,25 @@ class GoogleAccountSerializer(serializers.ModelSerializer):
         meta = getattr(obj, "metadata", None) or {}
         env = meta.get("geekez_env")
         return env if isinstance(env, dict) else None
+
+    def get_new_2fa(self, obj: GoogleAccount):
+        """最近一次“修改2FA”生成的新密钥（明文）。
+
+        注意：该字段是敏感信息。目前用于“自己用/快速复制”的需求。
+        后续如需加强安全性，可改为：
+        - 只返回掩码，或
+        - 仅在特定权限下返回，或
+        - 只允许查看一次
+        """
+
+        meta = getattr(obj, "metadata", None) or {}
+        val = meta.get("new_2fa_secret")
+        return val if isinstance(val, str) and val.strip() else None
+
+    def get_new_2fa_updated_at(self, obj: GoogleAccount):
+        meta = getattr(obj, "metadata", None) or {}
+        val = meta.get("new_2fa_updated_at")
+        return val if isinstance(val, str) and val.strip() else None
 
     def to_representation(self, instance):
         """自定义序列化输出（脱敏）"""
