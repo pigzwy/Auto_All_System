@@ -293,6 +293,11 @@ class GoogleAccountViewSet(viewsets.ModelViewSet):
         if search:
             queryset = queryset.filter(email__icontains=search)
 
+        # 过滤分组
+        group = self.request.query_params.get("group")
+        if group:
+            queryset = queryset.filter(group_id=group)
+
         # 过滤派生类型标签（前端展示用：无资格/未绑卡/成功）
         type_tag = self.request.query_params.get(
             "type_tag"

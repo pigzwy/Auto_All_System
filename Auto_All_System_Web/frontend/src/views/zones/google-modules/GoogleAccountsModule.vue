@@ -107,6 +107,10 @@
               </el-dropdown-menu>
             </template>
           </el-dropdown>
+
+          <el-button class="ml-2" type="danger" @click="handleBulkDelete">
+            <el-icon class="mr-1"><Delete /></el-icon> 批量删除
+          </el-button>
         </div>
       </div>
     </el-card>
@@ -653,7 +657,7 @@ import { ref, reactive, onMounted, computed, nextTick, watch, onBeforeUnmount } 
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { 
   Plus, Upload, Check, Close, Refresh, VideoPlay, CreditCard, Lock, 
-  Monitor, ArrowDown, Loading, Download
+  Monitor, ArrowDown, Loading, Download, Delete
 } from '@element-plus/icons-vue'
 import { 
   googleAccountsApi, googleTasksApi, googleSecurityApi, 
@@ -1018,6 +1022,35 @@ const handleSubscriptionCommand = async (command: string) => {
     }
   } catch (e: any) {
     if (e !== 'cancel') ElMessage.error('操作失败: ' + (e.message || '未知错误'))
+  }
+}
+
+const handleBulkDelete = async () => {
+  if (selectedAccounts.value.length === 0) {
+    ElMessage.warning('请先选择要删除的账号')
+    return
+  }
+
+  try {
+    await ElMessageBox.confirm(
+      `确定要删除选中的 ${selectedAccounts.value.length} 个账号吗？此操作不可恢复！`,
+      '批量删除确认',
+      {
+        confirmButtonText: '确定删除',
+        cancelButtonText: '取消',
+        type: 'warning'
+      }
+    )
+
+    const ids = getSelectedIds()
+    await googleAccountsApi.bulkDeleteAccounts(ids)
+    ElMessage.success(`成功删除 ${ids.length} 个账号`)
+    selectedAccounts.value = []
+    fetchAccounts()
+  } catch (e: any) {
+    if (e !== 'cancel') {
+      ElMessage.error('批量删除失败: ' + (e.message || '未知错误'))
+    }
   }
 }
 

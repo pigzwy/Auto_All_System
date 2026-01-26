@@ -65,7 +65,18 @@
       <template #header>
         <div class="card-header">
           <span class="card-title">账号列表</span>
-          <el-tag type="info">共 {{ accounts.length }} 个账号</el-tag>
+          <div class="header-actions">
+            <el-button
+              v-if="selectedAccounts.length > 0"
+              type="danger"
+              size="small"
+              @click="handleBulkDelete"
+            >
+              <el-icon><Delete /></el-icon>
+              <span style="margin-left: 5px;">批量删除 ({{ selectedAccounts.length }})</span>
+            </el-button>
+            <el-tag type="info">共 {{ accounts.length }} 个账号</el-tag>
+          </div>
         </div>
       </template>
 
@@ -74,7 +85,9 @@
         v-loading="loading"
         stripe
         style="width: 100%;"
+        @selection-change="handleSelectionChange"
       >
+        <el-table-column type="selection" width="55" />
         <el-table-column prop="email" label="邮箱" min-width="200" />
         <el-table-column prop="browser_id" label="浏览器ID" width="150">
           <template #default="{ row }">
@@ -190,7 +203,7 @@ import {
   Edit,
   Delete
 } from '@element-plus/icons-vue'
-import { getGoogleAccounts, createGoogleAccount, deleteGoogleAccount, batchImportGoogleAccounts } from '@/api/google_business'
+import { getGoogleAccounts, createGoogleAccount, deleteGoogleAccount, batchImportGoogleAccounts, batchDeleteAccounts } from '@/api/google_business'
 
 interface Account {
   id: number
@@ -213,6 +226,7 @@ const searchQuery = ref('')
 const showAddDialog = ref(false)
 const showImportDialog = ref(false)
 const importText = ref('')
+const selectedAccounts = ref<Account[]>([])
 
 const newAccount = ref({
   email: '',
@@ -330,6 +344,40 @@ const deleteAccount = async (account: Account) => {
   }
 }
 
+const handleSelectionChange = (selection: Account[]) => {
+  selectedAccounts.value = selection
+}
+
+const handleBulkDelete = async () => {
+  if (selectedAccounts.value.length === 0) {
+    ElMessage.warning('请先选择要删除的账号')
+    return
+  }
+
+  try {
+    await ElMessageBox.confirm(
+      `确定要删除选中的 ${selectedAccounts.value.length} 个账号吗？此操作不可恢复！`,
+      '批量删除确认',
+      {
+        confirmButtonText: '确定删除',
+        cancelButtonText: '取消',
+        type: 'warning'
+      }
+    )
+
+    const ids = selectedAccounts.value.map(account => account.id)
+    await batchDeleteAccounts({ ids })
+    ElMessage.success(`成功删除 ${ids.length} 个账号`)
+    selectedAccounts.value = []
+    loadAccounts()
+  } catch (error: any) {
+    if (error !== 'cancel') {
+      console.error('批量删除失败:', error)
+      ElMessage.error('批量删除失败')
+    }
+  }
+}
+
 const getStatusType = (status: string) => {
   const types: Record<string, any> = {
     'pending_check': 'info',
@@ -409,6 +457,12 @@ onMounted(() => {
     .card-title {
       font-weight: bold;
       font-size: 16px;
+    }
+
+    .header-actions {
+      display: flex;
+      align-items: center;
+      gap: 10px;
     }
   }
 
