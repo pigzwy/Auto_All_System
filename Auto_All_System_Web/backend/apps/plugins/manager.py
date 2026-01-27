@@ -305,12 +305,17 @@ class PluginManager:
         Returns:
             List: URL patterns列表
         """
-        urls = []
+        # 注意：urlpatterns 在 Django 启动时只构建一次。
+        # 如果这里仅返回“已启用”的插件 URL，那么在运行时启用插件后，
+        # 需要重启服务才能让 URL 生效，前端会看到大量 404。
+        #
+        # 为了让插件 URL 始终可用（权限/可用性由 ViewSet 自身控制），
+        # 这里返回所有已加载插件的 URL。
+        urls: List = []
         for plugin in self._plugins.values():
-            if plugin._enabled:
-                plugin_urls = plugin.get_urls()
-                if plugin_urls:
-                    urls.extend(plugin_urls)
+            plugin_urls = plugin.get_urls()
+            if plugin_urls:
+                urls.extend(plugin_urls)
         return urls
     
     def get_plugins_info(self) -> List[Dict]:
@@ -348,4 +353,3 @@ class PluginManager:
 
 # 创建全局插件管理器实例
 plugin_manager = PluginManager()
-

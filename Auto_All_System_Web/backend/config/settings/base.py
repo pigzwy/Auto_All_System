@@ -45,7 +45,7 @@ INSTALLED_APPS = [
     "apps.integrations.proxies",
     "apps.integrations.email",  # 邮件服务
     # 插件系统
-    "apps.plugins",  # 插件管理器
+    "apps.plugins.apps.PluginsConfig",  # 插件管理器（需要 ready() 触发 discover_plugins）
     # 业务插件
     "plugins.google_business",  # Google Business插件
 ]
