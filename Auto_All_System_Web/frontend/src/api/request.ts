@@ -1,16 +1,31 @@
 import axios from 'axios'
-import type { AxiosInstance, AxiosResponse } from 'axios'
+import type { AxiosInstance, AxiosRequestConfig, AxiosResponse } from 'axios'
 import { ElMessage } from 'element-plus'
 import router from '@/router'
 
+type UnwrappedAxiosInstance = Omit<
+  AxiosInstance,
+  'request' | 'get' | 'delete' | 'head' | 'options' | 'post' | 'put' | 'patch'
+> & {
+  <T = any, R = T, D = any>(config: AxiosRequestConfig<D>): Promise<R>
+  request<T = any, R = T, D = any>(config: AxiosRequestConfig<D>): Promise<R>
+  get<T = any, R = T, D = any>(url: string, config?: AxiosRequestConfig<D>): Promise<R>
+  delete<T = any, R = T, D = any>(url: string, config?: AxiosRequestConfig<D>): Promise<R>
+  head<T = any, R = T, D = any>(url: string, config?: AxiosRequestConfig<D>): Promise<R>
+  options<T = any, R = T, D = any>(url: string, config?: AxiosRequestConfig<D>): Promise<R>
+  post<T = any, R = T, D = any>(url: string, data?: D, config?: AxiosRequestConfig<D>): Promise<R>
+  put<T = any, R = T, D = any>(url: string, data?: D, config?: AxiosRequestConfig<D>): Promise<R>
+  patch<T = any, R = T, D = any>(url: string, data?: D, config?: AxiosRequestConfig<D>): Promise<R>
+}
+
 // 创建axios实例
-const service: AxiosInstance = axios.create({
+const service = axios.create({
   baseURL: import.meta.env.VITE_API_BASE_URL || '/api/v1',
   timeout: 30000,
   headers: {
     'Content-Type': 'application/json'
   }
-})
+}) as unknown as UnwrappedAxiosInstance
 
 // 请求拦截器
 service.interceptors.request.use(
@@ -74,4 +89,3 @@ service.interceptors.response.use(
 )
 
 export default service
-
