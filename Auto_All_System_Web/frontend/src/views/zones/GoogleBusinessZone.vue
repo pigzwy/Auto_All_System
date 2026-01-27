@@ -99,33 +99,9 @@
             <el-icon><Avatar /></el-icon>
             <template #title>谷歌账号管理</template>
           </el-menu-item>
-          <el-menu-item index="cards">
-            <el-icon><CreditCard /></el-icon>
-            <template #title>虚拟卡管理</template>
-          </el-menu-item>
-          <el-menu-item index="auto-all">
-            <el-icon><Cpu /></el-icon>
-            <template #title>一键全自动</template>
-          </el-menu-item>
-          <el-menu-item index="sheerid">
-            <el-icon><Check /></el-icon>
-            <template #title>SheerID验证</template>
-          </el-menu-item>
-          <el-menu-item index="bind-card">
-            <el-icon><Link /></el-icon>
-            <template #title>自动绑卡</template>
-          </el-menu-item>
           <el-menu-item index="proxy-management">
             <el-icon><Connection /></el-icon>
             <template #title>代理管理</template>
-          </el-menu-item>
-          <el-menu-item index="security">
-            <el-icon><Lock /></el-icon>
-            <template #title>安全设置</template>
-          </el-menu-item>
-          <el-menu-item index="subscription">
-            <el-icon><Tickets /></el-icon>
-            <template #title>订阅验证</template>
           </el-menu-item>
         </el-menu>
       </div>
@@ -145,22 +121,16 @@ import { useRouter } from 'vue-router'
 import { useUserStore } from '@/stores/user'
 import { balanceApi } from '@/api/balance'
 import {
-  Platform, User, ArrowDown, Check, CreditCard,
-  Cpu, DataLine, Fold, Expand, Avatar, Link, Wallet,
-  Connection, Lock, Tickets, CircleCheckFilled, CircleCloseFilled, Loading
+  Platform, User, ArrowDown,
+  DataLine, Fold, Expand, Avatar, Wallet,
+  Connection, CircleCheckFilled, CircleCloseFilled, Loading
 } from '@element-plus/icons-vue'
 import { googleBrowserApi } from '@/api/google'
 
 // 导入模块组件
 import WorkstationModule from './google-modules/WorkstationModule.vue'
 import GoogleAccountsModule from './google-modules/GoogleAccountsModule.vue'
-import VirtualCardsModule from './google-modules/VirtualCardsModule.vue'
-import OneClickAutoModule from './google-modules/OneClickAutoModule.vue'
-import SheerIDModule from './google-modules/SheerIDModule.vue'
-import AutoBindCardModule from './google-modules/AutoBindCardModule.vue'
 import ProxyManagementModule from './google-modules/ProxyManagementModule.vue'
-import SecurityModule from './google-modules/SecurityModule.vue'
-import SubscriptionModule from './google-modules/SubscriptionModule.vue'
 
 const router = useRouter()
 const userStore = useUserStore()
@@ -204,13 +174,7 @@ const refreshBalance = async () => {
 const moduleComponents: Record<string, any> = {
   workstation: WorkstationModule,
   accounts: GoogleAccountsModule,
-  cards: VirtualCardsModule,
-  'auto-all': OneClickAutoModule,
-  sheerid: SheerIDModule,
-  'bind-card': AutoBindCardModule,
-  'proxy-management': ProxyManagementModule,
-  security: SecurityModule,
-  subscription: SubscriptionModule
+  'proxy-management': ProxyManagementModule
 }
 
 // 当前模块组件
