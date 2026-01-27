@@ -21,7 +21,7 @@ try:
 except ImportError:
     pyotp = None
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("plugin.google_business.login")
 
 
 # ==================== 登录状态枚举 ====================
@@ -74,7 +74,7 @@ async def check_google_login_by_avatar(page: Page, timeout: float = 10.0) -> boo
                 locator = page.locator(selector).first
                 if await locator.count() > 0 and await locator.is_visible():
                     return True
-            except:
+            except Exception:
                 continue
 
         # 通过 URL 判断
@@ -113,7 +113,7 @@ async def detect_captcha(page: Page) -> bool:
             if await page.locator(indicator).count() > 0:
                 return True
         return False
-    except:
+    except Exception:
         return False
 
 
@@ -140,7 +140,7 @@ async def detect_error_message(page: Page) -> Optional[str]:
             if await locator.count() > 0 and await locator.first.is_visible():
                 return await locator.first.inner_text()
         return None
-    except:
+    except Exception:
         return None
 
 
@@ -317,7 +317,7 @@ async def robust_google_login(
             # 等待页面稳定
             try:
                 await page.wait_for_load_state("networkidle", timeout=3000)
-            except:
+            except Exception:
                 pass
 
             # A. 检测是否已登录成功
@@ -449,7 +449,7 @@ async def robust_google_login(
                     try:
                         await btn.click()
                         await asyncio.sleep(1)
-                    except:
+                    except Exception:
                         pass
                     break
 
@@ -516,6 +516,6 @@ async def _extract_logged_in_email(page: Page) -> Optional[str]:
             match = re.search(r"[\w\.-]+@[\w\.-]+", label)
             if match:
                 return match.group(0)
-    except:
+    except Exception:
         pass
     return None

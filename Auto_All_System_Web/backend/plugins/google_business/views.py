@@ -34,7 +34,7 @@ from .serializers import (
     AccountGroupSerializer,
     AccountGroupCreateSerializer,
 )
-from .utils import EncryptionUtil, calculate_task_cost
+from .utils import EncryptionUtil, calculate_task_cost, upsert_geekez_profile_meta
 
 logger = logging.getLogger(__name__)
 
@@ -927,6 +927,19 @@ class GoogleAccountViewSet(viewsets.ModelViewSet):
                     )
 
         # 如果需要匹配浏览器，获取所有浏览器窗口
+        # 需求：导入账号后，先按邮箱名在 Geekez 环境查已有 profile，存在则复用 profile_id，避免重复创建。
+        geekez_profile_map = {}
+        try:
+            from apps.integrations.browser_base import get_browser_manager, BrowserType
+
+            manager = get_browser_manager()
+            api = manager.get_api(BrowserType.GEEKEZ)
+            for p in api.list_profiles():
+                if getattr(p, "name", None) and getattr(p, "id", None):
+                    geekez_profile_map[p.name] = p.id
+        except Exception as e:
+            logger.info(f"Skip geekez profile match: {e}")
+
         browser_map = {}
         if match_browser:
             try:
@@ -963,6 +976,8 @@ class GoogleAccountViewSet(viewsets.ModelViewSet):
                 recovery = parts[2].strip() if len(parts) > 2 else ""
                 secret = parts[3].strip() if len(parts) > 3 else ""
 
+                account_obj = None
+
                 # 检查是否已存在
                 existing = GoogleAccount.objects.filter(email=email).first()
                 if existing:
@@ -977,6 +992,7 @@ class GoogleAccountViewSet(viewsets.ModelViewSet):
                         if account_group and hasattr(existing, "group"):
                             existing.group = account_group
                         existing.save()
+                        account_obj = existing
                         accounts_list.append(existing)
                         imported_count += 1
                     else:
@@ -1004,8 +1020,24 @@ class GoogleAccountViewSet(viewsets.ModelViewSet):
                             pass
 
                     account = GoogleAccount.objects.create(**create_kwargs)
+                    account_obj = account
                     accounts_list.append(account)
                     imported_count += 1
+
+                # 若 Geekez 已有同名 profile，写入 metadata，供后续直接复用 profile_id。
+                if account_obj and geekez_profile_map:
+                    profile_id = geekez_profile_map.get(email)
+                    if profile_id:
+                        now_iso = timezone.now().isoformat()
+                        account_obj.metadata = upsert_geekez_profile_meta(
+                            account_obj.metadata,
+                            profile_id=profile_id,
+                            profile_name=email,
+                            now_iso=now_iso,
+                            created_by_system=False,
+                            matched_on_import=True,
+                        )
+                        account_obj.save(update_fields=["metadata"])
 
             except Exception as e:
                 errors.append(f"Error processing {line}: {str(e)}")

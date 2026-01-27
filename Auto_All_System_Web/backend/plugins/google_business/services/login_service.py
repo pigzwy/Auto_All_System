@@ -28,6 +28,13 @@ except ImportError:
 
 from .base import BaseBrowserService
 from ..utils import TaskLogger
+from .robust_google_auth import (
+    robust_google_login,
+    check_google_login_by_avatar,
+    detect_captcha,
+    detect_error_message,
+    wait_for_password_input,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -92,6 +99,16 @@ class GoogleLoginService(BaseBrowserService):
         log(f"开始登录: {email}")
 
         try:
+            ok, msg = await robust_google_login(
+                page,
+                account_info,
+                log_callback=(task_logger.info if task_logger else None),
+                max_captcha_wait=self.CAPTCHA_WAIT_TIMEOUT,
+            )
+            if ok:
+                return {"success": True, "message": msg}
+            return {"success": False, "error": msg}
+
             # ========== 1. 导航到登录页 ==========
             try:
                 current_url = page.url
@@ -258,6 +275,8 @@ class GoogleLoginService(BaseBrowserService):
         Returns:
             True=已登录, False=未登录
         """
+        return await check_google_login_by_avatar(page, timeout=timeout)
+
         try:
             # 头像按钮选择器 (多个备选)
             avatar_selectors = [
@@ -290,6 +309,8 @@ class GoogleLoginService(BaseBrowserService):
 
     async def _detect_captcha(self, page: Page) -> bool:
         """检测是否有机器人验证"""
+        return await detect_captcha(page)
+
         captcha_indicators = [
             'iframe[src*="recaptcha"]',
             'iframe[title*="reCAPTCHA"]',
@@ -314,6 +335,8 @@ class GoogleLoginService(BaseBrowserService):
 
     async def _detect_error_message(self, page: Page) -> Optional[str]:
         """检测登录错误消息"""
+        return await detect_error_message(page)
+
         error_selectors = [
             '[role="alert"]',
             ".error-msg",
@@ -339,6 +362,12 @@ class GoogleLoginService(BaseBrowserService):
         self, page: Page, task_logger: Optional[TaskLogger] = None
     ) -> Tuple[bool, str]:
         """等待密码输入框出现（支持人工过验证）"""
+        return await wait_for_password_input(
+            page,
+            max_wait_seconds=self.CAPTCHA_WAIT_TIMEOUT,
+            log_callback=(task_logger.info if task_logger else None),
+        )
+
         password_input = page.locator('input[type="password"]')
         max_wait_seconds = self.CAPTCHA_WAIT_TIMEOUT
         wait_interval = 2

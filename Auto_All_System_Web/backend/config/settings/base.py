@@ -4,6 +4,7 @@ Django基础配置
 """
 
 import os
+import sys
 from pathlib import Path
 from datetime import timedelta
 
@@ -40,6 +41,7 @@ INSTALLED_APPS = [
     "apps.integrations",
     "apps.integrations.google_accounts",
     "apps.integrations.bitbrowser",
+    "apps.integrations.geekez",
     "apps.integrations.proxies",
     "apps.integrations.email",  # 邮件服务
     # 插件系统
@@ -95,6 +97,16 @@ DATABASES = {
         "CONN_MAX_AGE": 600,
     }
 }
+
+# 让 `python manage.py test` 在没有本地 Postgres 的情况下也能跑起来。
+# 仅在 test 命令时切换 sqlite，不影响 dev/prod。
+if "test" in sys.argv:
+    DATABASES = {
+        "default": {
+            "ENGINE": "django.db.backends.sqlite3",
+            "NAME": ":memory:",
+        }
+    }
 
 # Cache (Redis)
 CACHES = {
@@ -248,6 +260,19 @@ BITBROWSER_API_URL = os.getenv(
 )
 
 # 日志配置
+_ENABLE_FILE_LOG = True
+try:
+    _log_dir = BASE_DIR / "logs"
+    _log_file = _log_dir / "django.log"
+
+    # 目录可能由容器/脚本创建为 root，开发/测试环境下不可写。
+    # 这里做一次轻量探测：不可写则禁用 file handler，避免 Django 启动直接报错。
+    _log_dir.mkdir(parents=True, exist_ok=True)
+    with open(_log_file, "a", encoding="utf-8"):
+        pass
+except Exception:
+    _ENABLE_FILE_LOG = False
+
 LOGGING = {
     "version": 1,
     "disable_existing_loggers": False,
@@ -287,3 +312,17 @@ LOGGING = {
         },
     },
 }
+
+if not _ENABLE_FILE_LOG:
+    LOGGING["handlers"].pop("file", None)
+
+    def _remove_file_handler(handler_list):
+        return [h for h in handler_list if h != "file"]
+
+    LOGGING["root"]["handlers"] = _remove_file_handler(LOGGING["root"]["handlers"]) or [
+        "console"
+    ]
+
+    for _cfg in LOGGING.get("loggers", {}).values():
+        if "handlers" in _cfg:
+            _cfg["handlers"] = _remove_file_handler(_cfg["handlers"]) or ["console"]

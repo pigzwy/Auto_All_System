@@ -22,6 +22,50 @@ from typing import Any, Optional
 logger = logging.getLogger(__name__)
 
 
+def upsert_geekez_profile_meta(
+    meta: Optional[dict],
+    *,
+    profile_id: str,
+    profile_name: str,
+    now_iso: Optional[str] = None,
+    created_by_system: Optional[bool] = None,
+    matched_on_import: bool = False,
+) -> dict:
+    """写入/更新账号 metadata 里的 Geekez profile 信息。
+
+    约定：Geekez profile 通常以 email 作为 name。
+    - 若已有 created_at，则保留
+    - 不写入任何敏感信息（密码/2FA 等）
+    """
+
+    if not now_iso:
+        now_iso = timezone.now().isoformat()
+
+    safe_meta: dict = meta if isinstance(meta, dict) else {}
+    current = safe_meta.get("geekez_profile")
+    current_dict = current if isinstance(current, dict) else {}
+
+    if created_by_system is None:
+        created_by_system = bool(current_dict.get("created_by_system", False))
+
+    created_at = current_dict.get("created_at") or now_iso
+
+    payload: dict = {
+        "browser_type": "geekez",
+        "profile_id": str(profile_id),
+        "profile_name": str(profile_name),
+        "created_by_system": bool(created_by_system),
+        "created_at": created_at,
+    }
+
+    if matched_on_import:
+        payload["matched_on_import"] = True
+        payload["matched_at"] = now_iso
+
+    safe_meta["geekez_profile"] = payload
+    return safe_meta
+
+
 def attach_playwright_trace(page: Any, task_logger: "TaskLogger") -> None:
     """把关键 Playwright 事件绑定到 TaskLogger。
 

@@ -455,7 +455,7 @@
                   link
                   type="primary"
                   size="small"
-                  @click="openCeleryTask(String(row.celery_task_id))"
+                  @click="openCeleryTask(String(row.celery_task_id), selectedAccount?.email)"
                 >
                   日志
                 </el-button>
@@ -724,6 +724,7 @@ const traceCursorForward = ref<number | null>(null)
 const traceFollowLatest = ref(true)
 const traceLoadingOlder = ref(false)
 const tracePollingTimer = ref<number | null>(null)
+let tracePollingInFlight = false
 const traceFile = ref('')
 const traceSize = ref(0)
 const traceScrollRef = ref<HTMLElement | null>(null)
@@ -750,6 +751,7 @@ const stopTracePolling = () => {
     window.clearInterval(tracePollingTimer.value)
     tracePollingTimer.value = null
   }
+  tracePollingInFlight = false
 }
 
 const startTracePolling = () => {
@@ -757,7 +759,13 @@ const startTracePolling = () => {
   tracePollingTimer.value = window.setInterval(async () => {
     if (!showCeleryDialog.value) return
     if (!traceFollowLatest.value) return
-    await fetchTraceForward()
+    if (tracePollingInFlight) return
+    tracePollingInFlight = true
+    try {
+      await fetchTraceForward()
+    } finally {
+      tracePollingInFlight = false
+    }
   }, 1000)
 }
 
@@ -765,6 +773,14 @@ watch(traceFollowLatest, (v) => {
   if (!showCeleryDialog.value) return
   if (v) startTracePolling()
   else stopTracePolling()
+})
+
+watch(showCeleryDialog, (v) => {
+  if (v) {
+    if (traceFollowLatest.value) startTracePolling()
+  } else {
+    stopTracePolling()
+  }
 })
 
 onBeforeUnmount(() => {
@@ -858,16 +874,13 @@ const fetchAccounts = async () => {
 const fetchGroups = async () => {
   try {
     const response = await googleGroupsApi.getGroups()
-    console.log('fetchGroups response:', response)
     if (Array.isArray(response)) {
       // 过滤掉"未分组"项（前端自己处理）
       groupList.value = response.filter((g: any) => g.id !== null)
-      console.log('groupList after filter:', groupList.value)
     } else if (response.data && Array.isArray(response.data)) {
       groupList.value = response.data.filter((g: any) => g.id !== null)
-      console.log('groupList after filter (from response.data):', groupList.value)
     } else {
-      console.log('Unknown response format:', typeof response, response)
+      groupList.value = []
     }
   } catch (error) {
     console.error('获取分组列表失败:', error)
@@ -1363,15 +1376,17 @@ const reloadTrace = async () => {
   await fetchTraceBackward({ initial: true })
 }
 
-const openCeleryTask = async (taskId: string) => {
-  const email = selectedAccount.value?.email
-  if (!email) {
-    ElMessage.error('未找到账号邮箱，无法读取 trace')
+const openCeleryTask = async (taskId: string, email?: string | null) => {
+  stopTracePolling()
+
+  const resolvedEmail = String(email || selectedAccount.value?.email || '').trim()
+  if (!resolvedEmail) {
+    ElMessage.error('未找到账号邮箱，无法读取 trace（请先打开账号的任务日志）')
     return
   }
 
   celeryTaskId.value = taskId
-  celeryEmail.value = email
+  celeryEmail.value = resolvedEmail
   showCeleryDialog.value = true
 
   // 初始化状态
