@@ -29,9 +29,16 @@ export interface CloudMailConfigForm {
   is_active: boolean
 }
 
+export interface PaginatedResponse<T> {
+  count: number
+  next: string | null
+  previous: string | null
+  results: T
+}
+
 // 获取配置列表
 export const getCloudMailConfigs = () => {
-  return request.get<CloudMailConfig[]>('/email/configs/')
+  return request.get<PaginatedResponse<CloudMailConfig[]> | CloudMailConfig[]>('/email/configs/')
 }
 
 // 获取单个配置

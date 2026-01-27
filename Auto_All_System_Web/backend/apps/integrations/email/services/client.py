@@ -10,6 +10,7 @@ import time
 import secrets
 import string
 import logging
+from urllib.parse import urlparse
 from typing import Optional, List, Dict, Any, Tuple
 from dataclasses import dataclass
 
@@ -72,7 +73,9 @@ class CloudMailClient:
         """
         self.api_base = api_base.rstrip("/")
         self.api_token = api_token
-        self.domains = domains
+        self.domains = [d for d in (self._normalize_domain(x) for x in (domains or [])) if d]
+        if not self.domains:
+            raise ValueError("CloudMail domains is empty or invalid")
         self.default_role = default_role
         self._client = httpx.Client(
             base_url=self.api_base,
@@ -80,17 +83,64 @@ class CloudMailClient:
             timeout=timeout,
         )
 
-    def _request(self, endpoint: str, data: dict = None) -> Any:
+    @staticmethod
+    def _normalize_domain(value: Any) -> str:
+        """Normalize domain input to plain host (example.com).
+
+        Admin UI may accidentally store items like:
+        - 'http://example.com/api/public'
+        - 'user@example.com'
+        - ' example.com '
+        """
+
+        raw = str(value or "").strip().lower()
+        if not raw:
+            return ""
+
+        # accept accidental email string
+        if "@" in raw:
+            raw = raw.split("@", 1)[1].strip()
+
+        # accept URL
+        if "://" in raw:
+            parsed = urlparse(raw)
+            raw = (parsed.netloc or parsed.path).strip()
+
+        # strip path/query fragments
+        raw = raw.split("/", 1)[0].strip()
+        raw = raw.split("?", 1)[0].strip()
+        raw = raw.split("#", 1)[0].strip()
+
+        # strip port
+        if ":" in raw:
+            raw = raw.split(":", 1)[0].strip()
+
+        # very small validation (ASCII only)
+        if not re.fullmatch(r"[a-z0-9.-]+", raw):
+            return ""
+        if "." not in raw:
+            return ""
+        return raw
+
+    def _request(self, endpoint: str, data: dict[str, Any] | None = None) -> Any:
         """发送 POST 请求"""
         try:
-            resp = self._client.post(endpoint, json=data or {})
+            payload: dict[str, Any] = data if isinstance(data, dict) else {}
+            resp = self._client.post(endpoint, json=payload)
             resp.raise_for_status()
             result = resp.json()
 
             if result.get("code") != 200:
                 error_msg = result.get("message", "Unknown error")
+                extra = ""
+                if endpoint == "/addUser" and isinstance(data, dict):
+                    users = data.get("list")
+                    if isinstance(users, list) and users:
+                        first = users[0] if isinstance(users[0], dict) else None
+                        if isinstance(first, dict) and first.get("email"):
+                            extra = f" (email={first.get('email')})"
                 logger.error(f"Cloud Mail API error: {error_msg}")
-                raise Exception(f"Cloud Mail API Error: {error_msg}")
+                raise Exception(f"Cloud Mail API Error: {error_msg}{extra}")
 
             return result.get("data")
         except httpx.HTTPError as e:
@@ -134,7 +184,9 @@ class CloudMailClient:
         """
         import random
 
-        domain = domain or random.choice(self.domains)
+        domain = self._normalize_domain(domain) if domain else random.choice(self.domains)
+        if not domain:
+            raise ValueError("Invalid domain")
         chars = string.ascii_lowercase + string.digits
         prefix = "".join(secrets.choice(chars) for _ in range(prefix_length))
         return f"{prefix}@{domain}"

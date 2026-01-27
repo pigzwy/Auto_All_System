@@ -217,7 +217,7 @@ const fetchConfigs = async () => {
   try {
     const res = await getCloudMailConfigs()
     // axios 拦截器已解包，res 直接是响应体
-    configs.value = res.results || res || []
+    configs.value = Array.isArray(res) ? res : res.results || []
   } catch (error) {
     ElMessage.error('获取配置列表失败')
   } finally {
@@ -356,24 +356,54 @@ const showDomainInput = () => {
   })
 }
 
+const normalizeDomain = (value: string) => {
+  let raw = (value || '').trim().toLowerCase()
+  if (!raw) return ''
+
+  if (raw.includes('@')) {
+    raw = raw.split('@')[1].trim()
+  }
+  if (raw.includes('://')) {
+    try {
+      raw = new URL(raw).host
+    } catch {
+      raw = raw.split('://')[1]
+    }
+  }
+  raw = raw.split('/')[0].split('?')[0].split('#')[0].trim()
+  if (raw.includes(':')) raw = raw.split(':')[0].trim()
+
+  // 仅做基础校验，避免把 url/path 存进去导致创建邮箱失败
+  if (!/^[a-z0-9.-]+$/.test(raw)) return ''
+  if (!raw.includes('.')) return ''
+
+  return raw
+}
+
 const addDomain = () => {
   const value = domainInputValue.value.trim()
-  if (value && !formData.domains.includes(value)) {
+  if (value) {
     // 尝试解析为 JSON 数组
     try {
       const parsed = JSON.parse(value)
       if (Array.isArray(parsed)) {
         parsed.forEach((d: string) => {
-          const domain = d.trim()
+          const domain = normalizeDomain(String(d || ''))
           if (domain && !formData.domains.includes(domain)) {
             formData.domains.push(domain)
           }
         })
       } else {
-        formData.domains.push(value)
+        const domain = normalizeDomain(value)
+        if (domain && !formData.domains.includes(domain)) {
+          formData.domains.push(domain)
+        }
       }
     } catch {
-      formData.domains.push(value)
+      const domain = normalizeDomain(value)
+      if (domain && !formData.domains.includes(domain)) {
+        formData.domains.push(domain)
+      }
     }
   }
   domainInputVisible.value = false
@@ -390,7 +420,7 @@ const handlePasteDomains = (e: ClipboardEvent) => {
     if (Array.isArray(parsed)) {
       e.preventDefault()
       parsed.forEach((d: string) => {
-        const domain = d.trim()
+        const domain = normalizeDomain(String(d || ''))
         if (domain && !formData.domains.includes(domain)) {
           formData.domains.push(domain)
         }
