@@ -56,6 +56,8 @@
           <el-menu-item index="/admin/google-accounts">Google账号</el-menu-item>
           <el-menu-item index="/admin/proxy">代理配置</el-menu-item>
           <el-menu-item index="/admin/bitbrowser">比特浏览器</el-menu-item>
+          <el-menu-item index="/admin/geekez">Geekez浏览器</el-menu-item>
+          <el-menu-item index="/admin/email">域名邮箱</el-menu-item>
         </el-sub-menu>
         
         <el-menu-item index="/admin/analytics">
@@ -138,6 +140,8 @@ const currentRouteName = computed(() => {
     'AdminTasks': '任务管理',
     'AdminCards': '虚拟卡管理',
     'AdminPlugins': '插件管理',
+    'AdminBitbrowser': '比特浏览器',
+    'AdminGeekez': 'Geekez浏览器',
   }
   return nameMap[route.name as string] || ''
 })

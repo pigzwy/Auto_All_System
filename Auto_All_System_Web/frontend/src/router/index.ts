@@ -92,6 +92,16 @@ const routes: RouteRecordRaw[] = [
         component: () => import('@/views/admin/BitbrowserManagement.vue')
       },
       {
+        path: 'geekez',
+        name: 'AdminGeekez',
+        component: () => import('@/views/admin/GeekezManagement.vue')
+      },
+      {
+        path: 'email',
+        name: 'AdminEmail',
+        component: () => import('@/views/admin/EmailManagement.vue')
+      },
+      {
         path: 'settings',
         name: 'AdminSettings',
         component: () => import('@/views/admin/SystemSettings.vue')
@@ -213,6 +223,13 @@ const routes: RouteRecordRaw[] = [
     name: 'GoogleBusinessZone',
     component: () => import('@/views/zones/GoogleBusinessZone.vue'),
     meta: { requiresAuth: true }
+  },
+  // GPT 业务专区 - 完全独立的页面
+  {
+    path: '/gpt-zone',
+    name: 'GptBusinessZone',
+    component: () => import('@/views/zones/GptBusinessZone.vue'),
+    meta: { requiresAuth: true }
   }
 ]
 
@@ -240,4 +257,3 @@ router.beforeEach((to, _from, next) => {
 })
 
 export default router
-

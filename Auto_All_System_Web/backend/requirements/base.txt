@@ -32,6 +32,9 @@ cryptography==42.0.1
 
 # 浏览器自动化
 playwright==1.40.0
+drissionpage==4.1.1.2
+tomli==2.3.0
+rich==14.2.0
 
 # 2FA
 pyotp==2.9.0
@@ -40,6 +43,7 @@ pyotp==2.9.0
 python-dotenv==1.0.0
 Pillow==10.2.0
 requests==2.31.0
+httpx==0.27.0
 
 # 翻译和网络
 deep-translator==1.11.4

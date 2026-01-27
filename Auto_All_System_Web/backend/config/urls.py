@@ -54,7 +54,9 @@ urlpatterns = [
     path('api/v1/admin/', include('apps.admin_panel.urls')),
     path('api/v1/plugins/', include('apps.plugins.urls')),  # 插件管理
     path('api/v1/bitbrowser/', include('apps.integrations.bitbrowser.urls')),  # 比特浏览器管理
+    path('api/v1/geekez/', include('apps.integrations.geekez.urls')),  # GeekezBrowser 管理
     path('api/v1/proxies/', include('apps.integrations.proxies.urls')),  # 代理管理
+    path('api/v1/email/', include('apps.integrations.email.urls')),  # 域名邮箱管理
 ]
 
 # 动态加载插件路由
