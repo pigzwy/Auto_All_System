@@ -4,11 +4,11 @@
 
     <el-card shadow="hover">
       <!-- Google业务专区 (固定卡片) -->
-      <div class="featured-section">
-        <h2>🔥 业务专区</h2>
-        <el-row :gutter="20" style="margin-top: 16px;">
-          <el-col :xs="24" :sm="12" :md="8" :lg="6">
-            <el-card class="zone-card featured-card" shadow="hover" @click="openGoogleZone">
+        <div class="featured-section">
+          <h2>🔥 业务专区</h2>
+          <el-row :gutter="20" style="margin-top: 16px;">
+            <el-col :xs="24" :sm="12" :md="8" :lg="6">
+              <el-card class="zone-card featured-card" shadow="hover" @click="openGoogleZone">
               <el-tag type="success" class="hot-tag">HOT</el-tag>
               <div class="zone-icon">
                 🚀
@@ -29,10 +29,35 @@
                 <el-tag size="small" type="primary">自动化</el-tag>
                 <span class="price">进入</span>
               </div>
-            </el-card>
-          </el-col>
-        </el-row>
-      </div>
+              </el-card>
+            </el-col>
+
+            <el-col :xs="24" :sm="12" :md="8" :lg="6">
+              <el-card class="zone-card featured-card gpt-featured-card" shadow="hover" @click="openGptZone">
+                <el-tag type="warning" class="hot-tag">NEW</el-tag>
+                <div class="zone-icon">
+                  🤖
+                </div>
+                <h3>GPT 业务</h3>
+                <p class="zone-desc">OpenAI Team 批量开通/授权自动化</p>
+                <div class="zone-stats">
+                  <div class="stat-item">
+                    <div class="stat-value">{{ gptStats.teams }}</div>
+                    <div class="stat-label">团队数</div>
+                  </div>
+                  <div class="stat-item">
+                    <div class="stat-value">{{ gptStats.accounts }}</div>
+                    <div class="stat-label">账号数</div>
+                  </div>
+                </div>
+                <div class="zone-footer">
+                  <el-tag size="small" type="success">自动化</el-tag>
+                  <span class="price">进入</span>
+                </div>
+              </el-card>
+            </el-col>
+          </el-row>
+        </div>
 
       <!-- 其他专区 -->
       <div v-if="zones.length > 0" style="margin-top: 32px;">
@@ -76,6 +101,7 @@ import { ref, reactive, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { zonesApi } from '@/api/zones'
 import { googleAccountsApi } from '@/api/google'
+import { gptBusinessApi } from '@/api/gpt_business'
 import type { Zone } from '@/types'
 
 const router = useRouter()
@@ -85,6 +111,11 @@ const zones = ref<Zone[]>([])
 const googleStats = reactive({
   accounts: 0,
   subscribed: 0
+})
+
+const gptStats = reactive({
+  teams: 0,
+  accounts: 0
 })
 
 const fetchZones = async () => {
@@ -114,6 +145,19 @@ const fetchGoogleStats = async () => {
   }
 }
 
+const fetchGptStats = async () => {
+  try {
+    const stats = await gptBusinessApi.getStatistics()
+    gptStats.teams = stats.teams || 0
+    gptStats.accounts = stats.accounts || 0
+  } catch (error) {
+    // 插件未启用/未安装时可能返回 404
+    gptStats.teams = 0
+    gptStats.accounts = 0
+    console.error('Failed to fetch GPT stats:', error)
+  }
+}
+
 const handleZoneClick = (zone: Zone) => {
   router.push({ name: 'ZoneDetail', params: { id: zone.id } })
 }
@@ -122,9 +166,14 @@ const openGoogleZone = () => {
   router.push('/google-zone')
 }
 
+const openGptZone = () => {
+  router.push('/gpt-zone')
+}
+
 onMounted(() => {
   fetchZones()
   fetchGoogleStats()
+  fetchGptStats()
 })
 </script>
 
@@ -158,6 +207,16 @@ onMounted(() => {
         position: absolute;
         top: 12px;
         right: 12px;
+      }
+    }
+
+    .featured-card.gpt-featured-card {
+      background: linear-gradient(135deg, #10b98115 0%, #06b6d415 100%);
+      border: 2px solid #10b981;
+
+      &:hover {
+        border-color: #06b6d4;
+        background: linear-gradient(135deg, #10b98125 0%, #06b6d425 100%);
       }
     }
   }
@@ -238,4 +297,3 @@ onMounted(() => {
   }
 }
 </style>
-
