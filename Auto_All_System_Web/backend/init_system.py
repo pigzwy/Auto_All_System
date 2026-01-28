@@ -30,6 +30,9 @@ def init_system():
     print("开始初始化系统...")
     print("=" * 60)
     
+    force_reset_passwords = os.getenv('RESET_TEST_PASSWORDS') == '1'
+    password_set_map = {}
+
     # 1. 创建超级用户（admin角色）
     print("\n1. 创建超级用户...")
     
@@ -45,12 +48,17 @@ def init_system():
         }
     )
     
-    if created:
+    if created or force_reset_passwords:
         admin_user.set_password('admin123456')
-        admin_user.save()
-        print("   ✓ 创建超级用户: admin (密码: admin123456)")
+        admin_user.save(update_fields=['password'])
+        password_set_map['admin'] = True
+        if created:
+            print("   ✓ 创建超级用户: admin (密码: admin123456)")
+        else:
+            print("   ✓ 重置超级用户密码: admin (密码: admin123456)")
     else:
-        print("   - 超级用户已存在")
+        password_set_map['admin'] = False
+        print("   - 超级用户已存在（不重置密码）")
     
     # 创建或获取余额记录
     user_balance, balance_created = UserBalance.objects.get_or_create(
@@ -76,12 +84,17 @@ def init_system():
         }
     )
     
-    if created:
+    if created or force_reset_passwords:
         admin_test.set_password('admin123456')
-        admin_test.save()
-        print("   ✓ 创建管理员用户: admin_user (密码: admin123456)")
+        admin_test.save(update_fields=['password'])
+        password_set_map['admin_user'] = True
+        if created:
+            print("   ✓ 创建管理员用户: admin_user (密码: admin123456)")
+        else:
+            print("   ✓ 重置管理员用户密码: admin_user (密码: admin123456)")
     else:
-        print("   - 管理员用户已存在")
+        password_set_map['admin_user'] = False
+        print("   - 管理员用户已存在（不重置密码）")
     
     # 创建或获取余额记录
     user_balance, balance_created = UserBalance.objects.get_or_create(
@@ -106,12 +119,17 @@ def init_system():
         }
     )
     
-    if created:
+    if created or force_reset_passwords:
         test_user.set_password('test123456')
-        test_user.save()
-        print("   ✓ 创建普通用户: test_user (密码: test123456)")
+        test_user.save(update_fields=['password'])
+        password_set_map['test_user'] = True
+        if created:
+            print("   ✓ 创建普通用户: test_user (密码: test123456)")
+        else:
+            print("   ✓ 重置普通用户密码: test_user (密码: test123456)")
     else:
-        print("   - 普通用户已存在")
+        password_set_map['test_user'] = False
+        print("   - 普通用户已存在（不重置密码）")
     
     # 创建或获取余额记录
     user_balance, balance_created = UserBalance.objects.get_or_create(
@@ -205,13 +223,25 @@ def init_system():
     print("\n【测试账号信息】")
     print("-" * 60)
     
+    default_passwords = {
+        'admin': 'admin123456',
+        'admin_user': 'admin123456',
+        'test_user': 'test123456',
+    }
+
     # 显示所有用户信息
     for user in User.objects.all():
         balance_obj = UserBalance.objects.filter(user=user).first()
         balance = balance_obj.balance if balance_obj else Decimal('0.00')
         print(f"\n{user.get_role_display()}")
         print(f"   用户名: {user.username}")
-        print(f"   密码: (与用户名相同)123456")
+        if user.username in default_passwords:
+            if password_set_map.get(user.username):
+                print(f"   密码: {default_passwords[user.username]}")
+            else:
+                print("   密码: (已存在，未重置；如需重置请设置 RESET_TEST_PASSWORDS=1)")
+        else:
+            print("   密码: (未知)")
         print(f"   邮箱: {user.email}")
         print(f"   余额: ¥{balance}")
     print("-" * 60)
@@ -249,4 +279,3 @@ if __name__ == '__main__':
         print(f"\n错误: {e}")
         import traceback
         traceback.print_exc()
-
