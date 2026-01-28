@@ -15,6 +15,7 @@ from django.conf import settings
 from pathlib import Path
 import os
 import logging
+import requests
 
 from apps.integrations.google_accounts.models import GoogleAccount, AccountGroup
 from .models import GoogleTask, GoogleCardInfo, GoogleTaskAccount, GoogleBusinessConfig
@@ -804,8 +805,57 @@ class GoogleAccountViewSet(viewsets.ModelViewSet):
 
         launch_info = api.launch_profile(profile.id)
         if not launch_info:
+            # Geekez 新版本场景：控制端口可能不支持 /profiles/{uuid}/launch。
+            # 作为降级策略：尽量触发 API Server 的 /api/open，至少把 UI 环境拉起。
+            opened = False
+            try:
+                from urllib.parse import quote
+
+                encoded = quote(profile.id or profile.name, safe="")
+                for base in getattr(api, "_api_base_urls", lambda: [])():
+                    try:
+                        r = requests.get(f"{base}/api/open/{encoded}", timeout=5)
+                        if r.status_code == 200:
+                            body = r.json() if r.content else {}
+                            if isinstance(body, dict) and body.get("success") is True:
+                                opened = True
+                                break
+                    except Exception:
+                        continue
+            except Exception:
+                opened = False
+
+            # 依旧写入 profile 信息，便于后续追踪
+            meta = account.metadata or {}
+            meta["geekez_profile"] = {
+                "browser_type": BrowserType.GEEKEZ.value,
+                "profile_id": profile.id,
+                "profile_name": profile.name,
+                "created_by_system": True,
+                "created_at": (meta.get("geekez_profile") or {}).get("created_at")
+                or timezone.now().isoformat(),
+            }
+            account.metadata = meta
+            account.save(update_fields=["metadata"])
+
+            if opened:
+                return Response(
+                    {
+                        "success": True,
+                        "ui_only": True,
+                        "created_profile": created_profile,
+                        "browser_type": BrowserType.GEEKEZ.value,
+                        "profile_id": profile.id,
+                        "profile_name": profile.name,
+                        "message": "已请求 Geekez 打开环境（API /api/open）。当前未获取 debugPort/wsEndpoint，无法进行 CDP 自动化。请在 Geekez 侧启用可用的 Control Server 或开启 Remote Debugging 后再试。",
+                    }
+                )
+
             return Response(
-                {"error": "启动 Geekez profile 失败"},
+                {
+                    "error": "启动 Geekez profile 失败",
+                    "hint": "你的 Geekez 控制端口不支持 /profiles/{uuid}/launch，且 /api/open 也未成功触发。请检查 Geekez 配置/版本。",
+                },
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
 

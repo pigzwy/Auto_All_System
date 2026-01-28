@@ -28,18 +28,24 @@ class GeekezBrowserAdapter(BaseBrowserAPI):
     browser_type = BrowserType.GEEKEZ
 
     def __init__(self, host: Optional[str] = None, port: Optional[int] = None):
-        # When running in Docker, the GeekezBrowser control server is on the host machine,
-        # so we must respect env vars (GEEKEZ_API_HOST/GEEKEZ_API_PORT). Passing explicit
-        # defaults like 127.0.0.1 would incorrectly point to the container itself.
-        self._api = GeekezBrowserAPI(host=host, port=port)
+        # DO NOT cache a GeekezBrowserAPI instance here.
+        #
+        # Reason: Geekez connection settings are editable from the "集成管理" UI and stored
+        # in DB. If we cache the API object at process startup, the worker will keep using
+        # old host/port until a restart, which looks like the code is "hard-coded".
+        self._host = host
+        self._port = port
+
+    def _get_api(self) -> GeekezBrowserAPI:
+        return GeekezBrowserAPI(host=self._host, port=self._port)
 
     def health_check(self) -> bool:
         """检查 GeekezBrowser 服务是否在线"""
-        return self._api.health_check()
+        return self._get_api().health_check()
 
     def list_profiles(self) -> List[ProfileInfo]:
         """获取所有 Profile 列表"""
-        profiles = self._api.list_profiles()
+        profiles = self._get_api().list_profiles()
         return [
             ProfileInfo(
                 id=p.id,
@@ -53,7 +59,7 @@ class GeekezBrowserAdapter(BaseBrowserAPI):
 
     def get_profile_by_name(self, name: str) -> Optional[ProfileInfo]:
         """根据名称获取 Profile"""
-        p = self._api.get_profile_by_name(name)
+        p = self._get_api().get_profile_by_name(name)
         if not p:
             return None
         return ProfileInfo(
@@ -71,7 +77,7 @@ class GeekezBrowserAdapter(BaseBrowserAPI):
         metadata: Optional[Dict[str, Any]] = None,
     ) -> ProfileInfo:
         """创建或更新 Profile"""
-        p = self._api.create_or_update_profile(name, proxy, metadata)
+        p = self._get_api().create_or_update_profile(name, proxy, metadata)
         return ProfileInfo(
             id=p.id,
             name=p.name,
@@ -82,11 +88,11 @@ class GeekezBrowserAdapter(BaseBrowserAPI):
 
     def delete_profile(self, profile_id: str) -> bool:
         """删除 Profile"""
-        return self._api.delete_profile(profile_id)
+        return self._get_api().delete_profile(profile_id)
 
     def launch_profile(self, profile_id: str) -> Optional[LaunchInfo]:
         """启动浏览器 Profile"""
-        info = self._api.launch_profile(profile_id)
+        info = self._get_api().launch_profile(profile_id)
         if not info:
             return None
         return LaunchInfo(
@@ -100,4 +106,4 @@ class GeekezBrowserAdapter(BaseBrowserAPI):
 
     def close_profile(self, profile_id: str) -> bool:
         """关闭浏览器 Profile"""
-        return self._api.close_profile(profile_id)
+        return self._get_api().close_profile(profile_id)
