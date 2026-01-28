@@ -319,6 +319,8 @@ class AccountsViewSet(ViewSet):
 
     @staticmethod
     def _get_cloudmail_client(config_id: int):
+        import json
+        import re
         from apps.integrations.email.models import CloudMailConfig
         from apps.integrations.email.services.client import CloudMailClient
 
@@ -326,15 +328,44 @@ class AccountsViewSet(ViewSet):
         if not cfg:
             raise ValueError("CloudMailConfig not found")
 
-        domains = cfg.domains if isinstance(cfg.domains, list) else []
-        domains = [str(x).strip() for x in domains if str(x).strip()]
-        if not domains:
-            raise ValueError("CloudMailConfig domains is empty")
+        # 解析 domains，处理各种错误格式
+        def parse_domains(value):
+            """递归解析嵌套的 JSON 字符串"""
+            if not value:
+                return []
+            if isinstance(value, str):
+                value = value.strip()
+                if value.startswith("["):
+                    # 修复末尾多余逗号: ,] -> ]
+                    fixed = re.sub(r',\s*]', ']', value)
+                    try:
+                        value = json.loads(fixed)
+                    except json.JSONDecodeError:
+                        return [value] if value else []
+                else:
+                    return [value] if value else []
+            if isinstance(value, list):
+                result = []
+                for item in value:
+                    result.extend(parse_domains(item))
+                return result
+            return [str(value)] if value else []
+
+        raw_domains = parse_domains(cfg.domains)
+        raw_domains = [str(x).strip() for x in raw_domains if str(x).strip()]
+        if not raw_domains:
+            raise ValueError(f"CloudMailConfig id={config_id} domains is empty, raw value: {cfg.domains!r}")
+
+        # 使用 CloudMailClient 的域名标准化逻辑预检查
+        normalized = [CloudMailClient._normalize_domain(d) for d in raw_domains]
+        valid_domains = [d for d in normalized if d]
+        if not valid_domains:
+            raise ValueError(f"CloudMailConfig id={config_id} domains are all invalid after normalization. Raw: {raw_domains!r}, Normalized: {normalized!r}")
 
         return CloudMailClient(
             api_base=str(cfg.api_base),
             api_token=str(cfg.api_token),
-            domains=domains,
+            domains=valid_domains,
             default_role=str(cfg.default_role or "user"),
         )
 
