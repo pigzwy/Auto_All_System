@@ -1,5 +1,9 @@
 #!/bin/bash
 
+DB_PORT=${DB_PORT:-5432}
+REDIS_HOST=${REDIS_HOST:-redis}
+REDIS_PORT=${REDIS_PORT:-6379}
+
 # 等待数据库服务就绪
 echo "Waiting for PostgreSQL..."
 while ! nc -z $DB_HOST $DB_PORT; do
@@ -9,7 +13,7 @@ echo "PostgreSQL started"
 
 # 等待Redis服务就绪
 echo "Waiting for Redis..."
-while ! nc -z redis 6379; do
+while ! nc -z $REDIS_HOST $REDIS_PORT; do
   sleep 0.1
 done
 echo "Redis started"
@@ -45,4 +49,3 @@ python manage.py collectstatic --noinput
 # 启动应用
 echo "Starting application..."
 exec "$@"
-

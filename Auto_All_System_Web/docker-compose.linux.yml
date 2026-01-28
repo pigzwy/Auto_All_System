@@ -1,0 +1,25 @@
+services:
+  # Linux: build with host network (faster / respects local proxy)
+  backend:
+    build:
+      network: host
+
+  # GeekezBrowser API Server binds to 127.0.0.1 by default (containers cannot reach).
+  # This forwarder exposes it on host 0.0.0.0:12139.
+  geekez-api-forwarder:
+    image: python:3.11-slim
+    network_mode: host
+    restart: unless-stopped
+    volumes:
+      - ./scripts/tcp_forward.py:/tcp_forward.py:ro
+    command: python /tcp_forward.py --listen 0.0.0.0:12139 --target 127.0.0.1:12138
+
+  # Geekez control server binds to 127.0.0.1 in many setups.
+  # This forwarder exposes it on host 0.0.0.0:19528.
+  geekez-control-forwarder:
+    image: python:3.11-slim
+    network_mode: host
+    restart: unless-stopped
+    volumes:
+      - ./scripts/tcp_forward.py:/tcp_forward.py:ro
+    command: python /tcp_forward.py --listen 0.0.0.0:19528 --target 127.0.0.1:19527

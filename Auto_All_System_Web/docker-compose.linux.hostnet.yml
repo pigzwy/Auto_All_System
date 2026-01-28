@@ -1,0 +1,60 @@
+services:
+  # Linux (Advanced): run backend stack in host network.
+  #
+  # Why: GeekezBrowser's Chrome remote debugging port usually binds to 127.0.0.1 only.
+  # With bridge networking, containers cannot reach host localhost dynamic ports.
+  # Host networking makes container 127.0.0.1 == host 127.0.0.1, enabling CDP automation.
+  backend:
+    network_mode: host
+    extra_hosts: []
+    ports: []
+    environment:
+      USE_HOST_NETWORK: "1"
+      DB_HOST: 127.0.0.1
+      DB_PORT: 5432
+      REDIS_HOST: 127.0.0.1
+      REDIS_PORT: 6379
+      REDIS_URL: redis://127.0.0.1:6379/1
+      CELERY_BROKER_URL: redis://127.0.0.1:6379/0
+      CELERY_RESULT_BACKEND: redis://127.0.0.1:6379/1
+      BITBROWSER_API_URL: http://127.0.0.1:54345
+      GEEKEZ_CONTROL_HOST: 127.0.0.1
+      GEEKEZ_CONTROL_PORT: 19527
+      GEEKEZ_API_SERVER_HOST: 127.0.0.1
+      GEEKEZ_API_SERVER_PORT: 12138
+
+  celery:
+    network_mode: host
+    extra_hosts: []
+    environment:
+      USE_HOST_NETWORK: "1"
+      DB_HOST: 127.0.0.1
+      DB_PORT: 5432
+      REDIS_HOST: 127.0.0.1
+      REDIS_PORT: 6379
+      REDIS_URL: redis://127.0.0.1:6379/1
+      CELERY_BROKER_URL: redis://127.0.0.1:6379/0
+      CELERY_RESULT_BACKEND: redis://127.0.0.1:6379/1
+      BITBROWSER_API_URL: http://127.0.0.1:54345
+      GEEKEZ_CONTROL_HOST: 127.0.0.1
+      GEEKEZ_CONTROL_PORT: 19527
+      GEEKEZ_API_SERVER_HOST: 127.0.0.1
+      GEEKEZ_API_SERVER_PORT: 12138
+
+  celery-beat:
+    network_mode: host
+    extra_hosts: []
+    environment:
+      USE_HOST_NETWORK: "1"
+      DB_HOST: 127.0.0.1
+      DB_PORT: 5432
+      REDIS_HOST: 127.0.0.1
+      REDIS_PORT: 6379
+      REDIS_URL: redis://127.0.0.1:6379/1
+      CELERY_BROKER_URL: redis://127.0.0.1:6379/0
+      CELERY_RESULT_BACKEND: redis://127.0.0.1:6379/1
+      BITBROWSER_API_URL: http://127.0.0.1:54345
+      GEEKEZ_CONTROL_HOST: 127.0.0.1
+      GEEKEZ_CONTROL_PORT: 19527
+      GEEKEZ_API_SERVER_HOST: 127.0.0.1
+      GEEKEZ_API_SERVER_PORT: 12138

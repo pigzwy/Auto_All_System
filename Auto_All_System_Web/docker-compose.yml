@@ -32,23 +32,29 @@ services:
   # Django 后端
   backend:
     container_name: backend
+    image: auto_all_system_web-backend
     build:
       context: ./backend
       dockerfile: Dockerfile
+      args:
+        PIP_INDEX_URL: ${PIP_INDEX_URL:-}
+        PIP_TRUSTED_HOST: ${PIP_TRUSTED_HOST:-}
+        PIP_PROXY: ${PIP_PROXY:-}
+        HTTP_PROXY: ${HTTP_PROXY:-}
+        HTTPS_PROXY: ${HTTPS_PROXY:-}
+        NO_PROXY: ${NO_PROXY:-}
+        http_proxy: ${http_proxy:-}
+        https_proxy: ${https_proxy:-}
+        no_proxy: ${no_proxy:-}
+    entrypoint: ["sh", "/app/docker-entrypoint.sh"]
     command: sh -c "python manage.py runserver 0.0.0.0:8000"
     volumes:
       - ./backend:/app
-      - static_volume:/app/staticfiles
-      - media_volume:/app/media
-      # Mount GeekezBrowser profile storage from host (Windows default).
-      # If your Windows username differs, update this path.
-      - C:/Users/pig/AppData/Roaming/geekez-browser/BrowserProfiles:/geekez-browser/BrowserProfiles
-    ports:
-      - "8000:8000"
+      - "${GEEKEZ_BROWSER_PROFILES_PATH:-./data/geekez-profiles}:/geekez-browser/BrowserProfiles"
     env_file:
       - ./backend/.env
     environment:
-      # Docker环境标识（必须设置为docker才能使用host.docker.internal）
+      # Docker环境标识
       - DJANGO_ENVIRONMENT=docker
       # 数据库配置
       - DB_HOST=db
@@ -59,41 +65,31 @@ services:
       - REDIS_URL=redis://redis:6379/1
       - CELERY_BROKER_URL=redis://redis:6379/0
       - CELERY_RESULT_BACKEND=redis://redis:6379/1
-      # HTTP配置
-      - ENABLE_HTTPS=false
-      - ALLOWED_HOSTS=localhost,127.0.0.1,backend
-      # 比特浏览器API（使用host.docker.internal访问宿主机）
+      # 比特浏览器API
       - BITBROWSER_API_URL=http://host.docker.internal:54345
-      # GeekezBrowser API（使用host.docker.internal访问宿主机）
+      # GeekezBrowser API
       - GEEKEZ_API_HOST=host.docker.internal
       - GEEKEZ_API_PORT=19527
-      # GeekezBrowser profiles.json/settings.json directory inside container
       - GEEKEZ_DATA_DIR=/geekez-browser/BrowserProfiles
+    depends_on:
+      - db
+      - redis
     extra_hosts:
       - "host.docker.internal:host-gateway"
-    depends_on:
-      db:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/api/health/"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
+    ports:
+      - "8000:8000"
 
-  # Celery Worker
-  celery:
-    container_name: celery
-    build:
-      context: ./backend
-      dockerfile: Dockerfile
-    command: celery -A config worker -l info
+  # Celery Beat (定时任务)
+  celery-beat:
+    container_name: celery-beat
+    image: auto_all_system_web-backend
+    entrypoint: ["sh", "/app/docker-entrypoint.sh"]
+    command: celery -A config beat -l info
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:
       - ./backend:/app
-      - C:/Users/pig/AppData/Roaming/geekez-browser/BrowserProfiles:/geekez-browser/BrowserProfiles
+      - "${GEEKEZ_BROWSER_PROFILES_PATH:-./data/geekez-profiles}:/geekez-browser/BrowserProfiles"
     env_file:
       - ./backend/.env
     environment:
@@ -119,35 +115,29 @@ services:
       - redis
       - backend
 
-  # Celery Beat (定时任务)
-  celery-beat:
-    container_name: celery-beat
-    build:
-      context: ./backend
-      dockerfile: Dockerfile
-    command: celery -A config beat -l info
+  # Celery Worker
+  celery:
+    container_name: celery
+    image: auto_all_system_web-backend
+    entrypoint: ["sh", "/app/docker-entrypoint.sh"]
+    command: celery -A config worker -l info
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:
       - ./backend:/app
-      - C:/Users/pig/AppData/Roaming/geekez-browser/BrowserProfiles:/geekez-browser/BrowserProfiles
+      - "${GEEKEZ_BROWSER_PROFILES_PATH:-./data/geekez-profiles}:/geekez-browser/BrowserProfiles"
     env_file:
       - ./backend/.env
     environment:
-      # Docker环境标识
       - DJANGO_ENVIRONMENT=docker
-      # 数据库配置
       - DB_HOST=db
       - DB_NAME=auto_all_db
       - DB_USER=auto_all_user
       - DB_PASSWORD=your_password_here
-      # Redis配置
       - REDIS_URL=redis://redis:6379/1
       - CELERY_BROKER_URL=redis://redis:6379/0
       - CELERY_RESULT_BACKEND=redis://redis:6379/1
-      # 比特浏览器API
       - BITBROWSER_API_URL=http://host.docker.internal:54345
-      # GeekezBrowser API
       - GEEKEZ_API_HOST=host.docker.internal
       - GEEKEZ_API_PORT=19527
       - GEEKEZ_DATA_DIR=/geekez-browser/BrowserProfiles
