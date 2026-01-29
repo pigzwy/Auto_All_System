@@ -109,10 +109,11 @@
           </template>
         </el-table-column>
 
-        <el-table-column label="操作" width="300" fixed="right">
+        <el-table-column label="操作" width="360" fixed="right">
           <template #default="scope">
             <el-button text type="primary" @click="openCreateChild(scope.row)">生成子号</el-button>
             <el-button text @click="editSeat(scope.row)">改座位</el-button>
+            <el-button text @click="viewTasks(scope.row)">任务日志</el-button>
             <el-button text @click="launchGeekez(scope.row.id)">打开Geekez</el-button>
             <el-button text type="danger" @click="removeAccount(scope.row.id)">删除</el-button>
           </template>
@@ -186,6 +187,54 @@
         <el-button @click="childDialogVisible = false">取消</el-button>
         <el-button type="primary" :loading="creating" @click="createChild">创建</el-button>
       </template>
+    </el-dialog>
+
+    <el-drawer v-model="tasksDrawerVisible" title="任务日志" size="600px">
+      <div v-if="tasksDrawerAccount">
+        <div class="drawer-account-info">
+          <span class="mono">{{ tasksDrawerAccount.email }}</span>
+        </div>
+        <el-table :data="accountTasks" v-loading="tasksLoading" size="small" style="width: 100%;">
+          <el-table-column prop="type" label="类型" width="120">
+            <template #default="scope">
+              <el-tag size="small" :type="getTaskTypeTag(scope.row.type)">{{ getTaskTypeName(scope.row.type) }}</el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column prop="status" label="状态" width="100">
+            <template #default="scope">
+              <el-tag size="small" :type="getStatusTag(scope.row.status)">{{ scope.row.status }}</el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column label="创建时间" min-width="160">
+            <template #default="scope">
+              <span class="muted">{{ scope.row.created_at || '-' }}</span>
+            </template>
+          </el-table-column>
+          <el-table-column label="错误" min-width="200">
+            <template #default="scope">
+              <span class="muted" style="color: #ef4444;">{{ scope.row.error || '-' }}</span>
+            </template>
+          </el-table-column>
+          <el-table-column label="产物" width="80">
+            <template #default="scope">
+              <el-button link type="primary" size="small" @click="viewTaskArtifacts(scope.row)">查看</el-button>
+            </template>
+          </el-table-column>
+        </el-table>
+        <el-empty v-if="!tasksLoading && accountTasks.length === 0" description="暂无任务记录" />
+      </div>
+    </el-drawer>
+
+    <el-dialog v-model="artifactsDialogVisible" title="任务产物" width="520px">
+      <el-table :data="currentTaskArtifacts" v-loading="artifactsLoading" size="small" style="width: 100%;">
+        <el-table-column prop="name" label="文件" min-width="200" />
+        <el-table-column label="下载" width="100">
+          <template #default="scope">
+            <el-link :href="scope.row.download_url" target="_blank" type="primary">下载</el-link>
+          </template>
+        </el-table-column>
+      </el-table>
+      <el-empty v-if="!artifactsLoading && currentTaskArtifacts.length === 0" description="暂无产物" />
     </el-dialog>
   </div>
 </template>
@@ -415,10 +464,14 @@ const launchGeekez = async (accountId: string) => {
 }
 
 const runSelfRegister = async () => {
-  if (!selectedMother.value) return
+  if (!selectedMother.value) {
+    ElMessage.warning('请先选中一个母号')
+    return
+  }
   try {
     const res = await gptBusinessApi.selfRegister(selectedMother.value.id)
     ElMessage.success(res?.message || '已启动：自动开通')
+    refresh()
   } catch (e: any) {
     ElMessage.error(e?.response?.data?.detail || e?.message || '启动失败')
   }
@@ -442,6 +495,86 @@ const runSub2apiSink = async () => {
   } catch (e: any) {
     ElMessage.error(e?.response?.data?.detail || e?.message || '启动失败')
   }
+}
+
+const tasksDrawerVisible = ref(false)
+const tasksDrawerAccount = ref<MotherRow | null>(null)
+type TaskRow = {
+  id: string
+  type?: string
+  status?: string
+  mother_id?: string
+  created_at?: string
+  error?: string
+}
+
+type TaskArtifact = { name: string; download_url: string }
+
+const accountTasks = ref<TaskRow[]>([])
+const tasksLoading = ref(false)
+
+const artifactsDialogVisible = ref(false)
+const artifactsLoading = ref(false)
+const currentTaskArtifacts = ref<TaskArtifact[]>([])
+
+const viewTasks = async (mother: MotherRow) => {
+  tasksDrawerAccount.value = mother
+  tasksDrawerVisible.value = true
+  tasksLoading.value = true
+  try {
+    const res = await gptBusinessApi.listTasks()
+    const allTasks: TaskRow[] = (res?.tasks || []) as TaskRow[]
+    accountTasks.value = allTasks.filter(t => t.mother_id === mother.id)
+  } catch (e: any) {
+    ElMessage.error(e?.response?.data?.detail || e?.message || '获取任务失败')
+    accountTasks.value = []
+  } finally {
+    tasksLoading.value = false
+  }
+}
+
+const viewTaskArtifacts = async (task: TaskRow) => {
+  if (!task?.id) return
+  artifactsDialogVisible.value = true
+  artifactsLoading.value = true
+  currentTaskArtifacts.value = []
+  try {
+    const artifacts = await gptBusinessApi.getTaskArtifacts(task.id)
+    currentTaskArtifacts.value = artifacts || []
+  } catch (e: any) {
+    ElMessage.error(e?.response?.data?.detail || e?.message || '获取产物失败')
+    currentTaskArtifacts.value = []
+  } finally {
+    artifactsLoading.value = false
+  }
+}
+
+const getTaskTypeName = (type: string) => {
+  const map: Record<string, string> = {
+    self_register: '自动开通',
+    auto_invite: '自动邀请',
+    sub2api_sink: '自动入池'
+  }
+  return map[type] || type
+}
+
+const getTaskTypeTag = (type: string) => {
+  const map: Record<string, string> = {
+    self_register: 'success',
+    auto_invite: 'warning',
+    sub2api_sink: 'info'
+  }
+  return map[type] || ''
+}
+
+const getStatusTag = (status: string) => {
+  const map: Record<string, string> = {
+    success: 'success',
+    failed: 'danger',
+    running: 'primary',
+    pending: 'info'
+  }
+  return map[status] || 'info'
 }
 
 onMounted(() => {
@@ -509,6 +642,13 @@ onMounted(() => {
     display: inline-flex;
     align-items: center;
     gap: 6px;
+  }
+
+  .drawer-account-info {
+    margin-bottom: 16px;
+    padding: 12px;
+    background: #f3f4f6;
+    border-radius: 6px;
   }
 }
 </style>

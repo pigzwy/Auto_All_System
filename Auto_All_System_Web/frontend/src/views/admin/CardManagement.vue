@@ -11,6 +11,10 @@
           <el-icon><Upload /></el-icon>
           批量导入
         </el-button>
+        <el-button type="warning" @click="showRedeemDialog = true">
+          <el-icon><Key /></el-icon>
+          卡密激活
+        </el-button>
       </el-button-group>
     </div>
 
@@ -57,6 +61,18 @@
           </template>
         </el-table-column>
         <el-table-column prop="use_count" label="使用次数" width="100" />
+        <el-table-column label="账单地址" min-width="200">
+          <template #default="{ row }">
+            <div v-if="row.billing_address && Object.keys(row.billing_address).length > 0" class="text-xs">
+              <div>{{ row.billing_address.address_line1 || '-' }}</div>
+              <div class="text-gray-500">
+                {{ [row.billing_address.city, row.billing_address.state, row.billing_address.postal_code].filter(Boolean).join(', ') }}
+              </div>
+              <div class="text-gray-400">{{ row.billing_address.country || '' }}</div>
+            </div>
+            <span v-else class="text-gray">-</span>
+          </template>
+        </el-table-column>
         <el-table-column v-if="showOwnerColumn" label="所属者" width="120">
           <template #default="{ row }">
             <span v-if="row.owner_user">
@@ -172,14 +188,174 @@
         </el-button>
       </template>
     </el-dialog>
+
+    <!-- 卡密激活对话框 -->
+    <el-dialog v-model="showRedeemDialog" title="卡密激活" width="500px" @open="loadApiConfigs">
+      <el-alert type="info" :closable="false" style="margin-bottom: 16px">
+        <template #title>
+          <div>输入卡密后将调用激活接口获取完整卡信息（包含账单地址）</div>
+        </template>
+      </el-alert>
+      
+      <el-form :model="redeemForm" label-width="100px">
+        <el-form-item label="API 配置">
+          <el-select 
+            v-model="redeemForm.config_id" 
+            placeholder="选择 API 配置（默认使用系统默认）"
+            clearable
+            style="width: 100%"
+          >
+            <el-option 
+              v-for="config in apiConfigs" 
+              :key="config.id" 
+              :label="config.name + (config.is_default ? ' (默认)' : '')" 
+              :value="config.id"
+            />
+          </el-select>
+          <div class="text-xs text-gray-400 mt-1">
+            <el-link type="primary" @click="showApiConfigDialog = true">管理 API 配置</el-link>
+          </div>
+        </el-form-item>
+        <el-form-item label="卡密">
+          <el-input 
+            v-model="redeemForm.key_id" 
+            placeholder="输入卡密 key_id"
+            clearable
+          />
+        </el-form-item>
+        <el-form-item label="卡池类型">
+          <el-radio-group v-model="redeemForm.pool_type">
+            <el-radio label="public">公共卡池</el-radio>
+            <el-radio label="private">私有卡池</el-radio>
+          </el-radio-group>
+        </el-form-item>
+      </el-form>
+      
+      <div v-if="redeemResult" class="redeem-result">
+        <el-alert :type="redeemResult.type" :closable="false">
+          <template #title>
+            <div>{{ redeemResult.message }}</div>
+          </template>
+        </el-alert>
+        <div v-if="redeemResult.data" class="card-info-preview">
+          <el-descriptions :column="2" border size="small" style="margin-top: 12px">
+            <el-descriptions-item label="卡号">{{ redeemResult.data.masked_card_number }}</el-descriptions-item>
+            <el-descriptions-item label="有效期">{{ String(redeemResult.data.expiry_month).padStart(2, '0') }}/{{ redeemResult.data.expiry_year }}</el-descriptions-item>
+            <el-descriptions-item label="持卡人">{{ redeemResult.data.card_holder || '-' }}</el-descriptions-item>
+            <el-descriptions-item label="卡类型">{{ redeemResult.data.card_type }}</el-descriptions-item>
+            <el-descriptions-item label="地址" :span="2">
+              {{ formatBillingAddress(redeemResult.data.billing_address) }}
+            </el-descriptions-item>
+          </el-descriptions>
+        </div>
+      </div>
+      
+      <template #footer>
+        <el-button @click="showRedeemDialog = false">关闭</el-button>
+        <el-button type="primary" @click="handleRedeem" :loading="redeeming">
+          {{ redeeming ? '激活中...' : '激活' }}
+        </el-button>
+      </template>
+    </el-dialog>
+
+    <!-- API 配置管理对话框 -->
+    <el-dialog v-model="showApiConfigDialog" title="API 配置管理" width="800px">
+      <div class="mb-4">
+        <el-button type="primary" size="small" @click="showAddConfigForm = true">
+          添加配置
+        </el-button>
+      </div>
+      
+      <el-table :data="apiConfigs" v-loading="loadingConfigs" stripe size="small">
+        <el-table-column prop="name" label="名称" width="120">
+          <template #default="{ row }">
+            {{ row.name }}
+            <el-tag v-if="row.is_default" size="small" type="success" class="ml-1">默认</el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column prop="redeem_url" label="激活接口" min-width="200">
+          <template #default="{ row }">
+            <span class="text-xs font-mono">{{ row.redeem_url }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column prop="is_active" label="状态" width="80">
+          <template #default="{ row }">
+            <el-tag :type="row.is_active ? 'success' : 'info'" size="small">
+              {{ row.is_active ? '启用' : '禁用' }}
+            </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="操作" width="180">
+          <template #default="{ row }">
+            <el-button link type="primary" size="small" @click="editApiConfig(row)">编辑</el-button>
+            <el-button link type="success" size="small" v-if="!row.is_default" @click="setDefaultConfig(row)">设为默认</el-button>
+            <el-button link type="danger" size="small" @click="deleteApiConfig(row)">删除</el-button>
+          </template>
+        </el-table-column>
+      </el-table>
+      
+      <!-- 添加/编辑配置表单 -->
+      <el-dialog v-model="showAddConfigForm" :title="editingConfig ? '编辑配置' : '添加配置'" width="600px" append-to-body>
+        <el-form :model="configForm" label-width="120px">
+          <el-form-item label="配置名称" required>
+            <el-input v-model="configForm.name" placeholder="如: ActCard" />
+          </el-form-item>
+          <el-form-item label="激活接口 URL" required>
+            <el-input v-model="configForm.redeem_url" placeholder="https://actcard.xyz/api/keys/redeem" />
+          </el-form-item>
+          <el-form-item label="查询接口 URL">
+            <el-input v-model="configForm.query_url" placeholder="https://actcard.xyz/api/keys/query" />
+          </el-form-item>
+          <el-form-item label="请求方法">
+            <el-select v-model="configForm.request_method" style="width: 120px">
+              <el-option label="POST" value="POST" />
+              <el-option label="GET" value="GET" />
+            </el-select>
+          </el-form-item>
+          <el-form-item label="超时时间(秒)">
+            <el-input-number v-model="configForm.timeout" :min="5" :max="120" />
+          </el-form-item>
+          <el-form-item label="请求头 (JSON)">
+            <el-input 
+              v-model="configForm.request_headers_str" 
+              type="textarea" 
+              :rows="2"
+              placeholder='{"Authorization": "Bearer xxx"}'
+            />
+          </el-form-item>
+          <el-form-item label="响应映射 (JSON)">
+            <el-input 
+              v-model="configForm.response_mapping_str" 
+              type="textarea" 
+              :rows="3"
+              placeholder='{"data_path": "checkout", "fields": {"card_number": "card_number"}}'
+            />
+            <div class="text-xs text-gray-400 mt-1">
+              data_path: 响应中卡数据的路径；fields: 字段名映射
+            </div>
+          </el-form-item>
+          <el-form-item label="启用">
+            <el-switch v-model="configForm.is_active" />
+          </el-form-item>
+          <el-form-item label="备注">
+            <el-input v-model="configForm.notes" type="textarea" :rows="2" />
+          </el-form-item>
+        </el-form>
+        <template #footer>
+          <el-button @click="showAddConfigForm = false">取消</el-button>
+          <el-button type="primary" @click="saveApiConfig" :loading="savingConfig">保存</el-button>
+        </template>
+      </el-dialog>
+    </el-dialog>
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, reactive, onMounted } from 'vue'
 import { cardsApi } from '@/api/cards'
+import type { CardApiConfig } from '@/api/cards'
 import { ElMessage } from 'element-plus'
-import { Plus, Upload } from '@element-plus/icons-vue'
+import { Plus, Upload, Key } from '@element-plus/icons-vue'
 import { useUserStore } from '@/stores/user'
 import type { Card } from '@/types'
 
@@ -190,8 +366,11 @@ const currentPage = ref(1)
 const pageSize = ref(20)
 const showDialog = ref(false)
 const showImportDialog = ref(false)
+const showRedeemDialog = ref(false)
 const importing = ref(false)
+const redeeming = ref(false)
 const importResult = ref<any>(null)
+const redeemResult = ref<any>(null)
 const showOwnerColumn = ref(false)  // 是否显示所属者列
 
 const cardForm = reactive({
@@ -206,6 +385,32 @@ const cardForm = reactive({
 const importForm = reactive({
   cardsText: '',
   pool_type: 'public'
+})
+
+const redeemForm = reactive({
+  key_id: '',
+  pool_type: 'public',
+  config_id: undefined as number | undefined
+})
+
+// API 配置相关
+const apiConfigs = ref<CardApiConfig[]>([])
+const loadingConfigs = ref(false)
+const showApiConfigDialog = ref(false)
+const showAddConfigForm = ref(false)
+const savingConfig = ref(false)
+const editingConfig = ref<CardApiConfig | null>(null)
+
+const configForm = reactive({
+  name: '',
+  redeem_url: '',
+  query_url: '',
+  request_method: 'POST',
+  timeout: 30,
+  request_headers_str: '',
+  response_mapping_str: '',
+  is_active: true,
+  notes: ''
 })
 
 const fetchCards = async () => {
@@ -395,6 +600,187 @@ const handleImport = async () => {
 onMounted(() => {
   fetchCards()
 })
+
+const formatBillingAddress = (address: any): string => {
+  if (!address || Object.keys(address).length === 0) return '-'
+  const parts = [
+    address.address_line1,
+    address.city,
+    address.state,
+    address.postal_code,
+    address.country
+  ].filter(Boolean)
+  return parts.join(', ') || '-'
+}
+
+const handleRedeem = async () => {
+  if (!redeemForm.key_id.trim()) {
+    ElMessage.warning('请输入卡密')
+    return
+  }
+  
+  redeeming.value = true
+  redeemResult.value = null
+  
+  try {
+    const response = await cardsApi.redeemCard({
+      key_id: redeemForm.key_id.trim(),
+      pool_type: redeemForm.pool_type,
+      config_id: redeemForm.config_id
+    })
+    
+    if (response.code === 200 && response.data) {
+      redeemResult.value = {
+        type: 'success',
+        message: '激活成功！卡片已添加到卡池',
+        data: response.data
+      }
+      ElMessage.success('激活成功')
+      fetchCards()
+      redeemForm.key_id = ''
+    } else {
+      redeemResult.value = {
+        type: 'error',
+        message: response.message || '激活失败',
+        data: null
+      }
+    }
+  } catch (error: any) {
+    redeemResult.value = {
+      type: 'error',
+      message: error.response?.data?.message || '激活失败',
+      data: null
+    }
+    ElMessage.error('激活失败')
+  } finally {
+    redeeming.value = false
+  }
+}
+
+// API 配置管理方法
+const loadApiConfigs = async () => {
+  loadingConfigs.value = true
+  try {
+    const response = await cardsApi.getActiveApiConfigs()
+    apiConfigs.value = response.data || []
+  } catch (error) {
+    console.error('加载 API 配置失败', error)
+  } finally {
+    loadingConfigs.value = false
+  }
+}
+
+const resetConfigForm = () => {
+  Object.assign(configForm, {
+    name: '',
+    redeem_url: '',
+    query_url: '',
+    request_method: 'POST',
+    timeout: 30,
+    request_headers_str: '',
+    response_mapping_str: '',
+    is_active: true,
+    notes: ''
+  })
+  editingConfig.value = null
+}
+
+const editApiConfig = (config: CardApiConfig) => {
+  editingConfig.value = config
+  Object.assign(configForm, {
+    name: config.name,
+    redeem_url: config.redeem_url,
+    query_url: config.query_url || '',
+    request_method: config.request_method || 'POST',
+    timeout: config.timeout || 30,
+    request_headers_str: config.request_headers ? JSON.stringify(config.request_headers, null, 2) : '',
+    response_mapping_str: config.response_mapping ? JSON.stringify(config.response_mapping, null, 2) : '',
+    is_active: config.is_active,
+    notes: config.notes || ''
+  })
+  showAddConfigForm.value = true
+}
+
+const saveApiConfig = async () => {
+  if (!configForm.name || !configForm.redeem_url) {
+    ElMessage.warning('请填写必填字段')
+    return
+  }
+  
+  savingConfig.value = true
+  try {
+    let requestHeaders = {}
+    let responseMapping = {}
+    
+    if (configForm.request_headers_str.trim()) {
+      try {
+        requestHeaders = JSON.parse(configForm.request_headers_str)
+      } catch {
+        ElMessage.error('请求头 JSON 格式错误')
+        savingConfig.value = false
+        return
+      }
+    }
+    
+    if (configForm.response_mapping_str.trim()) {
+      try {
+        responseMapping = JSON.parse(configForm.response_mapping_str)
+      } catch {
+        ElMessage.error('响应映射 JSON 格式错误')
+        savingConfig.value = false
+        return
+      }
+    }
+    
+    const data = {
+      name: configForm.name,
+      redeem_url: configForm.redeem_url,
+      query_url: configForm.query_url,
+      request_method: configForm.request_method,
+      timeout: configForm.timeout,
+      request_headers: requestHeaders,
+      response_mapping: responseMapping,
+      is_active: configForm.is_active,
+      notes: configForm.notes
+    }
+    
+    if (editingConfig.value) {
+      await cardsApi.updateApiConfig(editingConfig.value.id, data)
+      ElMessage.success('更新成功')
+    } else {
+      await cardsApi.createApiConfig(data)
+      ElMessage.success('添加成功')
+    }
+    
+    showAddConfigForm.value = false
+    resetConfigForm()
+    loadApiConfigs()
+  } catch (error: any) {
+    ElMessage.error(error.response?.data?.message || '保存失败')
+  } finally {
+    savingConfig.value = false
+  }
+}
+
+const setDefaultConfig = async (config: CardApiConfig) => {
+  try {
+    await cardsApi.setDefaultApiConfig(config.id)
+    ElMessage.success(`${config.name} 已设为默认`)
+    loadApiConfigs()
+  } catch (error) {
+    ElMessage.error('设置失败')
+  }
+}
+
+const deleteApiConfig = async (config: CardApiConfig) => {
+  try {
+    await cardsApi.deleteApiConfig(config.id)
+    ElMessage.success('删除成功')
+    loadApiConfigs()
+  } catch (error) {
+    ElMessage.error('删除失败')
+  }
+}
 </script>
 
 <style scoped lang="scss">
@@ -453,6 +839,14 @@ onMounted(() => {
   .text-gray {
     color: #909399;
     font-size: 12px;
+  }
+  
+  .redeem-result {
+    margin-top: 16px;
+  }
+  
+  .card-info-preview {
+    margin-top: 12px;
   }
 }
 </style>
