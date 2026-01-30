@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 
 
-DEFAULT_REPO_PATH = "/home/pig/github/oai-team-auto-provisioner"
+DEFAULT_REPO_PATH = str(Path(__file__).resolve().parent.parent.parent / "libs" / "oai_provisioner")
 
 
 @dataclass(frozen=True)
@@ -53,6 +53,7 @@ def build_config_toml(
     artifacts: LegacyRunArtifacts,
     email_provider: str | None = None,
     email_config: dict[str, Any] | None = None,
+    checkout_card: dict[str, Any] | None = None,
 ) -> str:
     # 基于 config.toml.example 的 schema，按当前系统 settings 生成。
     # 目标：尽可能保持源项目行为一致，同时保证产物写到 job_dir。
@@ -157,6 +158,20 @@ def build_config_toml(
     lines.append(f"wait_timeout = {int(browser_cfg.get('wait_timeout') or 60)}")
     lines.append(f"short_wait = {int(browser_cfg.get('short_wait') or 10)}")
     lines.append(f"headless = {_format_toml_bool(bool(browser_cfg.get('headless', False)))}")
+    lines.append("")
+
+    # checkout 配置（绑卡信息）- 优先使用传入的 checkout_card，否则使用 settings
+    checkout_cfg = checkout_card or plugin_settings.get("checkout") or {}
+    lines.append("[checkout]")
+    lines.append(f"card_number = {_format_toml_str(str(checkout_cfg.get('card_number') or ''))}")
+    lines.append(f"card_expiry = {_format_toml_str(str(checkout_cfg.get('card_expiry') or ''))}")
+    lines.append(f"card_cvc = {_format_toml_str(str(checkout_cfg.get('card_cvc') or ''))}")
+    lines.append(f"cardholder_name = {_format_toml_str(str(checkout_cfg.get('cardholder_name') or ''))}")
+    lines.append(f"address_line1 = {_format_toml_str(str(checkout_cfg.get('address_line1') or ''))}")
+    lines.append(f"city = {_format_toml_str(str(checkout_cfg.get('city') or ''))}")
+    lines.append(f"postal_code = {_format_toml_str(str(checkout_cfg.get('postal_code') or ''))}")
+    lines.append(f"state = {_format_toml_str(str(checkout_cfg.get('state') or ''))}")
+    lines.append(f"country = {_format_toml_str(str(checkout_cfg.get('country') or 'US'))}")
     lines.append("")
 
     lines.append("[files]")

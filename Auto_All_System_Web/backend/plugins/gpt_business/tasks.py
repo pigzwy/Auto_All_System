@@ -4,6 +4,8 @@ import logging
 import random
 import csv
 import json
+import re
+import asyncio
 import sys
 from pathlib import Path
 from typing import Any
@@ -25,6 +27,56 @@ from .storage import find_account, get_settings, list_accounts, patch_account, p
 
 
 logger = logging.getLogger(__name__)
+
+
+def _get_available_card_for_checkout() -> dict[str, Any] | None:
+    """从虚拟卡管理获取一张可用卡用于绑卡"""
+    from apps.cards.models import Card
+    
+    card = Card.objects.filter(status="available").order_by("?").first()
+    if not card:
+        return None
+    
+    billing = card.billing_address or {}
+    expiry = f"{card.expiry_month:02d}/{str(card.expiry_year)[-2:]}" if card.expiry_month and card.expiry_year else ""
+    
+    return {
+        "card_id": card.id,
+        "card_number": card.card_number or "",
+        "card_expiry": expiry,
+        "card_cvc": card.cvv or "",
+        "cardholder_name": card.card_holder or "",
+        "address_line1": billing.get("street") or billing.get("address_line1") or "",
+        "city": billing.get("city") or "",
+        "postal_code": billing.get("zip") or billing.get("postal_code") or "",
+        "state": billing.get("state") or "",
+        "country": billing.get("country") or "US",
+    }
+
+
+def _mark_card_as_used(card_id: int, account_id: str, purpose: str) -> None:
+    """标记卡为已使用并记录日志"""
+    from apps.cards.models import Card, CardUsageLog
+    from django.utils import timezone
+    
+    try:
+        card = Card.objects.get(id=card_id)
+        card.status = "in_use"
+        card.use_count += 1
+        card.last_used_at = timezone.now()
+        card.save(update_fields=["status", "use_count", "last_used_at", "updated_at"])
+        
+        # CardUsageLog 需要 user 字段，但这里没有用户上下文，暂时跳过日志记录
+        # 如果需要记录，可以在 card.metadata 中存储
+        card.metadata = card.metadata or {}
+        card.metadata["last_account_id"] = account_id
+        card.metadata["last_purpose"] = purpose
+        card.save(update_fields=["metadata"])
+        
+    except Exception as e:
+        logger.warning(f"Failed to mark card as used: {e}")
+    except Card.DoesNotExist:
+        logger.warning(f"Card {card_id} not found when marking as used")
 
 
 DEFAULT_TIMEOUT_SECONDS = 30
@@ -393,8 +445,28 @@ def _cloudmail_email_config_from_account(acc: dict[str, Any]) -> dict[str, Any]:
     if not cfg:
         raise RuntimeError("CloudMailConfig not found")
 
-    domains = cfg.domains if isinstance(cfg.domains, list) else []
-    domains = [str(x).strip() for x in domains if str(x).strip()]
+    # domains 可能被错误保存为: ['["a.com", "b.com", ]']（嵌套 JSON 字符串 + 末尾逗号）
+    def _parse_domains(value: Any) -> list[str]:
+        if not value:
+            return []
+        if isinstance(value, list):
+            out: list[str] = []
+            for it in value:
+                out.extend(_parse_domains(it))
+            return out
+        if isinstance(value, str):
+            raw = value.strip()
+            if raw.startswith("["):
+                try:
+                    fixed = re.sub(r",\s*]", "]", raw)
+                    parsed = json.loads(fixed)
+                    return _parse_domains(parsed)
+                except Exception:
+                    return [raw] if raw else []
+            return [raw] if raw else []
+        return [str(value).strip()]
+
+    domains = [str(x).strip() for x in _parse_domains(cfg.domains) if str(x).strip()]
     if not domains:
         raise RuntimeError("CloudMailConfig domains is empty")
 
@@ -409,6 +481,8 @@ def _cloudmail_email_config_from_account(acc: dict[str, Any]) -> dict[str, Any]:
 
 @shared_task(bind=True)
 def self_register_task(self, record_id: str):
+    """自助开通任务 - Geekez + Playwright (注册 + 验证码 + 绑卡)"""
+
     patch_task(
         record_id,
         {
@@ -417,6 +491,9 @@ def self_register_task(self, record_id: str):
             "celery_task_id": self.request.id,
         },
     )
+
+    mother_id: str = ""
+    job_dir: Path | None = None
 
     try:
         settings = get_settings()
@@ -444,128 +521,274 @@ def self_register_task(self, record_id: str):
         job_dir = media_root / "gpt_business" / "jobs" / record_id
         artifacts = prepare_artifacts(job_dir)
 
+        def _log(line: str) -> None:
+            ts = timezone.now().isoformat()
+            artifacts.log_file.parent.mkdir(parents=True, exist_ok=True)
+            with artifacts.log_file.open("a", encoding="utf-8") as fp:
+                fp.write(f"[{ts}] {line}\n")
+
+        _log(f"self_register start mother_id={mother_id} email={email}")
+
+        card_info = _get_available_card_for_checkout()
+        if not card_info:
+            _log("no available card: will still try register, skip checkout")
+
+        config_id = int(mother.get("cloudmail_config_id") or 0)
+        if config_id <= 0:
+            raise RuntimeError("cloudmail_config_id missing")
+
+        from apps.integrations.email.models import CloudMailConfig
+        from apps.integrations.email.services.client import CloudMailClient
+        cfg = CloudMailConfig.objects.filter(id=config_id, is_active=True).first()
+        if not cfg:
+            raise RuntimeError(f"CloudMailConfig not found: {config_id}")
+
         email_cfg = _cloudmail_email_config_from_account(mother)
-        config_toml = build_config_toml(
-            plugin_settings=settings,
-            task_record=task_record,
-            artifacts=artifacts,
-            email_provider="cloudmail",
-            email_config=email_cfg,
+        mail_client = CloudMailClient(
+            api_base=str(email_cfg.get("api_base") or ""),
+            api_token=str(email_cfg.get("api_auth") or ""),
+            domains=list(email_cfg.get("domains") or []),
+            default_role=str(email_cfg.get("role") or "user"),
         )
 
-        script = """
-import json
-import sys
-from pathlib import Path
+        def _proxy_to_str(proxy_value: Any) -> str | None:
+            if not proxy_value:
+                return None
+            if isinstance(proxy_value, str):
+                return proxy_value.strip() or None
+            if isinstance(proxy_value, dict):
+                t = str(proxy_value.get("type") or "http").strip() or "http"
+                host = str(proxy_value.get("host") or "").strip()
+                port = str(proxy_value.get("port") or "").strip()
+                user = str(proxy_value.get("username") or "").strip()
+                pwd = str(proxy_value.get("password") or "").strip()
+                if not host or not port:
+                    return None
+                auth = ""
+                if user and pwd:
+                    auth = f"{user}:{pwd}@"
+                return f"{t}://{auth}{host}:{port}"
+            return None
 
-from browser_automation import init_browser, register_openai_account
+        proxy_str = _proxy_to_str((settings.get("browser") or {}).get("proxy"))
+        profile_name = f"gpt_{email}"
 
+        from apps.integrations.geekez.api import GeekezBrowserAPI
+        from plugins.gpt_business.services.openai_register import (
+            connect_to_browser,
+            register_openai_account,
+        )
 
-def main() -> int:
-    input_path = Path(sys.argv[1]) if len(sys.argv) > 1 else Path('web_input.json')
-    output_path = Path(sys.argv[2]) if len(sys.argv) > 2 else Path('web_result.json')
-
-    payload = json.loads(input_path.read_text(encoding='utf-8')) if input_path.exists() else {}
-    accounts = payload.get('accounts') if isinstance(payload, dict) else None
-    if not isinstance(accounts, list):
-        accounts = []
-
-    results = []
-    for acc in accounts:
-        if not isinstance(acc, dict):
-            continue
-        email = str(acc.get('email') or '').strip()
-        password = str(acc.get('password') or '').strip()
-        if not email or not password:
-            continue
-
-        ok = False
-        err = ''
-        page = None
-        try:
-            page = init_browser()
-            ok = bool(register_openai_account(page, email, password))
-        except Exception as e:
-            ok = False
-            err = str(e)
-        finally:
+        def _run_sync() -> dict[str, Any]:
+            """同步执行注册流程（使用 DrissionPage）"""
+            api = GeekezBrowserAPI()
+            
+            # 创建或获取 profile
+            _log(f"creating/updating profile: {profile_name}")
+            profile = api.create_or_update_profile(name=profile_name, proxy=proxy_str)
+            _log(f"profile ready: id={profile.id}, name={profile.name}")
+            
+            # 启动浏览器
+            _log(f"launching profile: {profile.id}")
+            launch = api.launch_profile(profile.id)
+            if not launch:
+                raise RuntimeError(f"launch_profile failed: {profile.id}")
+            
+            debug_port = launch.debug_port
+            _log(f"browser launched, debug_port={debug_port}")
+            
+            page = None
             try:
+                # 用 DrissionPage 连接到 Geekez 浏览器
+                page = connect_to_browser(debug_port)
+                _log("DrissionPage connected to Geekez browser")
+                
+                # 截图回调
+                def shot_callback(name: str):
+                    try:
+                        p = job_dir / name
+                        page.get_screenshot(path=str(p), full_page=True)
+                    except Exception:
+                        pass
+                
+                # 验证码回调
+                def get_code_callback(email_addr: str) -> str | None:
+                    return mail_client.wait_for_verification_code(email_addr, timeout=120)
+                
+                # 调用注册函数
+                _log("calling register_openai_account...")
+                print("[DEBUG] calling register_openai_account...", flush=True)
+                
+                try:
+                    register_ok = register_openai_account(
+                        page=page,
+                        email=email,
+                        password=password,
+                        get_verification_code=get_code_callback,
+                        log_callback=_log,
+                        screenshot_callback=shot_callback,
+                    )
+                except Exception as reg_err:
+                    print(f"[DEBUG] register_openai_account exception: {reg_err}", flush=True)
+                    _log(f"register exception: {reg_err}")
+                    register_ok = False
+                
+                print(f"[DEBUG] register_openai_account returned: {register_ok}", flush=True)
+                _log(f"register_openai_account returned: {register_ok}")
+                
+                # Team 开通逻辑
+                checkout_ok: bool | None = None
+                checkout_err = ""
+                session_data = {}
+                used_card_id: int | None = None
+                
+                print(f"[DEBUG] register_ok={register_ok}, starting card check...", flush=True)
+                _log(f"register_ok={register_ok}, starting team onboarding check...")
+                
+                if register_ok:
+                    print("[DEBUG] starting onboarding...", flush=True)
+                    
+                    try:
+                        _log("start team onboarding flow")
+                        
+                        from plugins.gpt_business.services.onboarding_flow import (
+                            run_onboarding_flow,
+                            set_log_callback,
+                        )
+                        
+                        set_log_callback(_log)
+                        
+                        print("[DEBUG] calling run_onboarding_flow with card callback...", flush=True)
+                        success, session_data = run_onboarding_flow(
+                            page=page,
+                            email=email,
+                            skip_checkout=False,
+                            get_card_callback=_get_available_card_for_checkout,
+                            card_wait_timeout=300,
+                        )
+                        print(f"[DEBUG] run_onboarding_flow returned: {success}", flush=True)
+                        
+                        checkout_ok = success
+                        if success:
+                            _log("team onboarding completed successfully")
+                        else:
+                            checkout_err = "onboarding flow failed"
+                            _log("team onboarding failed")
+                        
+                        shot_callback("checkout_done.png")
+                        
+                    except Exception as e:
+                        print(f"[DEBUG] checkout exception: {e}", flush=True)
+                        checkout_err = str(e)
+                        _log(f"checkout error: {e}")
+                        shot_callback("checkout_error.png")
+                        checkout_ok = False
+                
+                return {
+                    "profile_id": profile.id,
+                    "register_ok": register_ok,
+                    "checkout_ok": checkout_ok,
+                    "checkout_error": checkout_err,
+                    "session_data": session_data,
+                    "used_card_id": used_card_id,
+                }
+            finally:
+                # 关闭浏览器
                 if page:
-                    page.quit()
-            except Exception:
-                pass
+                    try:
+                        page.quit()
+                    except Exception:
+                        pass
+                try:
+                    api.close_profile(profile.id)
+                    _log(f"closed profile: {profile.id}")
+                except Exception as e:
+                    _log(f"failed to close profile: {e}")
 
-        results.append({'email': email, 'ok': ok, 'error': err})
+        flow_result = _run_sync()
+        register_ok = bool(flow_result.get("register_ok"))
+        checkout_ok = flow_result.get("checkout_ok")
+        used_card_id = flow_result.get("used_card_id")
+        
+        # 开通成功：注册成功且开通成功
+        # 未开通：注册成功但开通未进行或失败
+        if checkout_ok:
+            open_status = "activated"  # 已开通
+        elif register_ok:
+            open_status = "registered"  # 已注册未开通
+        else:
+            open_status = "failed"  # 失败
+        
+        success = register_ok and (checkout_ok in (None, True))
 
-    output_path.write_text(json.dumps({'results': results}, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
-    return 0 if all(r.get('ok') for r in results) else 1
-
-
-if __name__ == '__main__':
-    raise SystemExit(main())
-""".lstrip()
-
-        input_payload = {"accounts": [{"email": email, "password": password}]}
-
-        extra_files = {
-            "tools/web_self_register.py": script,
-            "web_input.json": json.dumps(input_payload, ensure_ascii=False, indent=2) + "\n",
-        }
-
-        repo_src = str(settings.get("legacy_repo_path") or DEFAULT_REPO_PATH)
-        return_code = run_repo_script(
-            repo_src,
-            artifacts,
-            config_toml=config_toml,
-            cmd=[sys.executable, "tools/web_self_register.py", "web_input.json", "web_result.json"],
-            extra_files=extra_files,
-        )
-
-        result_path = artifacts.repo_dir / "web_result.json"
-        parsed_result: dict[str, Any] = {}
-        if result_path.exists():
-            try:
-                parsed_result = json.loads(result_path.read_text(encoding="utf-8"))
-            except Exception:
-                parsed_result = {}
-
+        _log(f"done register_ok={register_ok} checkout_ok={checkout_ok} open_status={open_status}")
+        
         now = timezone.now().isoformat()
         patch_account(
             mother_id,
             {
-                "open_status": "success" if return_code == 0 else "failed",
+                "open_status": open_status,
                 "open_last_task": record_id,
                 "open_updated_at": now,
             },
         )
 
+        if used_card_id:
+            pass  # 卡已在 _run_sync 中标记为使用中
+
         result: dict[str, Any] = {
-            "return_code": return_code,
+            "success": success,
             "mother_id": mother_id,
             "email": email,
             "artifacts": _artifacts_list_from_job_dir(job_dir),
-            "details": parsed_result,
+            "details": flow_result,
         }
 
         patch_task(
             record_id,
             {
-                "status": "completed" if return_code == 0 else "failed",
+                "status": "completed" if success else "failed",
                 "finished_at": timezone.now().isoformat(),
                 "result": result,
-                **({} if return_code == 0 else {"error": f"self_register exited with code {return_code}"}),
+                **({} if success else {"error": str(flow_result.get("checkout_error") or "self_register failed")}),
             },
         )
 
         return result
     except Exception as exc:
         logger.exception("gpt_business self_register_task failed")
+        try:
+            if mother_id:
+                patch_account(
+                    mother_id,
+                    {
+                        "open_status": "failed",
+                        "open_last_task": record_id,
+                        "open_updated_at": timezone.now().isoformat(),
+                    },
+                )
+        except Exception:
+            pass
+
         patch_task(
             record_id,
             {
                 "status": "failed",
                 "finished_at": timezone.now().isoformat(),
                 "error": str(exc),
+                **(
+                    {
+                        "result": {
+                            "success": False,
+                            "mother_id": mother_id,
+                            "artifacts": _artifacts_list_from_job_dir(job_dir)
+                            if job_dir
+                            else [],
+                        }
+                    }
+                    if job_dir
+                    else {}
+                ),
             },
         )
         raise

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections import deque
 import os
 import secrets
 import string
@@ -93,6 +94,15 @@ def _mask_settings(settings: dict[str, Any]) -> dict[str, Any]:
     if proxies:
         masked["proxies"] = proxies
 
+    if isinstance(masked.get("checkout"), dict):
+        checkout = {**masked["checkout"]}
+        if "card_number" in checkout:
+            card = str(checkout.get("card_number") or "")
+            checkout["card_number"] = f"****{card[-4:]}" if len(card) >= 4 else "****"
+        if "card_cvc" in checkout:
+            checkout["card_cvc"] = "***"
+        masked["checkout"] = checkout
+
     return masked
 
 
@@ -136,7 +146,7 @@ class SettingsViewSet(ViewSet):
                 if key in payload:
                     settings[key] = payload[key]
 
-            for section in ["crs", "cpa", "s2a"]:
+            for section in ["crs", "cpa", "s2a", "checkout"]:
                 if section in payload:
                     current_section = settings.get(section) or {}
                     if isinstance(current_section, dict) and isinstance(payload[section], dict):
@@ -240,21 +250,39 @@ class TaskViewSet(ViewSet):
         if not task:
             return Response({"detail": "Not found"}, status=status.HTTP_404_NOT_FOUND)
 
-        result = task.get("result") or {}
-        artifacts = result.get("artifacts") or []
         normalized: list[dict[str, Any]] = []
-        for a in artifacts:
-            if not isinstance(a, dict):
-                continue
-            name = str(a.get("name") or "")
-            if not name:
-                continue
+        seen: set[str] = set()
+
+        def add_name(name: str) -> None:
+            name = str(name or "")
+            if not name or name in seen:
+                return
+            seen.add(name)
             normalized.append(
                 {
                     "name": name,
-                    "download_url": request.build_absolute_uri(f"/api/v1/plugins/gpt-business/tasks/{task['id']}/download/{name}/"),
+                    "download_url": request.build_absolute_uri(
+                        f"/api/v1/plugins/gpt-business/tasks/{task['id']}/download/{name}/"
+                    ),
                 }
             )
+
+        # 任务完成后写入的 artifacts
+        result = task.get("result") or {}
+        artifacts = result.get("artifacts") or []
+        for a in artifacts:
+            if not isinstance(a, dict):
+                continue
+            add_name(str(a.get("name") or ""))
+
+        # 任务运行中就会持续落盘 run.log（以及截图等），但 result.artifacts 可能还没 patch 回来。
+        media_root = Path(str(getattr(django_settings, "MEDIA_ROOT", "")))
+        job_dir = media_root / "gpt_business" / "jobs" / str(task.get("id") or "")
+        if job_dir.exists() and job_dir.is_dir():
+            for p in sorted(job_dir.glob("*")):
+                if p.is_file():
+                    add_name(p.name)
+
         return Response(normalized)
 
     @action(detail=True, methods=["get"], url_path=r"download/(?P<filename>[^/]+)")
@@ -268,11 +296,19 @@ class TaskViewSet(ViewSet):
         artifacts = result.get("artifacts") or []
         filename = str(filename or "")
         artifact = next((a for a in artifacts if isinstance(a, dict) and str(a.get("name")) == filename), None)
-        if not artifact:
-            return Response({"detail": "Artifact not found"}, status=status.HTTP_404_NOT_FOUND)
 
-        file_path = Path(str(artifact.get("path") or ""))
-        if not file_path.exists():
+        file_path: Path | None = None
+        if artifact:
+            file_path = Path(str(artifact.get("path") or ""))
+        else:
+            # 兼容任务运行中：run.log 等文件已经生成，但还没写回 result.artifacts
+            media_root = Path(str(getattr(django_settings, "MEDIA_ROOT", "")))
+            job_dir = media_root / "gpt_business" / "jobs" / str(task.get("id") or "")
+            candidate = job_dir / filename
+            if candidate.exists() and candidate.is_file():
+                file_path = candidate
+
+        if not file_path or not file_path.exists():
             return Response({"detail": "File missing"}, status=status.HTTP_404_NOT_FOUND)
 
         media_root = Path(str(getattr(django_settings, "MEDIA_ROOT", "")))
@@ -284,6 +320,62 @@ class TaskViewSet(ViewSet):
         response = FileResponse(file_path.open("rb"), as_attachment=True, filename=file_path.name)
         response["Content-Length"] = os.path.getsize(str(file_path))
         return response
+
+    @action(detail=True, methods=["get"], url_path="log")
+    def log(self, request, pk=None):
+        settings = get_settings()
+        task = find_task(settings, str(pk))
+        if not task:
+            return Response({"detail": "Not found"}, status=status.HTTP_404_NOT_FOUND)
+
+        filename = str(request.query_params.get("filename") or "run.log")
+        tail = request.query_params.get("tail")
+        try:
+            tail_lines = max(0, min(5000, int(tail))) if tail is not None else 2000
+        except Exception:
+            tail_lines = 2000
+
+        media_root = Path(str(getattr(django_settings, "MEDIA_ROOT", "")))
+        job_dir = media_root / "gpt_business" / "jobs" / str(task.get("id") or "")
+        log_path = job_dir / filename
+
+        if not log_path.exists() or not log_path.is_file():
+            return Response(
+                {
+                    "filename": filename,
+                    "exists": False,
+                    "text": "",
+                    "download_url": request.build_absolute_uri(
+                        f"/api/v1/plugins/gpt-business/tasks/{task['id']}/download/{filename}/"
+                    ),
+                }
+            )
+
+        # 保证只能读取 MEDIA_ROOT 内文件
+        try:
+            log_path.relative_to(media_root)
+        except Exception:
+            return Response({"detail": "Forbidden"}, status=status.HTTP_403_FORBIDDEN)
+
+        buf: deque[str] = deque(maxlen=tail_lines)
+        try:
+            with log_path.open("r", encoding="utf-8", errors="replace") as fp:
+                for line in fp:
+                    buf.append(line)
+        except Exception:
+            return Response({"detail": "Failed to read log"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+        text = "".join(buf)
+        return Response(
+            {
+                "filename": log_path.name,
+                "exists": True,
+                "text": text,
+                "download_url": request.build_absolute_uri(
+                    f"/api/v1/plugins/gpt-business/tasks/{task['id']}/download/{log_path.name}/"
+                ),
+            }
+        )
 
 
 class AccountsViewSet(ViewSet):
@@ -434,6 +526,16 @@ class AccountsViewSet(ViewSet):
             )
 
         return Response({"mothers": normalized_mothers, "email_domains": _get_email_domains()})
+
+    @action(detail=True, methods=["get"], url_path="tasks")
+    def tasks(self, request, pk=None):
+        settings = get_settings()
+        acc = find_account(settings, str(pk))
+        if not isinstance(acc, dict) or str(acc.get("type")) != "mother":
+            return Response({"detail": "Mother account not found"}, status=status.HTTP_400_BAD_REQUEST)
+
+        tasks = [t for t in list_tasks(settings) if str(t.get("mother_id") or "") == str(pk)]
+        return Response({"tasks": tasks})
 
     @action(detail=False, methods=["post"], url_path="mothers")
     def create_mother(self, request):

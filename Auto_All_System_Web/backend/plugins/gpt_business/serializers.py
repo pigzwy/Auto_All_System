@@ -70,6 +70,18 @@ class BrowserSettingsSerializer(serializers.Serializer):
     headless = serializers.BooleanField(required=False)
 
 
+class CheckoutSettingsSerializer(serializers.Serializer):
+    card_number = serializers.CharField(required=False, allow_blank=True, trim_whitespace=True)
+    card_expiry = serializers.CharField(required=False, allow_blank=True, trim_whitespace=True)
+    card_cvc = serializers.CharField(required=False, allow_blank=True, trim_whitespace=True)
+    cardholder_name = serializers.CharField(required=False, allow_blank=True, trim_whitespace=True)
+    address_line1 = serializers.CharField(required=False, allow_blank=True, trim_whitespace=True)
+    city = serializers.CharField(required=False, allow_blank=True, trim_whitespace=True)
+    postal_code = serializers.CharField(required=False, allow_blank=True, trim_whitespace=True)
+    state = serializers.CharField(required=False, allow_blank=True, trim_whitespace=True)
+    country = serializers.CharField(required=False, allow_blank=True, trim_whitespace=True)
+
+
 class SettingsUpdateSerializer(serializers.Serializer):
     gptmail = GptMailSettingsSerializer(required=False)
     teams = serializers.ListField(child=TeamSettingsSerializer(), required=False, allow_empty=True)
@@ -86,6 +98,7 @@ class SettingsUpdateSerializer(serializers.Serializer):
     request = RequestSettingsSerializer(required=False)
     verification = VerificationSettingsSerializer(required=False)
     browser = BrowserSettingsSerializer(required=False)
+    checkout = CheckoutSettingsSerializer(required=False)
 
     default_password = serializers.CharField(required=False, allow_blank=True, trim_whitespace=False)
     accounts_per_team = serializers.IntegerField(required=False, min_value=1, max_value=50)
