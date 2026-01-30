@@ -134,9 +134,10 @@ Token 是否必须？
 - 请求 Control Server 时带 `Authorization: Bearer <token>`
 
 2) close/stop 兼容
-- 关闭 profile 时：
-  - 优先尝试旧接口 `POST /profiles/{id}/close`（如果对老 Geekez 仍存在）
-  - 失败（404/405）时 fallback 到新接口：`POST /api/profiles/{idOrName}/stop`
+- 关闭 profile 时（兼容顺序）：
+  - 优先 `POST /profiles/{uuid}/stop`（Control Server，新版上游存在）
+  - Control Server 不可用时 fallback：`POST /api/profiles/{idOrName}/stop`（API Server）
+  - 最后兼容极老版本：`POST /profiles/{id}/close`
 
 3) Name → ID 映射（可选）
 - 如果上游 API Server 可用，可以用 `/api/profiles/:idOrName` 直接查
@@ -145,6 +146,23 @@ Token 是否必须？
 4) profile CRUD 的 UI 刷新（可选）
 - 为了让 Geekez UI 立即可见：推荐走上游 `/api/profiles` 做 CRUD（可获得 `generateUniqueName()` + `notifyUIRefresh()`）
 - 如果继续文件写入 `profiles.json`：UI 可能需要手动刷新（或重启 Geekez）
+
+5) profile delete 兼容（建议）
+- 删除 profile 时：
+  - 优先 `DELETE /api/profiles/{idOrName}`（API Server，会通知 UI 刷新）
+  - 失败时 fallback 到本地 `profiles.json`（历史行为）
+
+## 兼容模式（本项目实现）
+
+说明：为了同时兼容新旧 GeekezBrowser，Auto All System Web 后端采用“优先官方服务、失败再 fallback 文件”的策略。
+
+当前调用顺序（重点）：
+
+- `list_profiles`：`GET /api/profiles` → `GET /profiles` → 读取本地 `profiles.json`
+- `create_or_update_profile`：`POST/PUT /api/profiles` → 写本地 `profiles.json`
+- `delete_profile`：`DELETE /api/profiles/{idOrName}` → 读写本地 `profiles.json`
+- `launch_profile`：`POST /profiles/{uuid}/launch`（Control Server，返回 `wsEndpoint`）
+- `stop_profile/close_profile`：`POST /profiles/{uuid}/stop` → `POST /api/profiles/{idOrName}/stop` → `POST /profiles/{id}/close`
 
 ## 部署/配置建议
 

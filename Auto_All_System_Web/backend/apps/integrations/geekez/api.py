@@ -224,6 +224,28 @@ class GeekezBrowserAPI:
                 continue
         return None
 
+    def _control_request_json(
+        self, method: str, path: str, *, json_body: dict | None = None, timeout: int | None = None
+    ) -> dict | None:
+        method = method.upper().strip()
+        headers = self._control_headers()
+        for base_url in self._control_base_urls():
+            url = f"{base_url}{path}"
+            try:
+                resp = requests.request(
+                    method,
+                    url,
+                    json=json_body,
+                    timeout=timeout or self.timeout,
+                    headers=headers,
+                )
+                if resp.status_code != 200:
+                    continue
+                return resp.json() if resp.content else {}
+            except Exception:
+                continue
+        return None
+
     def _normalize_profile_id(self, profile_id_or_name: str) -> str:
         """control server 的 launch 只支持 UUID。这里允许传 name（email）自动映射。"""
 
@@ -407,19 +429,56 @@ class GeekezBrowserAPI:
 
         return ProfileInfo(id=profile_id, name=name, proxy=proxy, metadata=metadata or {})
 
-    def delete_profile(self, profile_id: str) -> bool:
-        """删除 Profile"""
-        profiles_list = self._read_profiles_json()
-        new_list = [
-            p
-            for p in profiles_list
-            if isinstance(p, dict) and str(p.get("id")) != str(profile_id)
-        ]
-        if len(new_list) == len(profiles_list):
-            return False  # 未找到
+    def delete_profile(self, profile_id_or_name: str) -> bool:
+        """删除 Profile。
 
-        self._write_profiles_json(new_list)
-        return True
+        兼容模式：
+        1) 优先走 API Server（/api/profiles/:idOrName），可触发 Geekez UI 刷新。
+        2) 失败时 fallback 到本地 profiles.json（历史行为）。
+        """
+
+        value = str(profile_id_or_name or "").strip()
+        if not value:
+            return False
+
+        def delete_local() -> bool:
+            profiles_list = self._read_profiles_json()
+
+            removed = False
+            new_list: list[Any] = []
+            for p in profiles_list:
+                if not isinstance(p, dict):
+                    new_list.append(p)
+                    continue
+                if str(p.get("id")) == value or str(p.get("name")) == value:
+                    removed = True
+                    continue
+                new_list.append(p)
+
+            if not removed:
+                return False
+            self._write_profiles_json(new_list)
+            return True
+
+        # Prefer official API server delete (matches Geekez UI / refresh semantics)
+        encoded = quote(value, safe="")
+        for base_url in self._api_base_urls():
+            try:
+                resp = requests.delete(
+                    f"{base_url}/api/profiles/{encoded}",
+                    timeout=self.timeout,
+                )
+                if resp.status_code in (200, 204):
+                    # best-effort sync local fallback storage
+                    try:
+                        delete_local()
+                    except Exception:
+                        pass
+                    return True
+            except Exception:
+                continue
+
+        return delete_local()
 
     # ==================== 浏览器控制 ====================
 
@@ -444,12 +503,21 @@ class GeekezBrowserAPI:
             logger.error(f"Invalid profile id/name: {profile_id}")
             return None
 
-        launch_payload = {
+        # 按 CONTROL_SERVER_API.md：仅使用 control server 支持的字段。
+        launch_payload: dict[str, Any] = {
             "debugPort": 0,
             "enableRemoteDebugging": True,
-            # 关键：让 DevTools 端口对 Docker 容器可达
-            "remoteDebuggingAddress": "0.0.0.0",
         }
+
+        # Docker 非 host-network 场景：DevTools 如果只绑定 127.0.0.1 会导致容器内不可达。
+        # Control Server 二开支持 remoteDebuggingAddress；上游若不支持则会忽略未知字段。
+        is_docker = os.environ.get("DJANGO_ENVIRONMENT") == "docker"
+        use_hostnet = (
+            os.environ.get("USE_HOST_NETWORK") == "1"
+            or os.environ.get("DB_HOST") in ("127.0.0.1", "localhost")
+        )
+        if is_docker and not use_hostnet:
+            launch_payload["remoteDebuggingAddress"] = "0.0.0.0"
 
         headers = self._control_headers()
         base_urls = self._control_base_urls()
@@ -493,6 +561,9 @@ class GeekezBrowserAPI:
                     continue
 
                 data = resp.json() if resp.content else {}
+
+                # CONTROL_SERVER_API.md: { ok: true, debugPort, wsEndpoint }
+                raw_ws = data.get("wsEndpoint")
                 debug_port = data.get("debugPort", 0)
                 if not isinstance(debug_port, int) or debug_port <= 0:
                     logger.error(
@@ -501,11 +572,22 @@ class GeekezBrowserAPI:
                     time.sleep(1)
                     continue
 
+                # 优先直接使用 wsEndpoint（文档保证可用于 Playwright connect_over_cdp）。
+                if isinstance(raw_ws, str) and raw_ws.strip():
+                    ws_endpoint = self._rewrite_ws_endpoint_host(raw_ws.strip(), cdp_host, debug_port)
+                    cdp_endpoint = f"http://{cdp_host}:{debug_port}"
+                    return LaunchInfo(
+                        profile_id=normalized_id,
+                        debug_port=debug_port,
+                        cdp_endpoint=cdp_endpoint,
+                        ws_endpoint=ws_endpoint,
+                        pid=data.get("pid"),
+                    )
+
                 # Some Geekez builds may return a debugPort that is not actually the active
                 # DevTools port when the environment is already running. In that case,
                 # wsEndpoint may contain the real port.
                 ws_port: int | None = None
-                raw_ws = data.get("wsEndpoint")
                 if isinstance(raw_ws, str) and raw_ws:
                     try:
                         parsed_ws = urlparse(raw_ws)
@@ -632,11 +714,30 @@ class GeekezBrowserAPI:
             return ws_endpoint
 
     def stop_profile(self, profile_id_or_name: str) -> bool:
-        """使用上游 API Server 停止 profile（/api/profiles/:idOrName/stop）。
+        """停止 profile。
 
-        注意：API Server 默认只监听 127.0.0.1；如果后端运行在 Docker，需要将
-        `GEEKEZ_API_SERVER_HOST` 指向宿主机可达地址（例如 host.docker.internal）。
+        按 docs/CONTROL_SERVER_API.md：优先使用 Control Server (19527)
+        - POST /profiles/{profile_id}/stop  -> {"ok": true, "message": "Stopped"|"Not running"}
+
+        兼容策略：如 Control Server 不可用，再尝试 API Server 的 /api/profiles/:idOrName/stop。
         """
+
+        value = str(profile_id_or_name or "").strip()
+        if not value:
+            return False
+
+        normalized_id = self._normalize_profile_id(value)
+        if normalized_id:
+            data = self._control_request_json(
+                "POST", f"/profiles/{quote(normalized_id, safe='')}/stop", timeout=5
+            )
+            if isinstance(data, dict) and data.get("ok") is True:
+                return True
+
+        return self._stop_profile_via_api_server(value)
+
+    def _stop_profile_via_api_server(self, profile_id_or_name: str) -> bool:
+        """best-effort: use API Server to stop profile (if supported by current build)."""
 
         value = str(profile_id_or_name or "").strip()
         if not value:
@@ -646,49 +747,48 @@ class GeekezBrowserAPI:
             encoded = quote(value, safe="")
             resp = requests.post(
                 f"{url}/api/profiles/{encoded}/stop",
-                timeout=self.timeout,
+                timeout=5,
             )
             return resp.status_code == 200
 
-        urls = [self.api_server_url]
-
-        # Docker 场景：提供默认转发端口 12139 -> 12138
-        if self.api_server_port == 12138:
-            urls.append(f"http://{self.api_server_host}:12139")
-        if os.environ.get("DJANGO_ENVIRONMENT") == "docker" and self.api_server_host in (
-            "127.0.0.1",
-            "localhost",
-        ):
-            urls.append("http://host.docker.internal:12139")
-
-        for url in urls:
+        for base_url in self._api_base_urls():
             try:
-                if try_url(url):
+                if try_url(base_url):
                     return True
             except Exception as e:
-                logger.warning(f"Stop profile via API server failed ({url}): {e}")
+                logger.warning(f"Stop profile via API server failed ({base_url}): {e}")
 
         return False
 
     def close_profile(self, profile_id_or_name: str) -> bool:
         """关闭浏览器 Profile。
 
-        兼容策略：
-        1) 先尝试旧 control server 的 /profiles/{id}/close（部分旧版本存在）
-        2) 如果 404/405，再 fallback 到新 API server 的 /api/profiles/:idOrName/stop
+        按 docs/CONTROL_SERVER_API.md：优先使用 Control Server
+        1) POST /profiles/{id}/stop
+        2) Control Server 不可用时，fallback 到 API Server /api/profiles/:idOrName/stop
+        3) 最后兼容极老版本的 /profiles/{id}/close（短超时）
         """
 
         value = str(profile_id_or_name or "").strip()
         if not value:
             return False
 
-        # 旧接口（control server）
+        # 1) Control Server stop
+        if self.stop_profile(value):
+            return True
+
+        # 2) (should already be attempted in stop_profile) - keep explicit for readability
+        if self._stop_profile_via_api_server(value):
+            return True
+
+        # 3) legacy control close
         headers = self._control_headers()
+        normalized_id = self._normalize_profile_id(value) or value
         for base_url in self._control_base_urls():
             try:
                 resp = requests.post(
-                    f"{base_url}/profiles/{value}/close",
-                    timeout=self.timeout,
+                    f"{base_url}/profiles/{quote(str(normalized_id), safe='')}/close",
+                    timeout=3,
                     headers=headers,
                 )
                 if resp.status_code == 200:
@@ -697,11 +797,12 @@ class GeekezBrowserAPI:
                     logger.warning(
                         f"Close profile failed via {base_url}: {resp.status_code} {resp.text}"
                     )
+            except requests.exceptions.Timeout:
+                pass
             except Exception as e:
                 logger.warning(f"Close profile (control) errored via {base_url}: {e}")
 
-        # 新接口（API server）
-        return self.stop_profile(value)
+        return False
 
     def shutdown(self) -> bool:
         """关闭 GeekezBrowser 服务"""
