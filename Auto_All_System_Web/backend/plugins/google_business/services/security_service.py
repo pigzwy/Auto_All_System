@@ -70,7 +70,7 @@ class GoogleSecurityService:
 
         password_input = page.locator('input[type="password"]').first
         try:
-            if await password_input.is_visible():
+            if await password_input.is_visible(timeout=500):
                 await password_input.fill(password)
                 await page.keyboard.press("Enter")
                 # 等待页面反应，不用固定 sleep 太久
@@ -234,7 +234,7 @@ class GoogleSecurityService:
             return False
 
     async def _dismiss_common_prompts(self, page: Page) -> None:
-        # 一些常见的“跳过/稍后”弹窗（不保证覆盖全部）
+        # 一些常见的"跳过/稍后"弹窗（不保证覆盖全部）
         candidates = [
             page.get_by_role("button", name="Not now"),
             page.get_by_role("button", name="Skip"),
@@ -242,13 +242,25 @@ class GoogleSecurityService:
             page.get_by_role("button", name="稍后"),
             page.get_by_role("button", name="跳过"),
         ]
-        for loc in candidates:
+
+        async def _try_click_prompt(loc: Locator) -> bool:
             try:
-                if await loc.first.is_visible():
-                    await loc.first.click()
-                    await asyncio.sleep(0.5)
+                first = loc.first
+                if await first.is_visible(timeout=300):
+                    await first.click()
+                    return True
             except Exception:
-                continue
+                pass
+            return False
+
+        # 并行检测所有弹窗按钮
+        results = await asyncio.gather(
+            *[_try_click_prompt(loc) for loc in candidates],
+            return_exceptions=True
+        )
+        # 如果点到了任何一个，稍等一下
+        if any(r is True for r in results):
+            await asyncio.sleep(0.3)
 
     async def _handle_reauth(
         self,
@@ -268,7 +280,7 @@ class GoogleSecurityService:
         self, locators: List[Locator], debug_label: str = ""
     ) -> bool:
         """
-        尝试点击第一个可见的元素
+        尝试点击第一个可见的元素（并行检测版本）
 
         Args:
             locators: Locator 列表
@@ -278,16 +290,15 @@ class GoogleSecurityService:
             是否成功点击
         """
 
-        # Playwright 的 locator.is_visible()/is_enabled() 默认会用全局 timeout（常见 30s）。
-        # 这里是“试探性”点击：不应为单个 selector 卡 30s，否则多 selector 串起来会非常慢。
-        probe_timeout_ms = 1200
+        # 减少超时时间，元素要么很快出现，要么不在
+        probe_timeout_ms = 500
+        click_timeout_ms = 3000
 
         async def _try_click(target: Locator, label: str) -> bool:
             """Google 页面经常把文本放在 span 内，真正可点的是祖先 button/role=button。
 
             这里优先常规 click，失败后再点祖先元素，最后才 force click。
             """
-
             try:
                 await target.scroll_into_view_if_needed()
             except Exception:
@@ -295,15 +306,8 @@ class GoogleSecurityService:
 
             # 1) 直接点目标
             try:
-                if await target.is_visible(timeout=probe_timeout_ms):
-                    try:
-                        if not await target.is_enabled(timeout=probe_timeout_ms):
-                            return False
-                    except Exception:
-                        # 某些元素不支持 enabled 检查，忽略
-                        pass
-                    await target.click(timeout=5000)
-                    return True
+                await target.click(timeout=click_timeout_ms)
+                return True
             except Exception as e:
                 if label:
                     logger.debug(f"[{label}] direct click failed: {e}")
@@ -316,14 +320,8 @@ class GoogleSecurityService:
             ]:
                 try:
                     anc = target.locator(ancestor_selector).first
-                    if await anc.count() > 0 and await anc.is_visible(
-                        timeout=probe_timeout_ms
-                    ):
-                        try:
-                            await anc.scroll_into_view_if_needed()
-                        except Exception:
-                            pass
-                        await anc.click(timeout=5000)
+                    if await anc.count() > 0:
+                        await anc.click(timeout=click_timeout_ms)
                         return True
                 except Exception as e:
                     if label:
@@ -334,37 +332,51 @@ class GoogleSecurityService:
 
             # 3) 兜底：force click（避免被内部 span 指针事件影响）
             try:
-                if await target.is_visible(timeout=probe_timeout_ms):
-                    await target.click(timeout=5000, force=True)
-                    return True
+                await target.click(timeout=click_timeout_ms, force=True)
+                return True
             except Exception as e:
                 if label:
                     logger.debug(f"[{label}] force click failed: {e}")
             return False
 
-        for i, loc in enumerate(locators):
+        async def _check_visible(idx: int, loc: Locator) -> Optional[Tuple[int, Locator]]:
+            """检查单个 locator 是否可见，返回 (索引, locator) 或 None"""
             try:
                 candidate = loc.first
-                # 先 count 再 is_visible：避免 is_visible 的默认超时导致串行等待过久
                 if await candidate.count() <= 0:
-                    continue
+                    return None
+                if await candidate.is_visible(timeout=probe_timeout_ms):
+                    return (idx, candidate)
+            except Exception:
+                pass
+            return None
 
-                is_visible = await candidate.is_visible(timeout=probe_timeout_ms)
-                if debug_label:
-                    logger.debug(f"[{debug_label}] Locator {i}: visible={is_visible}")
-                if not is_visible:
-                    continue
+        # 并行检测所有 locator
+        tasks = [_check_visible(i, loc) for i, loc in enumerate(locators)]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
 
+        # 按原顺序找第一个可见的
+        visible_locators = []
+        for r in results:
+            if isinstance(r, tuple) and r is not None:
+                visible_locators.append(r)
+
+        # 按索引排序，优先点击靠前的 locator
+        visible_locators.sort(key=lambda x: x[0])
+
+        for idx, candidate in visible_locators:
+            try:
                 clicked = await _try_click(candidate, debug_label)
                 if clicked:
-                    await asyncio.sleep(1)
+                    await asyncio.sleep(0.5)  # 减少等待时间
                     if debug_label:
-                        logger.info(f"[{debug_label}] Clicked locator {i} successfully")
+                        logger.info(f"[{debug_label}] Clicked locator {idx} successfully")
                     return True
             except Exception as e:
                 if debug_label:
-                    logger.warning(f"[{debug_label}] Locator {i} failed: {e}")
+                    logger.warning(f"[{debug_label}] Locator {idx} click failed: {e}")
                 continue
+
         if debug_label:
             logger.warning(f"[{debug_label}] No locator was clickable")
         return False

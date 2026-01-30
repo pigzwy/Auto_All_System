@@ -1008,23 +1008,36 @@ class GoogleAccountViewSet(viewsets.ModelViewSet):
 
         for line in accounts_data:
             try:
-                # 智能检测分隔符：支持 ---- (4个), --- (3个), --, |, \t
-                parts = None
-                for separator in ["----", "---", "--", "|", "\t"]:
-                    if separator in line:
-                        parts = line.split(separator)
-                        break
+                # 先去除整行首尾空格
+                line = line.strip()
+                if not line:
+                    continue
 
-                if parts is None or len(parts) < 2:
+                # 用正则切割：匹配 2 个或更多连续的 - 作为分隔符
+                import re
+                parts = re.split(r'-{2,}', line)
+
+                # 如果正则没切开，尝试其他分隔符
+                if len(parts) < 2:
+                    for separator in ["|", "\t"]:
+                        if separator in line:
+                            parts = line.split(separator)
+                            break
+
+                if len(parts) < 2:
                     errors.append(
                         f"Invalid format (no valid separator found): {line[:50]}..."
                     )
                     continue
 
+                # 去除每个字段的空格
                 email = parts[0].strip()
                 password = parts[1].strip()
                 recovery = parts[2].strip() if len(parts) > 2 else ""
                 secret = parts[3].strip() if len(parts) > 3 else ""
+
+                # 如果 secret 有空格（如 "dnar4iaka7 itn3bp"），去除其中的空格
+                secret = secret.replace(" ", "")
 
                 account_obj = None
 

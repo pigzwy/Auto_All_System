@@ -36,6 +36,7 @@ class BrowserInstance:
         self.browser: Optional[Browser] = None
         self.context: Optional[BrowserContext] = None
         self.page: Optional[Page] = None
+        self._playwright = None
         self.created_at = timezone.now()
         self.last_used_at = timezone.now()
         self.is_busy = False
@@ -44,18 +45,20 @@ class BrowserInstance:
     async def connect(self):
         """连接到浏览器"""
         if not self.browser:
-            playwright = await async_playwright().start()
-            self.browser = await playwright.chromium.connect_over_cdp(self.ws_endpoint)
+            self._playwright = await async_playwright().start()
+            self.browser = await self._playwright.chromium.connect_over_cdp(
+                self.ws_endpoint
+            )
+            browser = self.browser
+            assert browser is not None
             # connect_over_cdp 可能返回 0 个 contexts；做兼容兜底
             self.context = (
-                self.browser.contexts[0]
-                if self.browser.contexts
-                else await self.browser.new_context()
+                browser.contexts[0] if browser.contexts else await browser.new_context()
             )
+            context = self.context
+            assert context is not None
             self.page = (
-                self.context.pages[0]
-                if self.context.pages
-                else await self.context.new_page()
+                context.pages[0] if context.pages else await context.new_page()
             )
             logger.info(f"Browser {self.browser_id} connected")
 
@@ -66,10 +69,16 @@ class BrowserInstance:
                 await self.browser.close()
             except Exception as e:
                 logger.error(f"Error closing browser {self.browser_id}: {e}")
+            try:
+                if self._playwright is not None:
+                    await self._playwright.stop()
+            except Exception:
+                pass
             finally:
                 self.browser = None
                 self.context = None
                 self.page = None
+                self._playwright = None
                 logger.info(f"Browser {self.browser_id} disconnected")
 
     def mark_busy(self, task_id: str):
@@ -323,6 +332,7 @@ class BrowserPool:
         account_info: Optional[Dict[str, Any]] = None,
         proxy: Optional[str] = None,
         browser_type: Optional[BrowserType] = None,
+        wait_seconds: int = 15,
     ) -> Optional[BrowserInstance]:
         """
         通过邮箱获取浏览器实例 (便捷方法)
@@ -363,12 +373,22 @@ class BrowserPool:
 
             # 3. 获取 BrowserInstance
             ws_endpoint = launch_info.ws_endpoint or launch_info.cdp_endpoint
-            return await self.acquire(
-                browser_id=profile.id,
-                ws_endpoint=ws_endpoint,
-                task_id=task_id,
-                browser_type=bt,
+            # 某些情况下（实例刚释放/连接抖动/资源池满）会短暂返回 None，这里做等待重试
+            for i in range(max(1, int(wait_seconds))):
+                inst = await self.acquire(
+                    browser_id=profile.id,
+                    ws_endpoint=ws_endpoint,
+                    task_id=task_id,
+                    browser_type=bt,
+                )
+                if inst and inst.page:
+                    return inst
+                await asyncio.sleep(1)
+
+            self.logger.warning(
+                f"Failed to acquire browser instance for {email} after {wait_seconds}s. pool_stats={self.get_pool_stats()}"
             )
+            return None
 
         except Exception as e:
             self.logger.error(
@@ -408,7 +428,9 @@ class BrowserPool:
 
             # 如果需要关闭，也关闭浏览器
             if close:
-                api.close_profile(profile.id)
+                closed = api.close_profile(profile.id)
+                if not closed:
+                    self.logger.warning(f"Failed to close browser profile for {email}")
 
             return result
 

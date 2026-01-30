@@ -417,13 +417,16 @@ class GoogleLoginService(BaseBrowserService):
         task_logger: Optional[TaskLogger] = None,
     ) -> str:
         """
-        处理 2FA 验证
+        处理 2FA 验证（带重试机制）
 
         Returns:
             "handled" - 已处理
             "not_needed" - 不需要
             "error" - 处理失败
         """
+        import re
+        import time
+
         totp_selectors = [
             'input[name="totpPin"]',
             'input[id="totpPin"]',
@@ -431,41 +434,110 @@ class GoogleLoginService(BaseBrowserService):
             'input[type="tel"]',
         ]
 
+        totp_input = None
         for selector in totp_selectors:
-            totp_input = page.locator(selector)
-            if await totp_input.count() > 0 and await totp_input.first.is_visible():
+            loc = page.locator(selector)
+            if await loc.count() > 0 and await loc.first.is_visible():
+                totp_input = loc.first
+                break
+
+        if not totp_input:
+            return "not_needed"
+
+        if task_logger:
+            task_logger.info("检测到 2FA 输入框")
+
+        if not secret or not pyotp:
+            self.logger.warning("需要 2FA 验证但未提供密钥")
+            return "error"
+
+        secret = secret.replace(" ", "").strip().upper()
+
+        def _wrong_code_visible() -> bool:
+            try:
+                wrong = page.get_by_text(
+                    re.compile(r"Wrong code|Try again|incorrect|Invalid", re.IGNORECASE),
+                    exact=False,
+                ).first
+                return wrong.is_visible(timeout=500)
+            except Exception:
+                return False
+
+        async def _submit_code(code: str) -> bool:
+            await totp_input.fill(code)
+            await asyncio.sleep(0.5)
+
+            next_btn = page.locator("#totpNext >> button")
+            if await next_btn.count() > 0:
+                await next_btn.click()
+            else:
+                await totp_input.press("Enter")
+
+            await asyncio.sleep(1.5)
+
+            try:
+                if not await totp_input.is_visible(timeout=500):
+                    return True
+            except Exception:
+                pass
+
+            try:
+                url_now = page.url or ""
+                if "/challenge/totp" not in url_now and "signin/challenge" not in url_now:
+                    return True
+            except Exception:
+                pass
+
+            if await _wrong_code_visible():
+                return False
+
+            return False
+
+        try:
+            totp = pyotp.TOTP(secret)
+
+            base_ts = int(time.time())
+            codes = []
+            for delta in (0, -30, 30):
+                try:
+                    codes.append(totp.at(base_ts + delta))
+                except Exception:
+                    continue
+            uniq_codes = list(dict.fromkeys(codes))
+
+            for idx, code in enumerate(uniq_codes[:3]):
                 if task_logger:
-                    task_logger.info("检测到 2FA 输入框")
+                    task_logger.info(f"尝试 2FA 验证码 ({idx + 1}/{len(uniq_codes)}): {code[:3]}***")
 
-                if secret and pyotp:
-                    try:
-                        s = secret.replace(" ", "").strip()
-                        totp = pyotp.TOTP(s)
-                        code = totp.now()
+                if await _submit_code(code):
+                    if task_logger:
+                        task_logger.info("2FA 验证成功")
+                    return "handled"
 
-                        if task_logger:
-                            task_logger.info(f"输入 2FA 验证码: {code[:3]}***")
+                if task_logger:
+                    task_logger.warning(f"2FA 验证码 {code[:3]}*** 失败，尝试下一个")
 
-                        await totp_input.first.fill(code)
-                        await asyncio.sleep(0.5)
+            wait_s = 30 - (int(time.time()) % 30)
+            wait_s = max(2, min(wait_s + 1, 31))
+            if task_logger:
+                task_logger.info(f"等待 {wait_s}s 进入下一个 TOTP 时间窗口")
+            await asyncio.sleep(wait_s)
 
-                        # 点击下一步
-                        next_btn = page.locator("#totpNext >> button")
-                        if await next_btn.count() > 0:
-                            await next_btn.click()
-                        else:
-                            await totp_input.first.press("Enter")
+            code = totp.now()
+            if task_logger:
+                task_logger.info(f"最后尝试 2FA 验证码: {code[:3]}***")
 
-                        await asyncio.sleep(3)
-                        return "handled"
-                    except Exception as e:
-                        self.logger.error(f"2FA 验证失败: {e}")
-                        return "error"
-                else:
-                    self.logger.warning("需要 2FA 验证但未提供密钥")
-                    return "error"
+            if await _submit_code(code):
+                if task_logger:
+                    task_logger.info("2FA 验证成功")
+                return "handled"
 
-        return "not_needed"
+            self.logger.error("2FA 验证失败：所有尝试均未成功")
+            return "error"
+
+        except Exception as e:
+            self.logger.error(f"2FA 验证失败: {e}")
+            return "error"
 
     # ==================== 辅助邮箱验证处理 ====================
 
