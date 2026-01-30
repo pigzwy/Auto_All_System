@@ -60,7 +60,21 @@
             <el-tag :type="getStatusType(row.status)">{{ row.status_display || row.status }}</el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="use_count" label="使用次数" width="100" />
+        <el-table-column label="剩余时间" width="120">
+          <template #default="{ row }">
+            <template v-if="row.key_expire_time">
+              <span v-if="isExpired(row.key_expire_time)" class="text-red-500">已过期</span>
+              <span v-else class="text-green-600">{{ formatCountdown(row.key_expire_time) }}</span>
+            </template>
+            <span v-else class="text-gray-400">-</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="使用次数" width="120">
+          <template #default="{ row }">
+            <span>{{ row.use_count }}</span>
+            <span class="text-gray-400"> / {{ row.max_use_count || '∞' }}</span>
+          </template>
+        </el-table-column>
         <el-table-column label="账单地址" min-width="200">
           <template #default="{ row }">
             <div v-if="row.billing_address && Object.keys(row.billing_address).length > 0" class="text-xs">
@@ -261,7 +275,7 @@
     <!-- API 配置管理对话框 -->
     <el-dialog v-model="showApiConfigDialog" title="API 配置管理" width="800px">
       <div class="mb-4">
-        <el-button type="primary" size="small" @click="showAddConfigForm = true">
+        <el-button type="primary" size="small" @click="resetConfigForm(); showAddConfigForm = true">
           添加配置
         </el-button>
       </div>
@@ -442,6 +456,28 @@ const getStatusType = (status: string) => {
     expired: 'danger'
   }
   return map[status] || 'info'
+}
+
+const isExpired = (expireTime: string) => {
+  if (!expireTime) return false
+  return new Date(expireTime) < new Date()
+}
+
+const formatCountdown = (expireTime: string) => {
+  if (!expireTime) return '-'
+  const now = new Date().getTime()
+  const expire = new Date(expireTime).getTime()
+  const diff = expire - now
+  
+  if (diff <= 0) return '已过期'
+  
+  const minutes = Math.floor(diff / 60000)
+  const hours = Math.floor(minutes / 60)
+  const days = Math.floor(hours / 24)
+  
+  if (days > 0) return `${days}天${hours % 24}小时`
+  if (hours > 0) return `${hours}小时${minutes % 60}分`
+  return `${minutes}分钟`
 }
 
 const editCard = (_card: any) => {
@@ -629,29 +665,34 @@ const handleRedeem = async () => {
       config_id: redeemForm.config_id
     })
     
-    if (response.code === 200 && response.data) {
+    // axios 拦截器已解包，response 可能是 {code, data} 或直接是 data
+    const cardData = response.data || response
+    
+    if (cardData && cardData.id) {
       redeemResult.value = {
         type: 'success',
-        message: '激活成功！卡片已添加到卡池',
-        data: response.data
+        message: '导入成功！卡片已添加到卡池',
+        data: cardData
       }
-      ElMessage.success('激活成功')
+      ElMessage.success('导入成功')
       fetchCards()
       redeemForm.key_id = ''
     } else {
       redeemResult.value = {
         type: 'error',
-        message: response.message || '激活失败',
+        message: (response as any).message || '导入失败',
         data: null
       }
+      ElMessage.error((response as any).message || '导入失败')
     }
   } catch (error: any) {
+    const errMsg = error.response?.data?.message || error.message || '导入失败'
     redeemResult.value = {
       type: 'error',
-      message: error.response?.data?.message || '激活失败',
+      message: errMsg,
       data: null
     }
-    ElMessage.error('激活失败')
+    ElMessage.error(errMsg)
   } finally {
     redeeming.value = false
   }
@@ -661,8 +702,16 @@ const handleRedeem = async () => {
 const loadApiConfigs = async () => {
   loadingConfigs.value = true
   try {
-    const response = await cardsApi.getActiveApiConfigs()
-    apiConfigs.value = response.data || []
+    // 用 getApiConfigs 加载所有配置（包括未启用的），用于管理页面
+    const response = await cardsApi.getApiConfigs()
+    // response 是分页格式 {results: [...]} 或直接数组
+    if (response.results) {
+      apiConfigs.value = response.results
+    } else if (Array.isArray(response)) {
+      apiConfigs.value = response
+    } else {
+      apiConfigs.value = []
+    }
   } catch (error) {
     console.error('加载 API 配置失败', error)
   } finally {
@@ -702,8 +751,8 @@ const editApiConfig = (config: CardApiConfig) => {
 }
 
 const saveApiConfig = async () => {
-  if (!configForm.name || !configForm.redeem_url) {
-    ElMessage.warning('请填写必填字段')
+  if (!configForm.name || (!configForm.redeem_url && !configForm.query_url)) {
+    ElMessage.warning('请填写配置名称和至少一个接口 URL')
     return
   }
   
