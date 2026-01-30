@@ -220,6 +220,12 @@
               <el-button link type="primary" size="small" @click="viewTaskArtifacts(scope.row)">查看</el-button>
             </template>
           </el-table-column>
+
+          <el-table-column label="日志" width="80">
+            <template #default="scope">
+              <el-button link type="primary" size="small" @click="viewTaskLog(scope.row)">查看</el-button>
+            </template>
+          </el-table-column>
         </el-table>
         <el-empty v-if="!tasksLoading && accountTasks.length === 0" description="暂无任务记录" />
       </div>
@@ -235,6 +241,22 @@
         </el-table-column>
       </el-table>
       <el-empty v-if="!artifactsLoading && currentTaskArtifacts.length === 0" description="暂无产物" />
+    </el-dialog>
+
+    <el-dialog v-model="taskLogDialogVisible" title="任务日志" width="900px">
+      <div v-loading="taskLogLoading">
+        <div v-if="currentLogTask" class="drawer-account-info">
+          <div class="cell-actions">
+            <span class="mono">{{ currentLogTask.id }}</span>
+            <span class="muted">{{ currentLogFilename }}</span>
+            <el-link v-if="currentLogDownloadUrl" :href="currentLogDownloadUrl" target="_blank" type="primary">下载</el-link>
+            <el-button text type="primary" @click="reloadTaskLog">刷新</el-button>
+          </div>
+        </div>
+
+        <el-input v-model="taskLogText" type="textarea" :rows="18" readonly />
+        <el-empty v-if="!taskLogLoading && !taskLogText" description="暂无日志" />
+      </div>
     </el-dialog>
   </div>
 </template>
@@ -517,14 +539,21 @@ const artifactsDialogVisible = ref(false)
 const artifactsLoading = ref(false)
 const currentTaskArtifacts = ref<TaskArtifact[]>([])
 
+const taskLogDialogVisible = ref(false)
+const taskLogLoading = ref(false)
+const currentLogTask = ref<TaskRow | null>(null)
+const currentLogFilename = ref('run.log')
+const currentLogDownloadUrl = ref('')
+const taskLogText = ref('')
+
 const viewTasks = async (mother: MotherRow) => {
   tasksDrawerAccount.value = mother
   tasksDrawerVisible.value = true
   tasksLoading.value = true
   try {
-    const res = await gptBusinessApi.listTasks()
+    const res = await gptBusinessApi.getAccountTasks(mother.id)
     const allTasks: TaskRow[] = (res?.tasks || []) as TaskRow[]
-    accountTasks.value = allTasks.filter(t => t.mother_id === mother.id)
+    accountTasks.value = allTasks
   } catch (e: any) {
     ElMessage.error(e?.response?.data?.detail || e?.message || '获取任务失败')
     accountTasks.value = []
@@ -547,6 +576,38 @@ const viewTaskArtifacts = async (task: TaskRow) => {
   } finally {
     artifactsLoading.value = false
   }
+}
+
+const loadTaskLog = async (task: TaskRow) => {
+  if (!task?.id) return
+  taskLogLoading.value = true
+  currentLogTask.value = task
+  taskLogText.value = ''
+  currentLogFilename.value = 'run.log'
+  currentLogDownloadUrl.value = ''
+  try {
+    const res = await gptBusinessApi.getTaskLog(task.id, { tail: 2000 })
+    currentLogFilename.value = res?.filename || 'run.log'
+    currentLogDownloadUrl.value = res?.download_url || ''
+    taskLogText.value = res?.text || ''
+  } catch (e: any) {
+    ElMessage.error(e?.response?.data?.detail || e?.message || '获取日志失败')
+    taskLogText.value = ''
+    currentLogDownloadUrl.value = ''
+  } finally {
+    taskLogLoading.value = false
+  }
+}
+
+const viewTaskLog = async (task: TaskRow) => {
+  if (!task?.id) return
+  taskLogDialogVisible.value = true
+  await loadTaskLog(task)
+}
+
+const reloadTaskLog = async () => {
+  if (!currentLogTask.value) return
+  await loadTaskLog(currentLogTask.value)
 }
 
 const getTaskTypeName = (type: string) => {

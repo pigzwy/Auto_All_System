@@ -60,6 +60,10 @@ export const gptBusinessApi = {
     return request.get('/plugins/gpt-business/tasks/')
   },
 
+  getAccountTasks(motherAccountId: string): Promise<{ tasks: any[] }> {
+    return request.get(`/plugins/gpt-business/accounts/${motherAccountId}/tasks/`)
+  },
+
   createTask(data: GptBusinessInviteTaskCreate): Promise<any> {
     return request.post('/plugins/gpt-business/tasks/', data)
   },
@@ -70,6 +74,21 @@ export const gptBusinessApi = {
 
   getTaskArtifacts(taskId: string): Promise<Array<{ name: string; download_url: string }>> {
     return request.get(`/plugins/gpt-business/tasks/${taskId}/artifacts/`)
+  },
+
+  getTaskLog(
+    taskId: string,
+    opts?: {
+      tail?: number
+      filename?: string
+    }
+  ): Promise<{ filename: string; exists: boolean; text: string; download_url: string }> {
+    return request.get(`/plugins/gpt-business/tasks/${taskId}/log/`, {
+      params: {
+        tail: opts?.tail,
+        filename: opts?.filename
+      }
+    })
   },
 
   getCeleryTask(celeryTaskId: string): Promise<any> {

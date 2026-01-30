@@ -14,6 +14,7 @@ export interface User {
   last_login: string | null
   created_at: string
   balance?: string | number  // 余额字段
+  vip_level?: number  // VIP等级
 }
 
 export interface UserBalance {
