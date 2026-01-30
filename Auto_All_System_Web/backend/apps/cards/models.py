@@ -122,6 +122,14 @@ class Card(models.Model):
         help_text='包含street, city, state, zip, country等'
     )
     
+    # 卡密过期时间（从API获取的临时卡有时效限制）
+    key_expire_time = models.DateTimeField(
+        null=True,
+        blank=True,
+        verbose_name='卡密过期时间',
+        help_text='卡密的有效期限，过期后不可使用'
+    )
+    
     # 备注信息
     notes = models.TextField(
         blank=True,
@@ -277,4 +285,85 @@ class CardUsageLog(models.Model):
     def __str__(self):
         status = "成功" if self.success else "失败"
         return f"{self.card.masked_card_number} - {self.purpose} - {status}"
+
+
+class CardApiConfig(models.Model):
+    """
+    卡密 API 配置
+    用于存储外部卡密激活/查询 API 的配置
+    """
+    name = models.CharField(
+        max_length=100,
+        unique=True,
+        verbose_name='配置名称',
+        help_text='如: ActCard, OtherProvider'
+    )
+    redeem_url = models.URLField(
+        max_length=500,
+        verbose_name='激活接口URL',
+        help_text='如: https://actcard.xyz/api/keys/redeem'
+    )
+    query_url = models.URLField(
+        max_length=500,
+        blank=True,
+        verbose_name='查询接口URL',
+        help_text='如: https://actcard.xyz/api/keys/query'
+    )
+    
+    # 请求配置
+    request_method = models.CharField(
+        max_length=10,
+        default='POST',
+        verbose_name='请求方法'
+    )
+    request_headers = models.JSONField(
+        default=dict,
+        blank=True,
+        verbose_name='请求头',
+        help_text='如: {"Authorization": "Bearer xxx"}'
+    )
+    request_body_template = models.JSONField(
+        default=dict,
+        blank=True,
+        verbose_name='请求体模板',
+        help_text='使用 {key_id} 作为占位符'
+    )
+    
+    # 响应字段映射
+    response_mapping = models.JSONField(
+        default=dict,
+        blank=True,
+        verbose_name='响应字段映射',
+        help_text='外部API字段到系统字段的映射'
+    )
+    
+    is_active = models.BooleanField(default=True, verbose_name='是否启用')
+    is_default = models.BooleanField(default=False, verbose_name='是否默认')
+    timeout = models.IntegerField(default=30, verbose_name='超时时间(秒)')
+    
+    notes = models.TextField(blank=True, verbose_name='备注')
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name='创建时间')
+    updated_at = models.DateTimeField(auto_now=True, verbose_name='更新时间')
+    
+    class Meta:
+        db_table = 'card_api_configs'
+        verbose_name = '卡密API配置'
+        verbose_name_plural = '卡密API配置'
+        ordering = ['-is_default', '-created_at']
+    
+    def __str__(self):
+        default_mark = ' (默认)' if self.is_default else ''
+        return f"{self.name}{default_mark}"
+    
+    def save(self, *args, **kwargs):
+        # 如果设为默认，取消其他默认
+        if self.is_default:
+            CardApiConfig.objects.filter(is_default=True).exclude(pk=self.pk).update(is_default=False)
+        super().save(*args, **kwargs)
+    
+    @classmethod
+    def get_default(cls):
+        """获取默认配置"""
+        return cls.objects.filter(is_active=True, is_default=True).first() or \
+               cls.objects.filter(is_active=True).first()
 
