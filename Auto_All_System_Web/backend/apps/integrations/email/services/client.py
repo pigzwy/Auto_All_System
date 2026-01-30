@@ -326,21 +326,18 @@ class CloudMailClient:
         return None
 
     def extract_verification_code(self, email: Email) -> Optional[str]:
-        """
-        从邮件中提取验证码
+        """从邮件中提取验证码（支持 6 位数字）"""
+        text = f"{email.subject or ''}\n{email.text or ''}\n{email.content or ''}"
+        
+        if not text.strip():
+            return None
 
-        支持 6 位数字验证码
-        """
-        text = email.text or email.content
-
-        # 常见验证码模式
         patterns = [
-            r"verification code[:\s]+(\d{6})",
-            r"code[:\s]+(\d{6})",
-            r"(\d{6})[:\s]+is your",
-            r"验证码[：:\s]+(\d{6})",
-            r"[：:\s](\d{6})[：:\s]",
-            r"\b(\d{6})\b",
+            r"代码为\s*(\d{6})",
+            r"code is\s*(\d{6})",
+            r"verification code[:\s]*(\d{6})",
+            r"验证码[：:\s]*(\d{6})",
+            r"(\d{6})",
         ]
 
         for pattern in patterns:
@@ -371,23 +368,33 @@ class CloudMailClient:
         Returns:
             验证码字符串，失败返回 None
         """
-        email = self.wait_for_email(
-            to_email=to_email,
-            timeout=timeout,
-            poll_interval=poll_interval,
-            sender_contains=sender_contains,
-        )
-
-        if not email:
-            return None
-
-        code = self.extract_verification_code(email)
-        if code:
-            logger.info(f"Extracted verification code: {code}")
-        else:
-            logger.warning(f"Failed to extract code from email: {email.subject}")
-
-        return code
+        start = time.time()
+        checked_ids: set[int] = set()
+        
+        logger.info(f"Waiting for verification code to {to_email}")
+        
+        while time.time() - start < timeout:
+            emails = self.list_emails(to_email=to_email, size=10, time_sort="desc")
+            
+            for email in emails:
+                if email.email_id in checked_ids:
+                    continue
+                checked_ids.add(email.email_id)
+                
+                # 检查发件人过滤
+                if sender_contains and sender_contains.lower() not in email.sender_email.lower():
+                    continue
+                
+                # 尝试提取验证码
+                code = self.extract_verification_code(email)
+                if code:
+                    logger.info(f"Found verification code {code} in email: {email.subject}")
+                    return code
+            
+            time.sleep(poll_interval)
+        
+        logger.warning(f"Timeout waiting for verification code to {to_email}")
+        return None
 
     def close(self):
         """关闭客户端"""
