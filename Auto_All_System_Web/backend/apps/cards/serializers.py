@@ -2,7 +2,7 @@
 虚拟卡序列化器
 """
 from rest_framework import serializers
-from .models import Card, CardUsageLog
+from .models import Card, CardUsageLog, CardApiConfig
 
 
 class CardSerializer(serializers.ModelSerializer):
@@ -24,7 +24,7 @@ class CardSerializer(serializers.ModelSerializer):
             'pool_type', 'pool_type_display', 'owner_user', 'owner_user_name',
             'status', 'status_display',
             'use_count', 'success_count', 'success_rate',
-            'max_use_count', 'billing_address', 'notes',
+            'max_use_count', 'billing_address', 'key_expire_time', 'notes',
             'created_at', 'updated_at', 'last_used_at',
             'is_available', 'remaining_usage'
         ]
@@ -139,3 +139,17 @@ class CardUsageLogSerializer(serializers.ModelSerializer):
             'extra_data', 'created_at'
         ]
         read_only_fields = ['id', 'created_at']
+
+
+class CardApiConfigSerializer(serializers.ModelSerializer):
+    """卡密API配置序列化器"""
+    
+    class Meta:
+        model = CardApiConfig
+        fields = [
+            'id', 'name', 'redeem_url', 'query_url',
+            'request_method', 'request_headers', 'request_body_template',
+            'response_mapping', 'is_active', 'is_default', 'timeout',
+            'notes', 'created_at', 'updated_at'
+        ]
+        read_only_fields = ['id', 'created_at', 'updated_at']
