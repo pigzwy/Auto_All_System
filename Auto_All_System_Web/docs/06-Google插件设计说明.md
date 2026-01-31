@@ -372,7 +372,7 @@ class BrowserPool:
 
 **前端**:
 - Vue 3 - 前端框架
-- Element Plus - UI组件库
+- Tailwind CSS + shadcn-vue - UI与样式（含 legacy `el-*` 标签兼容层）
 - TypeScript - 类型安全
 - Axios - HTTP客户端
 - Pinia - 状态管理
@@ -874,4 +874,3 @@ verify_batch(links)  # 批量验证
 **文档维护**: Auto All System Team  
 **最后更新**: 2026-01-19  
 **版本**: v1.0
-

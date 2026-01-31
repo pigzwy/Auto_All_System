@@ -1,6 +1,6 @@
 # Auto All System - Frontend
 
-这是 Auto All System 的前端项目，使用 Vue 3 + TypeScript + Vite + Element Plus 构建。
+这是 Auto All System 的前端项目，使用 Vue 3 + TypeScript + Vite + Tailwind CSS + shadcn-vue 构建。
 
 ## 技术栈
 
@@ -9,7 +9,9 @@
 - **Vite** - 下一代前端构建工具
 - **Vue Router** - Vue.js 官方路由
 - **Pinia** - Vue 3 状态管理
-- **Element Plus** - Vue 3 UI 组件库
+- **Tailwind CSS** - 实用优先的 CSS 框架
+- **shadcn-vue / reka-ui** - 现代 UI 组件方案
+- **lucide-vue-next** - 图标库
 - **Axios** - HTTP 客户端
 - **Sass** - CSS 预处理器
 
@@ -164,7 +166,8 @@ VITE_API_BASE_URL=http://localhost:8000/api
 
 - [Vue 3 文档](https://cn.vuejs.org/)
 - [Vite 文档](https://cn.vitejs.dev/)
-- [Element Plus 文档](https://element-plus.org/zh-CN/)
+- [Tailwind CSS 文档](https://tailwindcss.com/docs)
+- [shadcn-vue 文档](https://www.shadcn-vue.com/)
+- [lucide 文档](https://lucide.dev/)
 - [Pinia 文档](https://pinia.vuejs.org/zh/)
 - [Vue Router 文档](https://router.vuejs.org/zh/)
-

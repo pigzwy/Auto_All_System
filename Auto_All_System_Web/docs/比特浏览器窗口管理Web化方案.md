@@ -867,7 +867,7 @@ graph TB
 | **后端** | Django REST Framework | RESTful API |
 | **数据库** | PostgreSQL | 数据持久化 |
 | **前端** | Vue 3 + TypeScript | SPA应用 |
-| **UI框架** | Element Plus | 组件库 |
+| **UI框架** | Tailwind CSS + shadcn-vue | 组件库（含 legacy `el-*` 标签兼容层） |
 | **部署** | Docker + docker-compose | 容器化部署 |
 | **外部API** | 比特浏览器 Local API | 窗口管理 |
 
@@ -890,4 +890,3 @@ graph TB
 **文档版本**: v1.1  
 **最后更新**: 2026-01-19 23:30  
 **状态**: ✅ 基础功能已完成，等待测试
-
