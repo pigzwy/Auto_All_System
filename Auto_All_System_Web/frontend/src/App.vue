@@ -1,10 +1,14 @@
 <template>
   <router-view />
+  <Toaster />
+  <MessageBoxHost />
 </template>
 
 <script setup lang="ts">
 import { onMounted } from 'vue'
 import { useUserStore } from '@/stores/user'
+import { Toaster } from '@/components/ui/toast'
+import MessageBoxHost from '@/components/app/MessageBoxHost.vue'
 
 const userStore = useUserStore()
 
@@ -13,21 +17,3 @@ onMounted(() => {
   userStore.checkAuth()
 })
 </script>
-
-<style>
-* {
-  margin: 0;
-  padding: 0;
-  box-sizing: border-box;
-}
-
-html, body, #app {
-  height: 100%;
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-}
-
-#app {
-  background-color: #f5f7fa;
-}
-</style>
-
