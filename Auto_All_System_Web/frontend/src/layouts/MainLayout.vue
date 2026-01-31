@@ -1,83 +1,135 @@
 <template>
-  <div class="flex h-screen w-full bg-gray-50">
+  <div class="flex h-screen w-full bg-muted/30 text-foreground">
     <!-- 侧边栏 -->
-    <aside class="flex flex-col w-64 bg-slate-900 text-white transition-all duration-300">
+    <aside
+      class="flex flex-col bg-slate-950 text-slate-100 shadow-lg transition-all duration-200"
+      :class="isSidebarCollapsed ? 'w-16' : 'w-64'"
+    >
       <!-- Logo -->
-      <div class="flex items-center justify-center h-16 border-b border-slate-800">
-        <div class="flex items-center gap-2 font-bold text-xl tracking-wide">
-          <span class="text-blue-500 text-2xl">⚡</span>
-          <span>Auto All</span>
+      <div class="flex h-16 items-center justify-center border-b border-slate-900/80">
+        <div class="flex items-center gap-2 font-bold tracking-wide" :class="isSidebarCollapsed ? 'text-base' : 'text-xl'">
+          <span class="text-blue-500" :class="isSidebarCollapsed ? 'text-xl' : 'text-2xl'">⚡</span>
+          <span v-if="!isSidebarCollapsed">Auto All</span>
         </div>
       </div>
 
       <!-- 导航菜单 -->
-      <div class="flex-1 overflow-y-auto py-4">
-        <el-menu
-          :default-active="activeMenu"
-          router
-          background-color="transparent"
-          text-color="#94a3b8"
-          active-text-color="#fff"
-          class="border-none !border-r-0"
-        >
-          <el-menu-item index="/" class="hover:bg-slate-800 !my-1 mx-2 !rounded-lg group">
-            <el-icon class="group-hover:text-blue-400 transition-colors"><HomeFilled /></el-icon>
-            <span class="group-hover:text-white transition-colors">首页</span>
-          </el-menu-item>
-          
-          <div class="px-4 py-2 text-xs font-semibold text-slate-500 uppercase tracking-wider mt-4 mb-2">
-            业务管理
-          </div>
-
-          <el-menu-item index="/zones" class="hover:bg-slate-800 !my-1 mx-2 !rounded-lg group">
-            <el-icon class="group-hover:text-blue-400 transition-colors"><Grid /></el-icon>
-            <span class="group-hover:text-white transition-colors">专区管理</span>
-          </el-menu-item>
-          <el-menu-item index="/cards" class="hover:bg-slate-800 !my-1 mx-2 !rounded-lg group">
-            <el-icon class="group-hover:text-blue-400 transition-colors"><CreditCard /></el-icon>
-            <span class="group-hover:text-white transition-colors">虚拟卡</span>
-          </el-menu-item>
-
-          <div class="px-4 py-2 text-xs font-semibold text-slate-500 uppercase tracking-wider mt-4 mb-2">
-            账户 & 设置
-          </div>
-
-          <el-menu-item index="/balance" class="hover:bg-slate-800 !my-1 mx-2 !rounded-lg group">
-            <el-icon class="group-hover:text-blue-400 transition-colors"><Wallet /></el-icon>
-            <span class="group-hover:text-white transition-colors">余额管理</span>
-          </el-menu-item>
-          <el-menu-item index="/recharge" class="hover:bg-slate-800 !my-1 mx-2 !rounded-lg group">
-            <el-icon class="group-hover:text-blue-400 transition-colors"><Money /></el-icon>
-            <span class="group-hover:text-white transition-colors">账户充值</span>
-          </el-menu-item>
-          <el-menu-item index="/vip" class="hover:bg-slate-800 !my-1 mx-2 !rounded-lg group">
-            <el-icon class="group-hover:text-blue-400 transition-colors"><Star /></el-icon>
-            <span class="group-hover:text-white transition-colors">VIP会员</span>
-          </el-menu-item>
-          <el-menu-item index="/profile" class="hover:bg-slate-800 !my-1 mx-2 !rounded-lg group">
-            <el-icon class="group-hover:text-blue-400 transition-colors"><User /></el-icon>
-            <span class="group-hover:text-white transition-colors">个人中心</span>
-          </el-menu-item>
-          
-          <el-menu-item 
-            v-if="userStore.user?.is_staff" 
-            index="/admin" 
-            class="!my-1 mx-2 !rounded-lg mt-6 !text-white"
-            style="background: linear-gradient(135deg, #6366f1 0%, #a855f7 100%);"
+      <nav class="flex-1 overflow-y-auto py-4">
+        <div class="px-2">
+          <RouterLink
+            to="/"
+            class="group mx-2 my-1 flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors"
+            :class="[
+              isPathActive('/') ? 'bg-slate-900/70 text-white' : 'text-slate-300 hover:bg-slate-900/60 hover:text-white',
+              isSidebarCollapsed ? 'justify-center' : 'justify-start'
+            ]"
           >
-            <el-icon><Setting /></el-icon>
-            <span class="font-bold">管理后台</span>
-          </el-menu-item>
-        </el-menu>
-      </div>
+            <HomeFilled class="h-4 w-4 shrink-0" :class="isPathActive('/') ? 'text-blue-400' : 'text-slate-400'" />
+            <span v-if="!isSidebarCollapsed" class="group-hover:text-white transition-colors">首页</span>
+          </RouterLink>
+        </div>
+
+        <div v-if="!isSidebarCollapsed" class="mt-6 px-4 py-2 text-xs font-semibold text-slate-500 uppercase tracking-wider">
+          业务管理
+        </div>
+        <div class="px-2">
+          <RouterLink
+            to="/zones"
+            class="group mx-2 my-1 flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors"
+            :class="[
+              isPathActive('/zones') ? 'bg-slate-900/70 text-white' : 'text-slate-300 hover:bg-slate-900/60 hover:text-white',
+              isSidebarCollapsed ? 'justify-center' : 'justify-start'
+            ]"
+          >
+            <Grid class="h-4 w-4 shrink-0" :class="isPathActive('/zones') ? 'text-blue-400' : 'text-slate-400'" />
+            <span v-if="!isSidebarCollapsed" class="group-hover:text-white transition-colors">专区管理</span>
+          </RouterLink>
+
+          <RouterLink
+            to="/cards"
+            class="group mx-2 my-1 flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors"
+            :class="[
+              isPathActive('/cards') ? 'bg-slate-900/70 text-white' : 'text-slate-300 hover:bg-slate-900/60 hover:text-white',
+              isSidebarCollapsed ? 'justify-center' : 'justify-start'
+            ]"
+          >
+            <CreditCard class="h-4 w-4 shrink-0" :class="isPathActive('/cards') ? 'text-blue-400' : 'text-slate-400'" />
+            <span v-if="!isSidebarCollapsed" class="group-hover:text-white transition-colors">虚拟卡</span>
+          </RouterLink>
+        </div>
+
+        <div v-if="!isSidebarCollapsed" class="mt-6 px-4 py-2 text-xs font-semibold text-slate-500 uppercase tracking-wider">
+          账户 & 设置
+        </div>
+        <div class="px-2">
+          <RouterLink
+            to="/balance"
+            class="group mx-2 my-1 flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors"
+            :class="[
+              isPathActive('/balance') ? 'bg-slate-900/70 text-white' : 'text-slate-300 hover:bg-slate-900/60 hover:text-white',
+              isSidebarCollapsed ? 'justify-center' : 'justify-start'
+            ]"
+          >
+            <Wallet class="h-4 w-4 shrink-0" :class="isPathActive('/balance') ? 'text-blue-400' : 'text-slate-400'" />
+            <span v-if="!isSidebarCollapsed" class="group-hover:text-white transition-colors">余额管理</span>
+          </RouterLink>
+
+          <RouterLink
+            to="/recharge"
+            class="group mx-2 my-1 flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors"
+            :class="[
+              isPathActive('/recharge') ? 'bg-slate-900/70 text-white' : 'text-slate-300 hover:bg-slate-900/60 hover:text-white',
+              isSidebarCollapsed ? 'justify-center' : 'justify-start'
+            ]"
+          >
+            <Money class="h-4 w-4 shrink-0" :class="isPathActive('/recharge') ? 'text-blue-400' : 'text-slate-400'" />
+            <span v-if="!isSidebarCollapsed" class="group-hover:text-white transition-colors">账户充值</span>
+          </RouterLink>
+
+          <RouterLink
+            to="/vip"
+            class="group mx-2 my-1 flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors"
+            :class="[
+              isPathActive('/vip') ? 'bg-slate-900/70 text-white' : 'text-slate-300 hover:bg-slate-900/60 hover:text-white',
+              isSidebarCollapsed ? 'justify-center' : 'justify-start'
+            ]"
+          >
+            <Star class="h-4 w-4 shrink-0" :class="isPathActive('/vip') ? 'text-blue-400' : 'text-slate-400'" />
+            <span v-if="!isSidebarCollapsed" class="group-hover:text-white transition-colors">VIP会员</span>
+          </RouterLink>
+
+          <RouterLink
+            to="/profile"
+            class="group mx-2 my-1 flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors"
+            :class="[
+              isPathActive('/profile') ? 'bg-slate-900/70 text-white' : 'text-slate-300 hover:bg-slate-900/60 hover:text-white',
+              isSidebarCollapsed ? 'justify-center' : 'justify-start'
+            ]"
+          >
+            <User class="h-4 w-4 shrink-0" :class="isPathActive('/profile') ? 'text-blue-400' : 'text-slate-400'" />
+            <span v-if="!isSidebarCollapsed" class="group-hover:text-white transition-colors">个人中心</span>
+          </RouterLink>
+
+          <RouterLink
+            v-if="userStore.user?.is_staff"
+            to="/admin"
+            class="mx-2 my-1 mt-6 flex items-center gap-3 rounded-lg bg-gradient-to-r from-indigo-500 to-fuchsia-500 px-3 py-2 text-sm font-bold text-white shadow-sm shadow-indigo-500/20 transition-colors hover:from-indigo-400 hover:to-fuchsia-400"
+            :class="isSidebarCollapsed ? 'justify-center' : 'justify-start'"
+          >
+            <Setting class="h-4 w-4 shrink-0" />
+            <span v-if="!isSidebarCollapsed">管理后台</span>
+          </RouterLink>
+        </div>
+      </nav>
       
       <!-- 用户简略信息 (底部) -->
-      <div class="p-4 border-t border-slate-800 bg-slate-900/50">
-        <div class="flex items-center gap-3">
-          <el-avatar :size="32" :src="userStore.user?.avatar || undefined" class="!bg-blue-600 font-bold">
-            {{ userStore.user?.username?.[0]?.toUpperCase() }}
-          </el-avatar>
-          <div class="flex flex-col overflow-hidden">
+      <div class="border-t border-slate-900/80 bg-slate-950/60 p-4">
+        <div class="flex items-center" :class="isSidebarCollapsed ? 'justify-center' : 'gap-3'">
+          <Avatar size="sm" class="h-8 w-8 bg-blue-600 text-white">
+            <AvatarImage v-if="userStore.user?.avatar" :src="userStore.user.avatar" alt="" />
+            <AvatarFallback class="bg-blue-600 text-white">{{ userStore.user?.username?.[0]?.toUpperCase() }}</AvatarFallback>
+          </Avatar>
+          <div v-if="!isSidebarCollapsed" class="flex flex-col overflow-hidden">
             <span class="text-sm font-medium text-white truncate">{{ userStore.user?.username }}</span>
             <span class="text-xs text-slate-400 truncate">VIP {{ userStore.user?.vip_level || 0 }}</span>
           </div>
@@ -88,60 +140,90 @@
     <!-- 主内容区 -->
     <div class="flex-1 flex flex-col overflow-hidden">
       <!-- 顶部导航栏 -->
-      <header class="h-16 bg-white border-b border-gray-100 flex items-center justify-between px-6 shadow-sm z-10">
-        <div class="flex items-center">
-          <el-breadcrumb separator="/" class="!text-sm">
-            <el-breadcrumb-item :to="{ path: '/' }">首页</el-breadcrumb-item>
-            <el-breadcrumb-item v-if="currentRouteName">{{ currentRouteName }}</el-breadcrumb-item>
-          </el-breadcrumb>
+      <header class="h-16 bg-background border-b border-border flex items-center justify-between px-6 shadow-sm z-10">
+        <div class="flex items-center gap-2">
+          <button
+            type="button"
+            class="inline-flex h-9 w-9 items-center justify-center rounded-md border border-border bg-background text-muted-foreground transition-colors hover:bg-muted"
+            @click="isSidebarCollapsed = !isSidebarCollapsed"
+            :title="isSidebarCollapsed ? '展开侧边栏' : '收起侧边栏'"
+          >
+            <Fold v-if="!isSidebarCollapsed" class="h-4 w-4" />
+            <Expand v-else class="h-4 w-4" />
+          </button>
+
+          <div class="flex items-center gap-2 text-sm">
+            <RouterLink to="/" class="text-muted-foreground hover:text-foreground">首页</RouterLink>
+            <span v-if="currentRouteName" class="text-muted-foreground">/</span>
+            <span v-if="currentRouteName" class="font-medium text-foreground">{{ currentRouteName }}</span>
+          </div>
         </div>
 
         <div class="flex items-center gap-4">
           <!-- 通知铃铛 (示例) -->
-          <div class="w-8 h-8 flex items-center justify-center rounded-full hover:bg-gray-100 cursor-pointer text-gray-500 transition-colors relative">
-            <el-icon :size="18"><Bell /></el-icon>
+          <button type="button" class="relative flex h-8 w-8 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted">
+            <Bell class="h-4 w-4" />
             <span class="absolute top-1.5 right-1.5 w-2 h-2 bg-red-500 rounded-full border border-white"></span>
-          </div>
 
-          <el-dropdown @command="handleCommand" trigger="click">
-            <span class="flex items-center gap-2 cursor-pointer hover:bg-gray-50 px-2 py-1 rounded-lg transition-colors">
-              <el-avatar :size="32" :src="userStore.user?.avatar || undefined" class="!bg-blue-100 !text-blue-600 border border-blue-200">
-                {{ userStore.user?.username?.[0]?.toUpperCase() }}
-              </el-avatar>
-              <div class="hidden md:flex flex-col items-start">
-                <span class="text-sm font-medium text-gray-700 leading-none">{{ userStore.user?.username }}</span>
-                <span class="text-xs text-gray-400 mt-1">余额: ¥{{ userStore.user?.balance || '0.00' }}</span>
-              </div>
-              <el-icon class="text-gray-400"><ArrowDown /></el-icon>
-            </span>
-            <template #dropdown>
-              <el-dropdown-menu class="!p-2 min-w-[160px]">
-                <div class="px-4 py-2 border-b border-gray-100 mb-1">
-                  <div class="text-sm font-bold text-gray-800">我的账户</div>
-                  <div class="text-xs text-gray-400 mt-0.5">{{ userStore.user?.email }}</div>
+          </button>
+
+          <DropdownMenu>
+            <DropdownMenuTrigger as-child>
+              <button
+                type="button"
+                class="flex items-center gap-2 rounded-lg px-2 py-1 transition-colors hover:bg-muted"
+              >
+                <Avatar size="sm" class="h-8 w-8 bg-blue-100 text-blue-600 border border-blue-200">
+                  <AvatarImage v-if="userStore.user?.avatar" :src="userStore.user.avatar" alt="" />
+                  <AvatarFallback class="bg-blue-100 text-blue-600">{{ userStore.user?.username?.[0]?.toUpperCase() }}</AvatarFallback>
+                </Avatar>
+                <div class="hidden md:flex flex-col items-start">
+                  <span class="text-sm font-medium text-gray-700 leading-none">{{ userStore.user?.username }}</span>
+                  <span class="mt-1 text-xs text-gray-400">余额: ¥{{ userStore.user?.balance || '0.00' }}</span>
                 </div>
-                <el-dropdown-item command="profile" class="!rounded-md">
-                  <el-icon><User /></el-icon>个人中心
-                </el-dropdown-item>
-                <el-dropdown-item v-if="userStore.user?.is_staff" command="admin" class="!rounded-md">
-                  <el-icon><Setting /></el-icon>管理后台
-                </el-dropdown-item>
-                <el-dropdown-item command="logout" divided class="!text-red-500 hover:!bg-red-50 !rounded-md">
-                  <el-icon><SwitchButton /></el-icon>退出登录
-                </el-dropdown-item>
-              </el-dropdown-menu>
-            </template>
-          </el-dropdown>
+                <ArrowDown class="h-4 w-4 text-gray-400" />
+              </button>
+            </DropdownMenuTrigger>
+
+            <DropdownMenuContent align="end" class="w-56">
+              <DropdownMenuLabel>
+                <div class="text-sm font-bold text-foreground">我的账户</div>
+                <div class="mt-0.5 text-xs text-muted-foreground">{{ userStore.user?.email }}</div>
+              </DropdownMenuLabel>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem @select="handleCommand('profile')">
+                <User class="h-4 w-4" />
+                个人中心
+              </DropdownMenuItem>
+              <DropdownMenuItem v-if="userStore.user?.is_staff" @select="handleCommand('admin')">
+                <Setting class="h-4 w-4" />
+                管理后台
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem class="text-rose-600 focus:text-rose-600" @select="handleCommand('logout')">
+                <SwitchButton class="h-4 w-4" />
+                退出登录
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
       </header>
 
       <!-- 内容区域 -->
-      <main class="flex-1 overflow-auto bg-gray-50 p-6">
+      <main class="flex-1 overflow-auto bg-muted/20 p-6">
         <div class="max-w-7xl mx-auto">
           <router-view v-slot="{ Component }">
-            <transition name="fade-slide" mode="out-in">
+            <Transition
+              mode="out-in"
+              enter-active-class="transition duration-200 ease-out"
+              enter-from-class="opacity-0 translate-y-2"
+              enter-to-class="opacity-100 translate-y-0"
+              leave-active-class="transition duration-150 ease-in"
+              leave-from-class="opacity-100 translate-y-0"
+              leave-to-class="opacity-0 -translate-y-2"
+            >
               <component :is="Component" />
-            </transition>
+            </Transition>
           </router-view>
         </div>
       </main>
@@ -150,21 +232,52 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useUserStore } from '@/stores/user'
-import { ElMessage } from 'element-plus'
+import { ElMessage } from '@/lib/element'
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
 import { 
   Setting, Money, Star, HomeFilled, Grid, CreditCard, 
-  Wallet, User, ArrowDown, Bell, SwitchButton 
-} from '@element-plus/icons-vue'
+  Wallet, User, ArrowDown, Bell, SwitchButton, Fold, Expand
+} from '@/icons'
 
 const route = useRoute()
 const router = useRouter()
 const userStore = useUserStore()
 
-const activeMenu = computed(() => route.path)
+const isSidebarCollapsed = ref(false)
+
+let sidebarMq: MediaQueryList | null = null
+const syncSidebarCollapse = () => {
+  if (!sidebarMq) return
+  isSidebarCollapsed.value = sidebarMq.matches
+}
+
+onMounted(() => {
+  sidebarMq = window.matchMedia('(max-width: 767px)')
+  syncSidebarCollapse()
+  sidebarMq.addEventListener('change', syncSidebarCollapse)
+})
+
+onBeforeUnmount(() => {
+  sidebarMq?.removeEventListener('change', syncSidebarCollapse)
+})
+
 const currentRouteName = computed(() => route.meta?.title || route.name as string)
+
+const isPathActive = (path: string) => {
+  if (path === '/') return route.path === '/'
+  return route.path === path || route.path.startsWith(`${path}/`)
+}
 
 const handleCommand = async (command: string) => {
   if (command === 'logout') {
@@ -182,31 +295,3 @@ const handleCommand = async (command: string) => {
   }
 }
 </script>
-
-<style scoped>
-/* 覆盖 Element Plus 菜单默认样式以适配 Dark Mode */
-:deep(.el-menu-item.is-active) {
-  background-color: #3b82f6 !important;
-  color: #fff !important;
-}
-
-:deep(.el-menu-item:hover) {
-  background-color: #1e293b !important; /* slate-800 */
-}
-
-/* 页面切换动画 */
-.fade-slide-enter-active,
-.fade-slide-leave-active {
-  transition: opacity 0.3s ease, transform 0.3s ease;
-}
-
-.fade-slide-enter-from {
-  opacity: 0;
-  transform: translateY(10px);
-}
-
-.fade-slide-leave-to {
-  opacity: 0;
-  transform: translateY(-10px);
-}
-</style>
