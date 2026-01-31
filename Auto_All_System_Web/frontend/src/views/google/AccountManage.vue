@@ -7,11 +7,11 @@
         <p class="mt-1 text-sm text-muted-foreground">管理所有 Google 账号信息</p>
       </div>
       <div class="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-3">
-        <Button  variant="default" type="button" @click="showImportDialog = true">
+        <Button variant="secondary" type="button" @click="showImportDialog = true">
           <Icon><Upload /></Icon>
           <span class="ml-1.5">批量导入</span>
         </Button>
-        <Button  variant="default" type="button" @click="showAddDialog = true">
+        <Button variant="success" type="button" @click="showAddDialog = true">
           <Icon><Plus /></Icon>
           <span class="ml-1.5">添加账号</span>
         </Button>

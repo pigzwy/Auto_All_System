@@ -5,7 +5,7 @@
         <h1 class="text-2xl font-semibold text-foreground">比特浏览器配置</h1>
         <p class="mt-1 text-sm text-muted-foreground">管理 Profile、代理关联与可用状态。</p>
       </div>
-      <Button  variant="default" type="button" @click="showDialog = true">
+      <Button variant="success" type="button" @click="showDialog = true">
         <Icon><Plus /></Icon>
         添加配置
       </Button>
@@ -40,7 +40,7 @@
         <DataColumn prop="last_used" label="最后使用" width="180" />
         <DataColumn label="操作" width="200" fixed="right">
           <template #default="{ row }">
-            <Button text  variant="default" type="button" @click="editConfig(row)">编辑</Button>
+            <Button text variant="ghost" class="text-warning hover:text-warning" type="button" @click="editConfig(row)">编辑</Button>
             <Button text  variant="default" type="button" @click="testConfig(row)">测试</Button>
             <Button text  variant="destructive" type="button" @click="deleteConfig(row)">删除</Button>
           </template>

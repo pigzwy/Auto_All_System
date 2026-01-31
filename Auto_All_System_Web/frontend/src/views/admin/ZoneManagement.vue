@@ -5,7 +5,7 @@
         <h1 class="text-2xl font-semibold text-foreground">专区管理</h1>
         <p class="mt-1 text-sm text-muted-foreground">管理业务专区与可用状态。</p>
       </div>
-      <Button  variant="default" type="button" @click="showCreateDialog = true">
+      <Button variant="success" type="button" @click="showCreateDialog = true">
         <Icon><Plus /></Icon>
         添加专区
       </Button>
@@ -73,7 +73,7 @@
 
               <div class="mt-4 flex items-center justify-between">
                 <span class="text-sm font-semibold text-emerald-600">¥{{ zone.base_price }}/次</span>
-                <Button text @click="editZone(zone)">编辑</Button>
+                <Button text variant="ghost" class="text-warning hover:text-warning" @click="editZone(zone)">编辑</Button>
               </div>
             </div>
           </div>

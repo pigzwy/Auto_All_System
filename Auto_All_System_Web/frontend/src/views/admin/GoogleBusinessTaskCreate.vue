@@ -144,7 +144,7 @@
 
         <!-- 提交按钮 -->
         <SimpleFormItem class="mt-8">
-          <Button  variant="default" type="button" @click="handleSubmit" :loading="submitting">
+          <Button variant="success" type="button" @click="handleSubmit" :loading="submitting">
             <Icon><Check /></Icon>
             创建任务
           </Button>

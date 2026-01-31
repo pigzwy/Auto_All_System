@@ -5,7 +5,7 @@
         <h1 class="text-2xl font-semibold text-foreground">Google账号管理</h1>
         <p class="mt-1 text-sm text-muted-foreground">管理账号状态、Gemini 订阅、2FA 等信息。</p>
       </div>
-      <Button  variant="default" type="button" @click="showDialog = true">
+      <Button variant="success" type="button" @click="showDialog = true">
         <Icon><Plus /></Icon>
         添加账号
       </Button>
@@ -43,7 +43,7 @@
         <DataColumn prop="created_at" label="创建时间" width="180" />
         <DataColumn label="操作" width="200" fixed="right">
           <template #default="{ row }">
-            <Button text  variant="default" type="button" @click="editAccount(row)">编辑</Button>
+            <Button text variant="ghost" class="text-warning hover:text-warning" type="button" @click="editAccount(row)">编辑</Button>
             <Button text  variant="default" type="button" @click="testLogin(row)">测试登录</Button>
             <Button text  variant="destructive" type="button" @click="deleteAccount(row)">删除</Button>
           </template>

@@ -2,7 +2,7 @@
   <div class="space-y-6">
     <div class="flex items-center justify-between">
       <h2 class="text-2xl font-semibold text-foreground">虚拟卡管理</h2>
-      <Button size="sm" class="gap-2" @click="showAddDialog = true">
+      <Button variant="success" size="sm" class="gap-2" @click="showAddDialog = true">
         <Plus class="h-4 w-4" /> 添加卡片
       </Button>
     </div>
@@ -95,4 +95,3 @@ const deleteCard = (_card: any) => {
   // delete logic
 }
 </script>
-

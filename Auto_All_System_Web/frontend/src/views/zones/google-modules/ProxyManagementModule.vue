@@ -7,7 +7,7 @@
       </div>
 
       <div class="flex items-center gap-2">
-        <Button variant="default" size="sm" class="gap-2" @click="showAddDialog = true">
+        <Button variant="success" size="sm" class="gap-2" @click="showAddDialog = true">
           <Plus class="h-4 w-4" />
           新增代理
         </Button>
@@ -48,7 +48,7 @@
                 <TableCell class="text-right">
                   <div class="flex items-center justify-end gap-2">
                     <Button variant="outline" size="sm" @click="testProxy(row)">测试</Button>
-                    <Button variant="outline" size="sm" @click="editProxy(row)">编辑</Button>
+                    <Button variant="warning" size="sm" type="button" @click="editProxy(row)">编辑</Button>
                     <Button variant="destructive" size="sm" @click="deleteProxy(row)">删除</Button>
                   </div>
                 </TableCell>

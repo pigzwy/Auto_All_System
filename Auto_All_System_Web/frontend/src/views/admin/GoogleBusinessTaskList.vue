@@ -8,7 +8,7 @@
         </Button>
         <h1 class="text-2xl font-semibold text-foreground">Google 业务任务管理</h1>
       </div>
-      <Button size="sm" class="gap-2" @click="router.push('/admin/google-business/tasks/create')">
+      <Button variant="success" size="sm" class="gap-2" @click="router.push('/admin/google-business/tasks/create')">
         <Plus class="h-4 w-4" />
         创建任务
       </Button>

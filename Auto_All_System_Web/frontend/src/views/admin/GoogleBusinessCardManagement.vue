@@ -42,11 +42,11 @@
       <Divider />
 
       <div class="flex flex-wrap gap-2">
-        <Button  variant="default" type="button" @click="showAddDialog">
+        <Button variant="success" type="button" @click="showAddDialog">
           <Icon><Plus /></Icon>
           添加卡片
         </Button>
-        <Button  variant="default" type="button" @click="showBatchImportDialog">
+        <Button variant="secondary" type="button" @click="showBatchImportDialog">
           <Icon><Upload /></Icon>
           批量导入
         </Button>
@@ -138,13 +138,14 @@
 
         <DataColumn label="操作" width="200" fixed="right">
           <template #default="{ row }">
-            <Button size="small" @click="showEditDialog(row)">
+            <Button variant="warning" size="small" type="button" @click="showEditDialog(row)">
               <Icon><Edit /></Icon>
               编辑
             </Button>
             <Button
               size="small"
-              :type="row.is_active ? 'warning' : 'success'"
+              :variant="row.is_active ? 'warning' : 'success'"
+              type="button"
               @click="toggleActive(row)"
             >
               {{ row.is_active ? '禁用' : '启用' }}

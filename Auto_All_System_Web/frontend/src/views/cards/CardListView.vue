@@ -3,7 +3,7 @@
     <div class="flex items-center justify-between">
       <h1 class="text-2xl font-semibold text-foreground">虚拟卡管理</h1>
       <div class="flex items-center gap-2">
-        <Button size="sm" class="gap-2" @click="showCreateDialog = true">
+        <Button variant="success" size="sm" class="gap-2" @click="showCreateDialog = true">
           <Plus class="h-4 w-4" />
           添加虚拟卡
         </Button>

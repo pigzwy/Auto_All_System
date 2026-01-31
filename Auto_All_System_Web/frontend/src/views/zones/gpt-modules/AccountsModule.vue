@@ -1,38 +1,9 @@
 <template>
-  <div class="space-y-6">
-    <div class="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-      <div>
-        <h2 class="text-2xl font-semibold text-foreground">账号列表</h2>
-        <p class="mt-1 text-sm text-muted-foreground">母号可展开查看子账号；邮箱由域名邮箱系统随机创建（来源：admin/email）</p>
-      </div>
-
-      <div class="flex flex-wrap items-center gap-2">
-        <Button variant="outline" size="sm" class="gap-2" :disabled="loading" @click="refresh">
-          <RefreshCcw class="h-4 w-4" :class="{ 'animate-spin': loading }" />
-          刷新
-        </Button>
-        <Button size="sm" class="gap-2" @click="openCreateMother">
-          <Plus class="h-4 w-4" />
-          生成母号
-        </Button>
-
-        <div v-if="selectedMother" class="flex items-center gap-2 rounded-md border border-border bg-muted/50 px-3 py-1.5 text-sm">
-          <span class="text-muted-foreground">已选:</span>
-          <span class="font-mono font-medium">{{ selectedMother.email }}</span>
-        </div>
-
-        <div class="flex items-center gap-2">
-          <Button variant="secondary" size="sm" class="gap-2" :disabled="!selectedMother" @click="runSelfRegister">
-            <UserPlus class="h-4 w-4" /> 自动开通
-          </Button>
-          <Button variant="secondary" size="sm" class="gap-2" :disabled="!selectedMother" @click="runAutoInvite">
-            <ArrowRightToLine class="h-4 w-4" /> 自动邀请
-          </Button>
-          <Button variant="secondary" size="sm" class="gap-2" :disabled="!selectedMother" @click="runSub2apiSink">
-            <LayoutList class="h-4 w-4" /> 自动入池
-          </Button>
-        </div>
-      </div>
+  <div class="space-y-4">
+    <!-- 简单标题 -->
+    <div>
+      <h2 class="text-lg font-semibold text-foreground">账号列表</h2>
+      <p class="text-sm text-muted-foreground">母号可展开查看子账号；邮箱由域名邮箱系统随机创建（来源：admin/email）</p>
     </div>
 
     <Card class="bg-card text-card-foreground">
@@ -48,12 +19,11 @@
                 <TableHead class="w-24">座位</TableHead>
                 <TableHead class="min-w-[120px]">备注</TableHead>
                 <TableHead class="w-40">创建时间</TableHead>
-                <TableHead class="w-[300px] text-right">操作</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               <TableRow v-if="loading && mothers.length === 0">
-                <TableCell colspan="8" class="py-10 text-center">
+                <TableCell colspan="7" class="py-10 text-center">
                   <div class="flex items-center justify-center gap-2 text-sm text-muted-foreground">
                     <Loader2 class="h-4 w-4 animate-spin" />
                     加载中...
@@ -95,15 +65,6 @@
                   </TableCell>
                   <TableCell class="text-muted-foreground text-xs truncate max-w-[120px]">{{ mother.note }}</TableCell>
                   <TableCell class="text-muted-foreground text-xs">{{ formatDate(mother.created_at) }}</TableCell>
-                  <TableCell class="text-right">
-                    <div class="flex items-center justify-end gap-1">
-                      <Button variant="ghost" size="xs" @click.stop="openCreateChild(mother)">生成子号</Button>
-                      <Button variant="ghost" size="xs" @click.stop="editSeat(mother)">改座位</Button>
-                      <Button variant="ghost" size="xs" @click.stop="viewTasks(mother)">日志</Button>
-                      <Button variant="ghost" size="xs" @click.stop="launchGeekez(mother.id)">Geekez</Button>
-                      <Button variant="ghost" size="xs" class="text-destructive hover:text-destructive" @click.stop="removeAccount(mother.id)">删除</Button>
-                    </div>
-                  </TableCell>
                 </TableRow>
 
                 <!-- Expanded Child Rows -->
@@ -392,15 +353,11 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, inject, onMounted, onUnmounted, reactive, ref, type Ref } from 'vue'
 import { ElMessage, ElMessageBox } from '@/lib/element'
 import {
   Copy,
   Loader2,
-  Plus,
-  RefreshCcw,
-  UserPlus,
-  ArrowRightToLine,
   LayoutList,
   FileDown
 } from 'lucide-vue-next'
@@ -446,19 +403,16 @@ import { gptBusinessApi } from '@/api/gpt_business'
 
 type MotherRow = GptBusinessAccountsResponse['mothers'][number]
 
+// 从父组件注入状态
+const selectedMother = inject<Ref<GptBusinessAccount | null>>('selectedMother')!
+const accountsLoading = inject<Ref<boolean>>('accountsLoading')!
+
 const loading = ref(false)
 const creating = ref(false)
 const cloudMailConfigs = ref<CloudMailConfig[]>([])
 
 const mothers = ref<any[]>([])
-const selectedMother = ref<any>(null)
-const selectedMotherId = computed({
-  get: () => selectedMother.value?.id,
-  set: (val) => {
-    if (!val) selectedMother.value = null
-    // Can't really set ID to object without finding it, but usually we set object
-  }
-})
+const selectedMotherId = computed(() => selectedMother.value?.id)
 
 const formatDate = (date: string | undefined) => {
   if (!date) return '-'
@@ -517,6 +471,7 @@ const fetchCloudMailConfigs = async () => {
 
 const refresh = async () => {
   loading.value = true
+  accountsLoading.value = true
   try {
     const [accounts, _configs] = await Promise.all([gptBusinessApi.listAccounts(), fetchCloudMailConfigs()])
     mothers.value = accounts.mothers || []
@@ -535,6 +490,7 @@ const refresh = async () => {
     console.error(e)
   } finally {
     loading.value = false
+    accountsLoading.value = false
   }
 }
 
@@ -634,25 +590,6 @@ const copyEmailPassword = (acc: GptBusinessAccount) => {
   copyText(acc.email_password)
 }
 
-const editSeat = async (mother: MotherRow) => {
-  try {
-    const { value } = await ElMessageBox.prompt('请输入母号座位数（seat_total）', '修改座位', {
-      confirmButtonText: '保存',
-      cancelButtonText: '取消',
-      inputValue: String(mother.seat_total || 0),
-      inputPattern: /^\d+$/,
-      inputErrorMessage: '请输入非负整数'
-    })
-
-    const seatTotal = Number(value)
-    await gptBusinessApi.updateAccount(mother.id, { seat_total: seatTotal })
-    ElMessage.success('已更新')
-    await refresh()
-  } catch (e: any) {
-    if (e === 'cancel' || e?.message === 'cancel') return
-    ElMessage.error(e?.response?.data?.detail || e?.message || '更新失败')
-  }
-}
 
 const removeAccount = async (accountId: string) => {
   try {
@@ -683,39 +620,8 @@ const launchGeekez = async (accountId: string) => {
   }
 }
 
-const runSelfRegister = async () => {
-  if (!selectedMother.value) {
-    ElMessage.warning('请先选中一个母号')
-    return
-  }
-  try {
-    const res = await gptBusinessApi.selfRegister(selectedMother.value.id)
-    ElMessage.success(res?.message || '已启动：自动开通')
-    refresh()
-  } catch (e: any) {
-    ElMessage.error(e?.response?.data?.detail || e?.message || '启动失败')
-  }
-}
 
-const runAutoInvite = async () => {
-  if (!selectedMother.value) return
-  try {
-    const res = await gptBusinessApi.autoInvite(selectedMother.value.id)
-    ElMessage.success(res?.message || '已启动：自动邀请')
-  } catch (e: any) {
-    ElMessage.error(e?.response?.data?.detail || e?.message || '启动失败')
-  }
-}
 
-const runSub2apiSink = async () => {
-  if (!selectedMother.value) return
-  try {
-    const res = await gptBusinessApi.sub2apiSink(selectedMother.value.id)
-    ElMessage.success(res?.message || '已启动：自动入池')
-  } catch (e: any) {
-    ElMessage.error(e?.response?.data?.detail || e?.message || '启动失败')
-  }
-}
 
 const tasksDrawerVisible = ref(false)
 const tasksDrawerAccount = ref<MotherRow | null>(null)
@@ -827,7 +733,33 @@ const getStatusTag = (status: string) => {
   return map[status] || 'info'
 }
 
+// 事件处理函数
+const handleRefresh = () => refresh()
+const handleOpenCreateMother = () => openCreateMother()
+const handleOpenCreateChild = (e: Event) => {
+  const mother = (e as CustomEvent).detail
+  if (mother) openCreateChild(mother)
+}
+const handleViewTasks = (e: Event) => {
+  const mother = (e as CustomEvent).detail
+  if (mother) viewTasks(mother)
+}
+
 onMounted(() => {
   refresh()
+  
+  // 监听父组件发出的事件
+  window.addEventListener('gpt-accounts-refresh', handleRefresh)
+  window.addEventListener('gpt-open-create-mother', handleOpenCreateMother)
+  window.addEventListener('gpt-open-create-child', handleOpenCreateChild)
+  window.addEventListener('gpt-view-tasks', handleViewTasks)
+})
+
+onUnmounted(() => {
+  // 清理事件监听
+  window.removeEventListener('gpt-accounts-refresh', handleRefresh)
+  window.removeEventListener('gpt-open-create-mother', handleOpenCreateMother)
+  window.removeEventListener('gpt-open-create-child', handleOpenCreateChild)
+  window.removeEventListener('gpt-view-tasks', handleViewTasks)
 })
 </script>

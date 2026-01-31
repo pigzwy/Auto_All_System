@@ -43,7 +43,7 @@
         <DataColumn prop="description" label="说明" min-width="200" show-overflow-tooltip />
         <DataColumn label="操作" width="100" fixed="right">
           <template #default="{ row }">
-            <Button text  variant="default" type="button" @click="editConfig(row)">编辑</Button>
+            <Button text variant="ghost" class="text-warning hover:text-warning" type="button" @click="editConfig(row)">编辑</Button>
           </template>
         </DataColumn>
       </DataTable>

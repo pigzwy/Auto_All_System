@@ -5,7 +5,7 @@
         <h1 class="text-2xl font-semibold text-foreground">域名邮箱管理</h1>
         <p class="mt-1 text-sm text-muted-foreground">管理云邮配置、域名池、默认配置与连通性测试。</p>
       </div>
-      <Button  variant="default" type="button" @click="openAddDialog">
+      <Button variant="success" type="button" @click="openAddDialog">
         <Icon><Plus /></Icon>
         添加配置
       </Button>
@@ -54,7 +54,7 @@
         </DataColumn>
         <DataColumn label="操作" width="280" fixed="right">
           <template #default="{ row }">
-            <Button text  variant="default" type="button" @click="editConfig(row)">编辑</Button>
+            <Button text variant="ghost" class="text-warning hover:text-warning" type="button" @click="editConfig(row)">编辑</Button>
             <Button text  variant="default" type="button" @click="testConnection(row)" :loading="row.testing">测试连接</Button>
             <Button text  variant="secondary" type="button" @click="testCreateEmail(row)">测试创建邮箱</Button>
             <Button v-if="!row.is_default" text  variant="secondary" type="button" @click="setDefault(row)">设为默认</Button>

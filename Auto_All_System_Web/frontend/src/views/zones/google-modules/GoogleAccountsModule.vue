@@ -244,7 +244,7 @@
                     <Button variant="link" size="xs" class="h-auto p-0" @click="handleLaunchGeekez(row)">
                       {{ getGeekezActionLabel(row) }}
                     </Button>
-                    <Button variant="link" size="xs" class="h-auto p-0" @click="openEditDialog(row)">编辑</Button>
+                    <Button variant="link" size="xs" class="h-auto p-0 text-warning hover:text-warning" @click="openEditDialog(row)">编辑</Button>
                     <Button variant="link" size="xs" class="h-auto p-0 text-amber-600 hover:text-amber-600" @click="viewTasks(row)">
                       任务日志
                     </Button>

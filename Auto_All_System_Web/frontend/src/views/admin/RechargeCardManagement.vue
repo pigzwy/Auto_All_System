@@ -7,7 +7,7 @@
           <Download class="h-4 w-4" :class="{ 'animate-spin': exporting }" />
           批量导出
         </Button>
-        <Button size="sm" class="gap-2" @click="showGenerateDialog = true">
+        <Button variant="success" size="sm" class="gap-2" @click="showGenerateDialog = true">
           <Plus class="h-4 w-4" />
           批量生成卡密
         </Button>

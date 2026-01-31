@@ -94,7 +94,7 @@
             <Icon><UserFilled /></Icon>
             <span class="ml-1.5">管理账号</span>
           </Button>
-          <Button  variant="default" type="button" class="w-full" @click="$router.push('/admin/google-business/tasks/create')">
+          <Button variant="success" type="button" class="w-full" @click="$router.push('/admin/google-business/tasks/create')">
             <Icon><Plus /></Icon>
             <span class="ml-1.5">创建任务</span>
           </Button>

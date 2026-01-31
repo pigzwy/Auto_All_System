@@ -13,7 +13,7 @@
         <CardContent>
           <div class="flex flex-col items-center py-4">
             <div class="mb-4 text-4xl font-bold text-primary">¥{{ balance?.balance || '0.00' }}</div>
-            <Button size="lg" class="gap-2" @click="goToRecharge">
+            <Button variant="success" size="lg" class="gap-2" @click="goToRecharge">
               <Plus class="h-4 w-4" />
               充值
             </Button>

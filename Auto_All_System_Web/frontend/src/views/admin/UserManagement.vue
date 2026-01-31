@@ -5,7 +5,7 @@
         <h1 class="text-2xl font-semibold text-foreground">用户管理</h1>
         <p class="mt-1 text-sm text-muted-foreground">管理用户、权限、状态与余额。</p>
       </div>
-      <Button type="button" class="gap-2" @click="showCreateDialog = true">
+      <Button variant="success" type="button" class="gap-2" @click="showCreateDialog = true">
         <Plus class="h-4 w-4" />
         添加用户
       </Button>
@@ -114,7 +114,7 @@
                 <TableCell class="w-[180px]">{{ formatDate(row.created_at) }}</TableCell>
                 <TableCell class="w-[250px] text-right">
                   <div class="flex items-center justify-end gap-2">
-                    <Button type="button" variant="ghost" size="sm" class="gap-1 text-primary" @click="handleEdit(row)">
+                    <Button type="button" variant="ghost" size="sm" class="gap-1 text-warning hover:text-warning" @click="handleEdit(row)">
                       <Edit class="h-4 w-4" />
                       编辑
                     </Button>

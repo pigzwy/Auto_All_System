@@ -5,7 +5,7 @@
         <h1 class="text-2xl font-semibold text-foreground">代理管理</h1>
         <p class="mt-1 text-sm text-muted-foreground">维护代理池、可用性和延迟情况。</p>
       </div>
-      <Button type="button" class="gap-2" @click="showDialog = true">
+      <Button variant="success" type="button" class="gap-2" @click="showDialog = true">
         <Plus class="h-4 w-4" />
         添加代理
       </Button>
@@ -59,7 +59,7 @@
                 <TableCell class="w-[180px]">{{ row.last_check_at || '-' }}</TableCell>
                 <TableCell class="w-[250px] text-right">
                   <div class="flex items-center justify-end gap-2">
-                    <Button type="button" variant="ghost" size="sm" @click="editProxy(row)">编辑</Button>
+                    <Button type="button" variant="ghost" size="sm" class="text-warning hover:text-warning" @click="editProxy(row)">编辑</Button>
                     <Button type="button" variant="ghost" size="sm" @click="testProxy(row)">测试</Button>
                     <Button type="button" variant="outline" size="sm" @click="toggleActive(row)">
                       {{ row.status === 'active' ? '禁用' : '启用' }}

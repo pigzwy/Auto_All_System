@@ -1,84 +1,170 @@
 <template>
-  <div class="min-h-screen bg-muted/30 text-foreground">
-    <header class="sticky top-0 z-30 bg-background/80 backdrop-blur border-b border-border">
-      <div class="mx-auto max-w-7xl px-4 py-3 flex items-center justify-between gap-4">
-        <div class="flex items-center gap-3 min-w-0">
-          <Button variant="ghost" size="sm" class="gap-2" @click="goZones">
-            <ChevronLeft class="h-4 w-4" />
-            返回专区
-          </Button>
-          <div class="min-w-0">
-            <div class="text-sm font-semibold text-foreground">GPT 业务专区</div>
-            <div class="text-xs text-muted-foreground truncate">OpenAI Team 自动开通 / 授权</div>
+  <div class="min-h-screen bg-gradient-to-b from-background to-muted/30 text-foreground">
+    <!-- 顶部导航栏 -->
+    <header class="sticky top-0 z-30 border-b border-border/50 bg-background/80 backdrop-blur-xl">
+      <div class="mx-auto max-w-[1600px] px-6">
+        <!-- 主导航行 -->
+        <div class="flex h-14 items-center justify-between gap-4">
+          <!-- 左侧：返回 + 标题 -->
+          <div class="flex items-center gap-4">
+            <Button variant="ghost" size="sm" class="gap-2 text-muted-foreground hover:text-foreground" @click="goZones">
+              <ChevronLeft class="h-4 w-4" />
+              <span class="hidden sm:inline">返回专区</span>
+            </Button>
+            <div class="h-6 w-px bg-border" />
+            <div class="flex items-center gap-2">
+              <div class="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/10">
+                <Sparkles class="h-4 w-4 text-primary" />
+              </div>
+              <div>
+                <h1 class="text-base font-semibold">GPT 业务专区</h1>
+              </div>
+            </div>
+            <Badge variant="outline" class="border-amber-500/30 bg-amber-500/10 text-amber-600 dark:text-amber-400">Beta</Badge>
           </div>
-        </div>
 
-        <div class="flex items-center gap-3">
-          <Badge variant="secondary" class="rounded-full">Beta</Badge>
-
+          <!-- 右侧：用户菜单 -->
           <DropdownMenu>
             <DropdownMenuTrigger as-child>
-              <Button variant="outline" size="sm" class="gap-2 bg-muted/30">
-                <UserRound class="h-4 w-4 text-muted-foreground" />
-                <span class="max-w-[140px] truncate">{{ userStore.user?.username || '用户' }}</span>
+              <Button variant="ghost" size="sm" class="gap-2">
+                <div class="flex h-7 w-7 items-center justify-center rounded-full bg-muted">
+                  <UserRound class="h-4 w-4 text-muted-foreground" />
+                </div>
+                <span class="hidden text-sm sm:inline">{{ userStore.user?.username || '用户' }}</span>
                 <ChevronDown class="h-4 w-4 text-muted-foreground" />
               </Button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" class="w-44">
+            <DropdownMenuContent align="end" class="w-48">
               <DropdownMenuItem @select="goProfile">
+                <UserRound class="mr-2 h-4 w-4" />
                 个人资料
               </DropdownMenuItem>
               <DropdownMenuSeparator />
               <DropdownMenuItem class="text-destructive" @select="logout">
+                <LogOut class="mr-2 h-4 w-4" />
                 退出登录
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
         </div>
+
+        <!-- 功能操作栏 -->
+        <div class="flex items-center gap-6 border-t border-border/30 py-3">
+          <!-- 基础操作 -->
+          <div class="flex items-center gap-2">
+            <Button variant="outline" size="sm" class="gap-2" :disabled="accountsLoading" @click="refreshAccounts">
+              <RefreshCcw class="h-4 w-4" :class="{ 'animate-spin': accountsLoading }" />
+              刷新
+            </Button>
+            <Button size="sm" class="gap-2" @click="openCreateMother">
+              <Plus class="h-4 w-4" />
+              生成母号
+            </Button>
+          </div>
+
+          <!-- 分隔线 -->
+          <div class="h-8 w-px bg-border/50" />
+
+          <!-- 已选母号 -->
+          <div class="flex items-center gap-3">
+            <span class="text-sm text-muted-foreground">当前选择：</span>
+            <div v-if="selectedMother" class="flex items-center gap-2 rounded-lg border border-primary/30 bg-primary/5 px-3 py-1.5">
+              <div class="h-2 w-2 rounded-full bg-primary animate-pulse" />
+              <span class="font-mono text-sm font-medium text-primary">{{ selectedMother.email }}</span>
+              <button class="ml-1 rounded p-0.5 hover:bg-primary/20" @click="clearSelection">
+                <X class="h-3.5 w-3.5 text-primary/70 hover:text-primary" />
+              </button>
+            </div>
+            <span v-else class="text-sm italic text-muted-foreground/60">点击表格行选择母号</span>
+          </div>
+
+          <!-- 分隔线 -->
+          <div class="h-8 w-px bg-border/50" />
+
+          <!-- 自动化操作组 -->
+          <div class="flex items-center gap-1">
+            <span class="mr-2 text-xs font-medium uppercase tracking-wider text-muted-foreground">自动化</span>
+            <Button variant="secondary" size="sm" class="gap-2" :disabled="!selectedMother" @click="runSelfRegister">
+              <UserPlus class="h-4 w-4" />
+              开通
+            </Button>
+            <Button variant="secondary" size="sm" class="gap-2" :disabled="!selectedMother" @click="runAutoInvite">
+              <ArrowRightToLine class="h-4 w-4" />
+              邀请
+            </Button>
+            <Button variant="secondary" size="sm" class="gap-2" :disabled="!selectedMother" @click="runSub2apiSink">
+              <LayoutList class="h-4 w-4" />
+              入池
+            </Button>
+          </div>
+
+          <!-- 分隔线 -->
+          <div class="h-8 w-px bg-border/50" />
+
+          <!-- 账号管理组 -->
+          <div class="flex items-center gap-1">
+            <span class="mr-2 text-xs font-medium uppercase tracking-wider text-muted-foreground">管理</span>
+            <Button variant="outline" size="sm" class="gap-2" :disabled="!selectedMother" @click="openCreateChild">
+              <Plus class="h-4 w-4" />
+              子号
+            </Button>
+            <Button variant="outline" size="sm" class="gap-2" :disabled="!selectedMother" @click="editSeat">
+              <Settings class="h-4 w-4" />
+              座位
+            </Button>
+            <Button variant="outline" size="sm" class="gap-2" :disabled="!selectedMother" @click="viewTasks">
+              <FileText class="h-4 w-4" />
+              日志
+            </Button>
+          </div>
+
+          <!-- 分隔线 -->
+          <div class="h-8 w-px bg-border/50" />
+
+          <!-- 其他操作 -->
+          <div class="flex items-center gap-1">
+            <Button variant="ghost" size="sm" class="gap-2" :disabled="!selectedMother" @click="launchGeekez">
+              <ExternalLink class="h-4 w-4" />
+              Geekez
+            </Button>
+            <Button variant="ghost" size="sm" class="gap-2 text-destructive hover:bg-destructive/10 hover:text-destructive" :disabled="!selectedMother" @click="removeAccount">
+              <Trash2 class="h-4 w-4" />
+              删除
+            </Button>
+          </div>
+        </div>
       </div>
     </header>
 
-    <div class="mx-auto max-w-7xl p-4 grid gap-4 md:grid-cols-[220px_1fr] items-start">
-      <aside class="rounded-xl border border-border bg-card text-card-foreground shadow-sm overflow-hidden md:sticky md:top-20">
-        <nav class="p-2 space-y-1">
-          <Button
-            variant="ghost"
-            class="w-full justify-start gap-2"
-            :class="activeModule === 'workstation' ? 'bg-accent text-accent-foreground' : 'text-muted-foreground hover:text-foreground'"
-            @click="handleSelect('workstation')"
-          >
-            <LayoutDashboard class="h-4 w-4" />
-            工作台
-          </Button>
-
-          <Button
-            variant="ghost"
-            class="w-full justify-start gap-2"
-            :class="activeModule === 'accounts' ? 'bg-accent text-accent-foreground' : 'text-muted-foreground hover:text-foreground'"
-            @click="handleSelect('accounts')"
-          >
-            <Users class="h-4 w-4" />
-            账号列表
-          </Button>
-        </nav>
-      </aside>
-
-      <main class="min-w-0 rounded-xl border border-border bg-card text-card-foreground shadow-sm">
-        <div class="p-4 min-w-0">
-          <div class="min-w-0 overflow-x-auto">
-            <component :is="currentModule" />
-          </div>
-        </div>
-      </main>
-    </div>
+    <!-- 主内容区：直接铺开 -->
+    <main class="mx-auto max-w-[1600px] p-6">
+      <AccountsModule />
+    </main>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { provide, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useUserStore } from '@/stores/user'
-import { ChevronDown, ChevronLeft, LayoutDashboard, UserRound, Users } from 'lucide-vue-next'
+import { ElMessage, ElMessageBox } from '@/lib/element'
+import {
+  ArrowRightToLine,
+  ChevronDown,
+  ChevronLeft,
+  ExternalLink,
+  FileText,
+  LayoutList,
+  LogOut,
+  Plus,
+  RefreshCcw,
+  Settings,
+  Sparkles,
+  Trash2,
+  UserPlus,
+  UserRound,
+  X
+} from 'lucide-vue-next'
 
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -90,26 +176,126 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 
-import WorkstationModule from './gpt-modules/WorkstationModule.vue'
+import { gptBusinessApi, type GptBusinessAccount } from '@/api/gpt_business'
 import AccountsModule from './gpt-modules/AccountsModule.vue'
-
-type ModuleKey = 'workstation' | 'accounts'
 
 const router = useRouter()
 const userStore = useUserStore()
 
-const activeModule = ref<ModuleKey>('workstation')
+// ========== 账号相关状态 ==========
+const accountsLoading = ref(false)
+const selectedMother = ref<GptBusinessAccount | null>(null)
 
-const currentModule = computed(() => {
-  if (activeModule.value === 'workstation') return WorkstationModule
-  if (activeModule.value === 'accounts') return AccountsModule
-  return WorkstationModule
-})
+// 提供给子组件使用
+provide('selectedMother', selectedMother)
+provide('accountsLoading', accountsLoading)
 
-const handleSelect = (index: string) => {
-  activeModule.value = index as ModuleKey
+const clearSelection = () => {
+  selectedMother.value = null
 }
 
+// ========== 账号操作（委托给 AccountsModule） ==========
+const refreshAccounts = () => {
+  window.dispatchEvent(new CustomEvent('gpt-accounts-refresh'))
+}
+
+const openCreateMother = () => {
+  window.dispatchEvent(new CustomEvent('gpt-open-create-mother'))
+}
+
+const openCreateChild = () => {
+  if (!selectedMother.value) return
+  window.dispatchEvent(new CustomEvent('gpt-open-create-child', { detail: selectedMother.value }))
+}
+
+const runSelfRegister = async () => {
+  if (!selectedMother.value) return
+  try {
+    const res = await gptBusinessApi.selfRegister(selectedMother.value.id)
+    ElMessage.success(res?.message || '已启动：自动开通')
+    refreshAccounts()
+  } catch (e: any) {
+    ElMessage.error(e?.response?.data?.detail || e?.message || '启动失败')
+  }
+}
+
+const runAutoInvite = async () => {
+  if (!selectedMother.value) return
+  try {
+    const res = await gptBusinessApi.autoInvite(selectedMother.value.id)
+    ElMessage.success(res?.message || '已启动：自动邀请')
+  } catch (e: any) {
+    ElMessage.error(e?.response?.data?.detail || e?.message || '启动失败')
+  }
+}
+
+const runSub2apiSink = async () => {
+  if (!selectedMother.value) return
+  try {
+    const res = await gptBusinessApi.sub2apiSink(selectedMother.value.id)
+    ElMessage.success(res?.message || '已启动：自动入池')
+  } catch (e: any) {
+    ElMessage.error(e?.response?.data?.detail || e?.message || '启动失败')
+  }
+}
+
+const editSeat = async () => {
+  if (!selectedMother.value) return
+  try {
+    const { value } = await ElMessageBox.prompt('请输入母号座位数（seat_total）', '修改座位', {
+      confirmButtonText: '保存',
+      cancelButtonText: '取消',
+      inputValue: String(selectedMother.value.seat_total || 0),
+      inputPattern: /^\d+$/,
+      inputErrorMessage: '请输入非负整数'
+    })
+    await gptBusinessApi.updateAccount(selectedMother.value.id, { seat_total: Number(value) })
+    ElMessage.success('已更新')
+    refreshAccounts()
+  } catch (e: any) {
+    if (e === 'cancel' || e?.message === 'cancel') return
+    ElMessage.error(e?.response?.data?.detail || e?.message || '更新失败')
+  }
+}
+
+const viewTasks = () => {
+  if (!selectedMother.value) return
+  window.dispatchEvent(new CustomEvent('gpt-view-tasks', { detail: selectedMother.value }))
+}
+
+const launchGeekez = async () => {
+  if (!selectedMother.value) return
+  try {
+    const res = await gptBusinessApi.launchGeekez(selectedMother.value.id)
+    if (res?.success) {
+      ElMessage.success('已启动 Geekez 环境')
+    } else {
+      ElMessage.warning('启动失败')
+    }
+  } catch (e: any) {
+    ElMessage.error(e?.response?.data?.detail || e?.message || '启动失败')
+  }
+}
+
+const removeAccount = async () => {
+  if (!selectedMother.value) return
+  try {
+    await ElMessageBox.confirm('删除后不可恢复；删除母号会同时删除其子账号。确认删除？', '确认删除', {
+      type: 'warning',
+      confirmButtonText: '删除',
+      cancelButtonText: '取消'
+    })
+    await gptBusinessApi.deleteAccount(selectedMother.value.id)
+    ElMessage.success('已删除')
+    selectedMother.value = null
+    refreshAccounts()
+  } catch (e: any) {
+    if (e === 'cancel' || e?.message === 'cancel') return
+    ElMessage.error(e?.response?.data?.detail || e?.message || '删除失败')
+  }
+}
+
+// ========== 导航 ==========
 const goZones = () => {
   router.push('/zones')
 }
@@ -123,4 +309,3 @@ const logout = async () => {
   router.replace('/login')
 }
 </script>
-

@@ -59,13 +59,13 @@
         <CardTitle class="text-base">创建任务</CardTitle>
       </CardHeader>
       <CardContent>
-        <div class="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
-          <p class="text-sm text-muted-foreground">从当前专区快速创建一个新任务。</p>
-          <Button  variant="default" type="button" @click="handleCreateTask">
-            <Icon><Plus /></Icon>
-            创建新任务
-          </Button>
-        </div>
+          <div class="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
+            <p class="text-sm text-muted-foreground">从当前专区快速创建一个新任务。</p>
+            <Button variant="success" type="button" @click="handleCreateTask">
+              <Icon><Plus /></Icon>
+              创建新任务
+            </Button>
+          </div>
       </CardContent>
     </Card>
   </div>

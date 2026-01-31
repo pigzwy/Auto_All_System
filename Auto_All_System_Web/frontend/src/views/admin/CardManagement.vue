@@ -6,11 +6,11 @@
         <p class="mt-1 text-sm text-muted-foreground">卡池维护、批量导入、卡密激活与 API 配置管理。</p>
       </div>
       <ButtonGroup>
-        <Button  variant="default" type="button" @click="showDialog = true">
+        <Button variant="success" type="button" @click="showDialog = true">
           <Icon><Plus /></Icon>
           添加虚拟卡
         </Button>
-        <Button  variant="default" type="button" @click="showImportDialog = true">
+        <Button variant="secondary" type="button" @click="showImportDialog = true">
           <Icon><Upload /></Icon>
           批量导入
         </Button>
@@ -102,7 +102,7 @@
         <DataColumn label="操作" width="150" fixed="right">
           <template #default="{ row }">
             <div class="flex items-center gap-2">
-              <Button link  variant="default" type="button" @click="editCard(row)">编辑</Button>
+              <Button link  variant="warning" type="button" @click="editCard(row)">编辑</Button>
               <Button link  variant="destructive" type="button" @click="deleteCard(row)">删除</Button>
             </div>
           </template>
@@ -314,7 +314,7 @@
         </DataColumn>
         <DataColumn label="操作" width="180">
           <template #default="{ row }">
-            <Button link  variant="default" type="button" size="small" @click="editApiConfig(row)">编辑</Button>
+            <Button link  variant="warning" type="button" size="small" @click="editApiConfig(row)">编辑</Button>
             <Button link  variant="default" type="button" size="small" v-if="!row.is_default" @click="setDefaultConfig(row)">设为默认</Button>
             <Button link  variant="destructive" type="button" size="small" @click="deleteApiConfig(row)">删除</Button>
           </template>
