@@ -44,7 +44,9 @@ const variant = computed(() => {
   if (props.link) return 'link'
   if (props.text || props.type === 'text') return 'ghost'
   if (props.type === 'danger') return 'destructive'
-  if (props.type === 'warning' || props.type === 'info') return 'secondary'
+  if (props.type === 'success') return 'success'
+  if (props.type === 'warning') return 'warning'
+  if (props.type === 'info') return 'secondary'
   return 'default'
 })
 
