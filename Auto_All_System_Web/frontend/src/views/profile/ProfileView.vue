@@ -1,310 +1,141 @@
 <template>
-  <div class="profile-view">
-    <h1>个人中心</h1>
+  <div class="space-y-6">
+    <div class="flex items-center justify-between">
+      <h1 class="text-2xl font-semibold text-foreground">个人资料</h1>
+    </div>
 
-    <el-row :gutter="20">
-      <el-col :span="8">
-        <el-card shadow="hover" class="user-card">
-          <div class="user-avatar">
-            <el-avatar :size="100" :src="userStore.user?.avatar || undefined">
-              {{ userStore.user?.username?.[0]?.toUpperCase() }}
-            </el-avatar>
+    <Card class="bg-card text-card-foreground">
+      <CardHeader>
+        <CardTitle>基本信息</CardTitle>
+      </CardHeader>
+      <CardContent>
+        <form @submit.prevent="handleUpdateProfile" class="space-y-4 max-w-lg">
+          <div class="grid gap-2">
+            <label class="text-sm font-medium">用户名</label>
+            <Input v-model="form.username" disabled />
+            <p class="text-xs text-muted-foreground">用户名不可修改</p>
           </div>
-          <div class="user-info">
-            <h2>{{ userStore.user?.username }}</h2>
-            <p>{{ userStore.user?.email }}</p>
-            <el-tag v-if="userStore.user?.role === 'super_admin'" type="danger">超级管理员</el-tag>
-            <el-tag v-else-if="userStore.user?.role === 'admin'" type="warning">管理员</el-tag>
-            <el-tag v-else type="info">普通用户</el-tag>
+
+          <div class="grid gap-2">
+            <label class="text-sm font-medium">邮箱</label>
+            <Input v-model="form.email" />
           </div>
-          <el-divider />
-          <div class="user-stats">
-            <div class="stat-item">
-              <div class="stat-value">{{ balance?.balance || '0.00' }}</div>
-              <div class="stat-label">账户余额</div>
-            </div>
-            <el-divider direction="vertical" />
-            <div class="stat-item">
-              <div class="stat-value">{{ taskCount || 0 }}</div>
-              <div class="stat-label">任务总数</div>
-            </div>
+
+          <div class="pt-4">
+            <Button type="submit" :disabled="loading" class="gap-2">
+              <Loader2 v-if="loading" class="h-4 w-4 animate-spin" />
+              保存修改
+            </Button>
           </div>
-        </el-card>
-      </el-col>
+        </form>
+      </CardContent>
+    </Card>
 
-      <el-col :span="16">
-        <el-card shadow="hover" class="info-card">
-          <el-tabs v-model="activeTab">
-            <el-tab-pane label="基本信息" name="basic">
-              <el-form :model="profileForm" label-width="100px">
-                <el-form-item label="用户名">
-                  <el-input v-model="profileForm.username" disabled />
-                </el-form-item>
-                <el-form-item label="邮箱">
-                  <el-input v-model="profileForm.email" />
-                </el-form-item>
-                <el-form-item label="注册时间">
-                  <el-input :value="formatDate(userStore.user?.date_joined || '')" disabled />
-                </el-form-item>
-                <el-form-item label="最后登录">
-                  <el-input :value="formatDate(userStore.user?.last_login || '')" disabled />
-                </el-form-item>
-                <el-form-item>
-                  <el-button type="primary" @click="handleUpdateProfile" :loading="updating">
-                    保存修改
-                  </el-button>
-                </el-form-item>
-              </el-form>
-            </el-tab-pane>
+    <Card class="bg-card text-card-foreground">
+      <CardHeader>
+        <CardTitle>修改密码</CardTitle>
+      </CardHeader>
+      <CardContent>
+        <form @submit.prevent="handleChangePassword" class="space-y-4 max-w-lg">
+          <div class="grid gap-2">
+            <label class="text-sm font-medium">旧密码</label>
+            <Input v-model="pwdForm.old_password" type="password" autocomplete="current-password" />
+          </div>
 
-            <el-tab-pane label="修改密码" name="password">
-              <el-form :model="passwordForm" :rules="passwordRules" ref="passwordFormRef" label-width="100px">
-                <el-form-item label="当前密码" prop="old_password">
-                  <el-input v-model="passwordForm.old_password" type="password" show-password />
-                </el-form-item>
-                <el-form-item label="新密码" prop="new_password">
-                  <el-input v-model="passwordForm.new_password" type="password" show-password />
-                </el-form-item>
-                <el-form-item label="确认密码" prop="confirm_password">
-                  <el-input v-model="passwordForm.confirm_password" type="password" show-password />
-                </el-form-item>
-                <el-form-item>
-                  <el-button type="primary" @click="handleChangePassword" :loading="changingPassword">
-                    修改密码
-                  </el-button>
-                </el-form-item>
-              </el-form>
-            </el-tab-pane>
+          <div class="grid gap-2">
+            <label class="text-sm font-medium">新密码</label>
+            <Input v-model="pwdForm.new_password" type="password" autocomplete="new-password" />
+          </div>
 
-            <el-tab-pane label="API 密钥" name="api">
-              <div class="api-key-section">
-                <el-alert
-                  title="API 密钥用于第三方应用接入"
-                  type="info"
-                  :closable="false"
-                  style="margin-bottom: 20px"
-                />
-                <el-form label-width="100px">
-                  <el-form-item label="API Key">
-                    <el-input
-                      :value="apiKey || '未生成'"
-                      readonly
-                      :type="showApiKey ? 'text' : 'password'"
-                    >
-                      <template #append>
-                        <el-button @click="showApiKey = !showApiKey">
-                          <el-icon v-if="showApiKey"><Hide /></el-icon>
-                          <el-icon v-else><View /></el-icon>
-                        </el-button>
-                      </template>
-                    </el-input>
-                  </el-form-item>
-                  <el-form-item>
-                    <el-button type="primary" @click="handleGenerateApiKey">
-                      生成新密钥
-                    </el-button>
-                    <el-button v-if="apiKey" @click="handleCopyApiKey">
-                      <el-icon><CopyDocument /></el-icon>
-                      复制
-                    </el-button>
-                  </el-form-item>
-                </el-form>
-              </div>
-            </el-tab-pane>
-          </el-tabs>
-        </el-card>
-      </el-col>
-    </el-row>
+          <div class="grid gap-2">
+            <label class="text-sm font-medium">确认新密码</label>
+            <Input v-model="pwdForm.confirm_password" type="password" autocomplete="new-password" />
+          </div>
+
+          <div class="pt-4">
+            <Button type="submit" variant="secondary" :disabled="pwdLoading" class="gap-2">
+              <Loader2 v-if="pwdLoading" class="h-4 w-4 animate-spin" />
+              修改密码
+            </Button>
+            <p class="mt-2 text-xs text-muted-foreground">修改成功后将自动退出登录，请使用新密码重新登录。</p>
+          </div>
+        </form>
+      </CardContent>
+    </Card>
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, reactive, onMounted } from 'vue'
-import { ElMessage, type FormInstance, type FormRules } from 'element-plus'
 import { useUserStore } from '@/stores/user'
-import { balanceApi } from '@/api/balance'
-import { tasksApi } from '@/api/tasks'
-import type { UserBalance } from '@/types'
-import dayjs from 'dayjs'
+import { useRouter } from 'vue-router'
+import { ElMessage } from '@/lib/element'
+import { userApi } from '@/api/user'
+import { Loader2 } from 'lucide-vue-next'
+
+import { Button } from '@/components/ui/button'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Input } from '@/components/ui/input'
 
 const userStore = useUserStore()
-const activeTab = ref('basic')
-const updating = ref(false)
-const changingPassword = ref(false)
-const showApiKey = ref(false)
-const apiKey = ref('')
-const balance = ref<UserBalance | null>(null)
-const taskCount = ref(0)
+const router = useRouter()
+const loading = ref(false)
+const pwdLoading = ref(false)
 
-const passwordFormRef = ref<FormInstance>()
-
-const profileForm = reactive({
+const form = reactive({
   username: '',
   email: ''
 })
 
-const passwordForm = reactive({
+const pwdForm = reactive({
   old_password: '',
   new_password: '',
   confirm_password: ''
 })
 
-const validateConfirmPassword = (_rule: any, value: any, callback: any) => {
-  if (value === '') {
-    callback(new Error('请再次输入密码'))
-  } else if (value !== passwordForm.new_password) {
-    callback(new Error('两次输入的密码不一致'))
-  } else {
-    callback()
+onMounted(() => {
+  if (userStore.user) {
+    form.username = userStore.user.username
+    form.email = userStore.user.email
   }
-}
-
-const passwordRules: FormRules = {
-  old_password: [
-    { required: true, message: '请输入当前密码', trigger: 'blur' }
-  ],
-  new_password: [
-    { required: true, message: '请输入新密码', trigger: 'blur' },
-    { min: 6, message: '密码至少6位', trigger: 'blur' }
-  ],
-  confirm_password: [
-    { required: true, message: '请再次输入密码', trigger: 'blur' },
-    { validator: validateConfirmPassword, trigger: 'blur' }
-  ]
-}
-
-const fetchData = async () => {
-  try {
-    // 获取余额
-    balance.value = await balanceApi.getMyBalance()
-
-    // 获取任务数量
-    const tasksResponse = await tasksApi.getTasks({ page_size: 1 })
-    taskCount.value = tasksResponse.count
-  } catch (error) {
-    console.error('Failed to fetch data:', error)
-  }
-}
+})
 
 const handleUpdateProfile = async () => {
-  updating.value = true
+  loading.value = true
   try {
-    // 这里应该调用更新用户信息的API
-    ElMessage.success('信息更新成功')
+    await userApi.updateProfile({ email: form.email })
+    ElMessage.success('保存成功')
+    await userStore.checkAuth()
   } catch (error) {
-    console.error('Failed to update profile:', error)
-    ElMessage.error('更新失败')
+    console.error(error)
   } finally {
-    updating.value = false
+    loading.value = false
   }
 }
 
 const handleChangePassword = async () => {
-  if (!passwordFormRef.value) return
+  if (pwdForm.new_password !== pwdForm.confirm_password) {
+    ElMessage.error('两次输入的密码不一致')
+    return
+  }
 
-  await passwordFormRef.value.validate(async (valid) => {
-    if (!valid) return
-
-    changingPassword.value = true
-    try {
-      // 这里应该调用修改密码的API
-      ElMessage.success('密码修改成功')
-      passwordForm.old_password = ''
-      passwordForm.new_password = ''
-      passwordForm.confirm_password = ''
-    } catch (error) {
-      console.error('Failed to change password:', error)
-      ElMessage.error('密码修改失败')
-    } finally {
-      changingPassword.value = false
-    }
-  })
-}
-
-const handleGenerateApiKey = async () => {
+  pwdLoading.value = true
   try {
-    // 这里应该调用生成API密钥的API
-    apiKey.value = 'sk_' + Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15)
-    ElMessage.success('API密钥生成成功')
+    await userApi.changePassword({
+      old_password: pwdForm.old_password,
+      new_password: pwdForm.new_password
+    })
+    ElMessage.success('密码修改成功，请重新登录')
+    pwdForm.old_password = ''
+    pwdForm.new_password = ''
+    pwdForm.confirm_password = ''
+
+    await userStore.logout()
+    router.push({ name: 'Login' })
   } catch (error) {
-    console.error('Failed to generate API key:', error)
-    ElMessage.error('生成失败')
+    console.error(error)
+  } finally {
+    pwdLoading.value = false
   }
 }
-
-const handleCopyApiKey = () => {
-  if (!apiKey.value) return
-  navigator.clipboard.writeText(apiKey.value)
-  ElMessage.success('已复制到剪贴板')
-}
-
-const formatDate = (date: string) => {
-  if (!date) return '-'
-  return dayjs(date).format('YYYY-MM-DD HH:mm:ss')
-}
-
-onMounted(() => {
-  if (userStore.user) {
-    profileForm.username = userStore.user.username
-    profileForm.email = userStore.user.email || ''
-  }
-  fetchData()
-})
 </script>
-
-<style scoped lang="scss">
-.profile-view {
-  h1 {
-    margin-bottom: 24px;
-  }
-
-  .user-card {
-    text-align: center;
-
-    .user-avatar {
-      margin: 20px 0;
-    }
-
-    .user-info {
-      h2 {
-        margin: 12px 0 8px 0;
-        font-size: 24px;
-      }
-
-      p {
-        color: #909399;
-        margin: 0 0 12px 0;
-      }
-    }
-
-    .user-stats {
-      display: flex;
-      justify-content: space-around;
-      padding: 20px 0;
-
-      .stat-item {
-        .stat-value {
-          font-size: 28px;
-          font-weight: bold;
-          color: #409EFF;
-          margin-bottom: 8px;
-        }
-
-        .stat-label {
-          font-size: 14px;
-          color: #909399;
-        }
-      }
-    }
-  }
-
-  .info-card {
-    height: 100%;
-
-    .api-key-section {
-      padding: 20px 0;
-    }
-  }
-}
-</style>
-

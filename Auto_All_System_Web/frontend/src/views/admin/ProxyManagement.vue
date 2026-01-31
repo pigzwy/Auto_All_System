@@ -1,96 +1,149 @@
 <template>
-  <div class="proxy-management">
-    <div class="page-header">
-      <h1>🌐 代理管理</h1>
-      <el-button type="primary" @click="showDialog = true">
-        <el-icon><Plus /></el-icon>
+  <div class="space-y-6 p-5">
+    <div class="flex items-end justify-between gap-4">
+      <div>
+        <h1 class="text-2xl font-semibold text-foreground">代理管理</h1>
+        <p class="mt-1 text-sm text-muted-foreground">维护代理池、可用性和延迟情况。</p>
+      </div>
+      <Button type="button" class="gap-2" @click="showDialog = true">
+        <Plus class="h-4 w-4" />
         添加代理
-      </el-button>
+      </Button>
     </div>
 
-    <el-card shadow="hover">
-      <el-table :data="proxies" v-loading="loading" stripe>
-        <el-table-column prop="id" label="ID" width="60" />
-        <el-table-column label="类型" width="100">
-          <template #default="{ row }">
-            <el-tag>{{ getProxyType(row.proxy_type) }}</el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column prop="host" label="主机" width="150" />
-        <el-table-column prop="port" label="端口" width="80" />
-        <el-table-column prop="username" label="用户名" width="120" />
-        <el-table-column label="状态" width="100">
-          <template #default="{ row }">
-            <el-tag :type="row.status === 'active' ? 'success' : 'danger'">
-              {{ row.status === 'active' ? '可用' : '禁用' }}
-            </el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column label="延迟" width="100">
-          <template #default="{ row }">
-            <span :style="{ color: getLatencyColor(row.response_time) }">
-              {{ row.response_time ? `${row.response_time}ms` : '-' }}
-            </span>
-          </template>
-        </el-table-column>
-        <el-table-column prop="use_count" label="使用次数" width="100" />
-        <el-table-column prop="last_check_at" label="最后检测" width="180" />
-        <el-table-column label="操作" width="250" fixed="right">
-          <template #default="{ row }">
-            <el-button text type="primary" @click="editProxy(row)">编辑</el-button>
-            <el-button text type="success" @click="testProxy(row)">测试</el-button>
-            <el-button text type="warning" @click="toggleActive(row)">
-              {{ row.status === 'active' ? '禁用' : '启用' }}
-            </el-button>
-            <el-button text type="danger" @click="deleteProxy(row)">删除</el-button>
-          </template>
-        </el-table-column>
-      </el-table>
-    </el-card>
+    <Card class="shadow-sm">
+      <CardContent class="p-6">
+        <div class="relative overflow-hidden rounded-xl border border-border">
+          <div
+            v-if="loading"
+            class="absolute inset-0 z-10 flex items-center justify-center bg-background/60 backdrop-blur-sm"
+          >
+            <Loading class="h-8 w-8 animate-spin text-muted-foreground" />
+          </div>
+
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead class="w-[60px]">ID</TableHead>
+                <TableHead class="w-[100px]">类型</TableHead>
+                <TableHead class="w-[150px]">主机</TableHead>
+                <TableHead class="w-[80px]">端口</TableHead>
+                <TableHead class="w-[120px]">用户名</TableHead>
+                <TableHead class="w-[100px]">状态</TableHead>
+                <TableHead class="w-[100px]">延迟</TableHead>
+                <TableHead class="w-[100px]">使用次数</TableHead>
+                <TableHead class="w-[180px]">最后检测</TableHead>
+                <TableHead class="w-[250px] text-right">操作</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              <TableRow v-for="(row, idx) in proxies" :key="row.id ?? idx" :class="idx % 2 === 1 ? 'bg-muted/10' : ''">
+                <TableCell class="w-[60px]">{{ row.id }}</TableCell>
+                <TableCell class="w-[100px]">
+                  <Badge variant="secondary" class="rounded-full">{{ getProxyType(row.proxy_type) }}</Badge>
+                </TableCell>
+                <TableCell class="w-[150px]">{{ row.host }}</TableCell>
+                <TableCell class="w-[80px]">{{ row.port }}</TableCell>
+                <TableCell class="w-[120px]">{{ row.username || '-' }}</TableCell>
+                <TableCell class="w-[100px]">
+                  <Badge variant="outline" class="rounded-full" :class="row.status === 'active' ? 'border-emerald-500/20 bg-emerald-500/10 text-emerald-700' : 'border-rose-500/20 bg-rose-500/10 text-rose-700'">
+                    {{ row.status === 'active' ? '可用' : '禁用' }}
+                  </Badge>
+                </TableCell>
+                <TableCell class="w-[100px]">
+                  <span :class="getLatencyClass(row.response_time)">
+                    {{ row.response_time ? `${row.response_time}ms` : '-' }}
+                  </span>
+                </TableCell>
+                <TableCell class="w-[100px]">{{ row.use_count ?? 0 }}</TableCell>
+                <TableCell class="w-[180px]">{{ row.last_check_at || '-' }}</TableCell>
+                <TableCell class="w-[250px] text-right">
+                  <div class="flex items-center justify-end gap-2">
+                    <Button type="button" variant="ghost" size="sm" @click="editProxy(row)">编辑</Button>
+                    <Button type="button" variant="ghost" size="sm" @click="testProxy(row)">测试</Button>
+                    <Button type="button" variant="outline" size="sm" @click="toggleActive(row)">
+                      {{ row.status === 'active' ? '禁用' : '启用' }}
+                    </Button>
+                    <Button type="button" variant="ghost" size="sm" class="text-rose-600" @click="deleteProxy(row)">删除</Button>
+                  </div>
+                </TableCell>
+              </TableRow>
+
+              <TableRow v-if="!proxies.length">
+                <TableCell :colspan="10" class="py-10 text-center text-sm text-muted-foreground">暂无数据</TableCell>
+              </TableRow>
+            </TableBody>
+          </Table>
+        </div>
+      </CardContent>
+    </Card>
 
     <!-- 添加/编辑对话框 -->
-    <el-dialog 
-      v-model="showDialog" 
-      :title="editingProxy ? '编辑代理' : '添加代理'"
-      width="500px"
-    >
-      <el-form :model="formData" label-width="80px">
-        <el-form-item label="类型">
-          <el-select v-model="formData.proxy_type" placeholder="选择类型">
-            <el-option label="HTTP" value="http" />
-            <el-option label="HTTPS" value="https" />
-            <el-option label="SOCKS5" value="socks5" />
-          </el-select>
-        </el-form-item>
-        <el-form-item label="主机">
-          <el-input v-model="formData.host" placeholder="IP或域名" />
-        </el-form-item>
-        <el-form-item label="端口">
-          <el-input-number v-model="formData.port" :min="1" :max="65535" />
-        </el-form-item>
-        <el-form-item label="用户名">
-          <el-input v-model="formData.username" placeholder="可选" />
-        </el-form-item>
-        <el-form-item label="密码">
-          <el-input v-model="formData.password" type="password" placeholder="可选" />
-        </el-form-item>
-        <el-form-item label="启用">
-          <el-switch v-model="isActive" />
-        </el-form-item>
-      </el-form>
-      <template #footer>
-        <el-button @click="showDialog = false">取消</el-button>
-        <el-button type="primary" @click="handleSave">保存</el-button>
-      </template>
-    </el-dialog>
+    <Dialog v-model:open="showDialog">
+      <DialogContent class="sm:max-w-[500px]">
+        <DialogHeader>
+          <DialogTitle>{{ editingProxy ? '编辑代理' : '添加代理' }}</DialogTitle>
+        </DialogHeader>
+
+        <div class="grid gap-4 py-2">
+          <div class="grid gap-2">
+            <label class="text-sm font-medium text-foreground">类型</label>
+            <Select v-model="formData.proxy_type">
+              <SelectTrigger>
+                <SelectValue placeholder="选择类型" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="http">HTTP</SelectItem>
+                <SelectItem value="https">HTTPS</SelectItem>
+                <SelectItem value="socks5">SOCKS5</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div class="grid gap-2">
+            <label class="text-sm font-medium text-foreground">主机</label>
+            <Input v-model="formData.host" placeholder="IP或域名" />
+          </div>
+
+          <div class="grid gap-2">
+            <label class="text-sm font-medium text-foreground">端口</label>
+            <Input v-model.number="formData.port" type="number" min="1" max="65535" />
+          </div>
+
+          <div class="grid gap-2">
+            <label class="text-sm font-medium text-foreground">用户名</label>
+            <Input v-model="formData.username" placeholder="可选" />
+          </div>
+
+          <div class="grid gap-2">
+            <label class="text-sm font-medium text-foreground">密码</label>
+            <Input v-model="formData.password" type="password" placeholder="可选" />
+          </div>
+
+          <div class="grid gap-2">
+            <label class="text-sm font-medium text-foreground">启用</label>
+            <div class="flex items-center gap-3">
+              <Switch :checked="isActive" @update:checked="isActive = $event" />
+              <span class="text-sm text-muted-foreground">{{ isActive ? '可用' : '禁用' }}</span>
+            </div>
+          </div>
+        </div>
+
+        <DialogFooter>
+          <Button type="button" variant="secondary" @click="showDialog = false">取消</Button>
+          <Button type="button" @click="handleSave">保存</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, reactive, onMounted, computed } from 'vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
-import { Plus } from '@element-plus/icons-vue'
+import { ElMessage, ElMessageBox } from '@/lib/element'
+import { Plus, Loading } from '@/icons'
 import { proxiesApi } from '@/api/proxies'
+import { Card, CardContent } from '@/components/ui/card'
 
 const loading = ref(false)
 const proxies = ref<any[]>([])
@@ -137,11 +190,11 @@ const getProxyType = (type: string) => {
   return type.toUpperCase()
 }
 
-const getLatencyColor = (latency: number) => {
-  if (!latency) return '#909399'
-  if (latency < 100) return '#67c23a'
-  if (latency < 300) return '#e6a23c'
-  return '#f56c6c'
+const getLatencyClass = (latency?: number | null) => {
+  if (!latency) return 'text-muted-foreground'
+  if (latency < 100) return 'text-emerald-600'
+  if (latency < 300) return 'text-amber-600'
+  return 'text-rose-600'
 }
 
 const editProxy = (row: any) => {
@@ -229,19 +282,3 @@ onMounted(() => {
   fetchProxies()
 })
 </script>
-
-<style scoped lang="scss">
-.proxy-management {
-  .page-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 24px;
-
-    h1 {
-      margin: 0;
-    }
-  }
-}
-</style>
-

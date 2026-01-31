@@ -1,116 +1,143 @@
 <template>
-  <div class="google-business-zone">
-    <!-- 顶部触发区域和导航栏 -->
-    <div class="navbar-wrapper">
-      <!-- 触发区域 - 鼠标移到这里时显示导航栏 -->
-      <div class="navbar-trigger"></div>
-      <!-- 导航栏 -->
-      <div class="top-navbar">
-        <div class="navbar-content">
-          <div class="logo-section">
-            <el-icon class="menu-toggle" @click="toggleSidebar" :size="24">
-              <Fold v-if="!sidebarCollapsed" />
-              <Expand v-else />
-            </el-icon>
-            <el-icon class="logo-icon" :size="32"><Platform /></el-icon>
-            <div class="logo-text">
-              <h2>Google 业务专区</h2>
-              <span>学生优惠订阅自动化处理平台</span>
-            </div>
+  <div class="min-h-screen bg-muted/30 text-foreground">
+    <header class="sticky top-0 z-30 h-16 bg-background/80 backdrop-blur border-b border-border">
+      <div class="mx-auto max-w-7xl h-full px-4 flex items-center justify-between gap-4">
+        <div class="flex items-center gap-3 min-w-0">
+          <Button
+            variant="outline"
+            size="icon-sm"
+            class="bg-muted/30"
+            @click="toggleSidebar"
+          >
+            <PanelLeftClose v-if="!sidebarCollapsed" class="h-4 w-4" />
+            <PanelLeftOpen v-else class="h-4 w-4" />
+          </Button>
+
+          <Button
+            variant="ghost"
+            size="sm"
+            class="hidden sm:inline-flex"
+            @click="router.push('/zones')"
+          >
+            <ChevronLeft class="h-4 w-4" />
+            返回专区
+          </Button>
+
+          <div class="h-9 w-9 rounded-lg bg-primary/10 text-primary flex items-center justify-center">
+            <Sparkles class="h-5 w-5" />
           </div>
-          <div class="navbar-actions">
-            <div class="balance-display">
-              <el-icon :size="18"><Wallet /></el-icon>
-              <span class="balance-label">余额：</span>
-              <span class="balance-amount">¥{{ userBalance }}</span>
-            </div>
-            <el-dropdown @command="handleCommand">
-              <el-button type="primary">
-                <el-icon><User /></el-icon>
-                {{ userStore.user?.username || 'User' }}
-                <el-icon class="el-icon--right"><ArrowDown /></el-icon>
-              </el-button>
-              <template #dropdown>
-                <el-dropdown-menu>
-                  <el-dropdown-item command="profile">个人信息</el-dropdown-item>
-                  <el-dropdown-item command="recharge">充值</el-dropdown-item>
-                  <el-dropdown-item divided command="logout">退出登录</el-dropdown-item>
-                </el-dropdown-menu>
-              </template>
-            </el-dropdown>
+
+          <div class="min-w-0">
+            <div class="text-sm font-semibold leading-none">Google 业务专区</div>
+            <div class="mt-1 text-xs text-muted-foreground truncate">学生优惠订阅自动化处理平台</div>
           </div>
         </div>
-      </div>
-    </div>
 
-    <!-- 主容器 -->
-    <div class="main-container">
-      <!-- 左侧导航栏 -->
-      <div class="sidebar" :class="{ collapsed: sidebarCollapsed }">
-        <el-menu
-          :default-active="activeModule"
-          class="sidebar-menu"
-          :collapse="sidebarCollapsed"
-          @select="handleModuleChange"
-        >
-          <el-menu-item index="workstation">
-            <el-icon><DataLine /></el-icon>
-            <template #title>
-              <div class="menu-item-content">
-                <span>工作台</span>
-                <el-tooltip
-                  v-if="!sidebarCollapsed"
-                  effect="dark"
-                  placement="right"
-                >
-                  <template #content>
-                    <div class="browser-status-tooltip">
-                      <div class="tooltip-row">
-                        <span>浏览器类型:</span>
-                        <span>{{ browserStatus?.default || 'Unknown' }}</span>
-                      </div>
-                      <div class="tooltip-row">
-                        <span>引擎状态:</span>
-                        <span :class="browserStatus?.engine_online ? 'status-online' : 'status-offline'">
-                          {{ browserStatus?.engine_online ? 'Online' : 'Offline' }}
-                        </span>
-                      </div>
-                      <div class="tooltip-row">
-                        <span>浏览器池:</span>
-                        <span>{{ browserStatus?.pool?.busy || 0 }} / {{ browserStatus?.pool?.total || 0 }}</span>
-                      </div>
-                      <div class="tooltip-hint">点击刷新状态</div>
-                    </div>
-                  </template>
-                  <div 
-                    class="browser-status-icon" 
-                    @click.stop="fetchBrowserStatus"
-                    :class="{ 'is-loading': isBrowserStatusLoading }"
-                  >
-                    <el-icon v-if="isBrowserStatusLoading" class="rotating"><Loading /></el-icon>
-                    <el-icon v-else-if="browserStatus?.engine_online" color="#67C23A"><CircleCheckFilled /></el-icon>
-                    <el-icon v-else color="#F56C6C"><CircleCloseFilled /></el-icon>
-                  </div>
-                </el-tooltip>
-              </div>
-            </template>
-          </el-menu-item>
-          <el-menu-item index="accounts">
-            <el-icon><Avatar /></el-icon>
-            <template #title>谷歌账号管理</template>
-          </el-menu-item>
-          <el-menu-item index="proxy-management">
-            <el-icon><Connection /></el-icon>
-            <template #title>代理管理</template>
-          </el-menu-item>
-        </el-menu>
-      </div>
+        <div class="flex items-center gap-3">
+          <div class="hidden sm:flex items-center gap-2 rounded-full border border-border bg-muted/30 px-3 py-1.5">
+            <Wallet class="h-4 w-4 text-muted-foreground" />
+            <span class="text-xs text-muted-foreground">余额</span>
+            <span class="text-sm font-semibold text-foreground">¥{{ userBalance }}</span>
+          </div>
 
-      <!-- 右侧内容区域 -->
-      <div class="content-area" :class="{ expanded: sidebarCollapsed }">
-        <!-- 动态加载模块组件 -->
-        <component :is="currentModuleComponent" />
+          <DropdownMenu>
+            <DropdownMenuTrigger as-child>
+              <Button type="button" variant="default" size="sm" class="gap-2">
+                <UserRound class="h-4 w-4" />
+                <span class="max-w-[140px] truncate">{{ userStore.user?.username || 'User' }}</span>
+                <ChevronDown class="h-4 w-4 opacity-70" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" class="w-44">
+              <DropdownMenuItem @select="handleCommand('profile')">个人信息</DropdownMenuItem>
+              <DropdownMenuItem @select="handleCommand('recharge')">充值</DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem class="text-destructive" @select="handleCommand('logout')">退出登录</DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
       </div>
+    </header>
+
+    <div
+      v-if="!sidebarCollapsed"
+      class="md:hidden fixed inset-0 z-30 bg-black/30"
+      @click="toggleSidebar"
+    />
+
+    <!-- Main -->
+    <div class="flex min-h-[calc(100vh-4rem)]">
+      <aside
+        class="fixed md:static top-16 bottom-0 left-0 z-40 bg-card text-card-foreground border-r border-border shadow-sm md:shadow-none transition-all duration-200 overflow-hidden"
+        :class="sidebarCollapsed ? '-translate-x-full md:translate-x-0 md:w-16 w-64' : 'translate-x-0 w-64 md:w-64'"
+      >
+        <nav class="h-full px-2 py-4 space-y-1">
+          <Button
+            variant="ghost"
+            class="w-full h-11 px-3 gap-2"
+            :class="[
+              sidebarCollapsed ? 'justify-center px-2' : 'justify-start',
+              activeModule === 'workstation' ? 'bg-accent text-accent-foreground' : 'text-muted-foreground hover:text-foreground'
+            ]"
+            @click="handleModuleChange('workstation')"
+          >
+            <LayoutDashboard class="h-4 w-4 shrink-0" />
+            <span v-if="!sidebarCollapsed" class="flex-1 text-left">工作台</span>
+
+            <div v-if="!sidebarCollapsed" class="ml-auto flex items-center gap-2">
+              <span
+                class="h-2 w-2 rounded-full"
+                :class="browserStatus?.engine_online ? 'bg-emerald-500' : 'bg-red-500'"
+                :title="browserStatus?.engine_online ? '引擎在线' : '引擎离线'"
+              />
+              <button
+                type="button"
+                class="inline-flex h-7 w-7 items-center justify-center rounded-md border border-border bg-muted/30 hover:bg-muted transition-colors"
+                :class="isBrowserStatusLoading ? 'opacity-70' : ''"
+                :title="isBrowserStatusLoading ? '刷新中...' : '刷新浏览器状态'"
+                @click.stop="fetchBrowserStatus"
+              >
+                <RefreshCcw v-if="!isBrowserStatusLoading" class="h-4 w-4 text-muted-foreground" />
+                <Loader2 v-else class="h-4 w-4 text-primary animate-spin" />
+              </button>
+            </div>
+          </Button>
+
+          <Button
+            variant="ghost"
+            class="w-full h-11 px-3 gap-2"
+            :class="[
+              sidebarCollapsed ? 'justify-center px-2' : 'justify-start',
+              activeModule === 'accounts' ? 'bg-accent text-accent-foreground' : 'text-muted-foreground hover:text-foreground'
+            ]"
+            @click="handleModuleChange('accounts')"
+          >
+            <Users class="h-4 w-4 shrink-0" />
+            <span v-if="!sidebarCollapsed" class="text-left">谷歌账号管理</span>
+          </Button>
+
+          <Button
+            variant="ghost"
+            class="w-full h-11 px-3 gap-2"
+            :class="[
+              sidebarCollapsed ? 'justify-center px-2' : 'justify-start',
+              activeModule === 'proxy-management' ? 'bg-accent text-accent-foreground' : 'text-muted-foreground hover:text-foreground'
+            ]"
+            @click="handleModuleChange('proxy-management')"
+          >
+            <Network class="h-4 w-4 shrink-0" />
+            <span v-if="!sidebarCollapsed" class="text-left">代理管理</span>
+          </Button>
+        </nav>
+      </aside>
+
+      <main class="flex-1 min-w-0 bg-muted/20 p-4 sm:p-6 md:ml-0">
+        <div class="max-w-7xl mx-auto">
+          <div class="min-w-0 overflow-x-auto">
+            <component :is="currentModuleComponent" />
+          </div>
+        </div>
+      </main>
     </div>
   </div>
 </template>
@@ -121,10 +148,28 @@ import { useRouter } from 'vue-router'
 import { useUserStore } from '@/stores/user'
 import { balanceApi } from '@/api/balance'
 import {
-  Platform, User, ArrowDown,
-  DataLine, Fold, Expand, Avatar, Wallet,
-  Connection, CircleCheckFilled, CircleCloseFilled, Loading
-} from '@element-plus/icons-vue'
+  ChevronDown,
+  ChevronLeft,
+  LayoutDashboard,
+  Loader2,
+  Network,
+  PanelLeftClose,
+  PanelLeftOpen,
+  RefreshCcw,
+  Sparkles,
+  UserRound,
+  Users,
+  Wallet,
+} from 'lucide-vue-next'
+
+import { Button } from '@/components/ui/button'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
 import { googleBrowserApi } from '@/api/google'
 
 // 导入模块组件
@@ -218,247 +263,4 @@ onMounted(async () => {
   ])
 })
 </script>
-
-<style scoped lang="scss">
-.google-business-zone {
-  min-height: 100vh;
-  display: flex;
-  flex-direction: column;
-  background: #f5f7fa;
-  
-  .navbar-wrapper {
-    position: fixed;
-    top: 0;
-    left: 0;
-    right: 0;
-    z-index: 100;
-    
-    .navbar-trigger {
-      height: 6px; // 触发区域高度调整为6px
-      background: transparent;
-      position: relative;
-      z-index: 101;
-      pointer-events: auto; // 只有这个6px的区域会触发hover
-    }
-    
-    .top-navbar {
-      background: white;
-      box-shadow: 0 2px 12px rgba(0, 0, 0, 0.1);
-      position: absolute;
-      top: 0;
-      left: 0;
-      right: 0;
-      transform: translateY(-100%);
-      transition: transform 0.3s ease-in-out;
-      z-index: 100;
-      pointer-events: auto; // 导航栏下拉后可以点击
-    }
-    
-    .navbar-trigger:hover ~ .top-navbar,
-    .top-navbar:hover {
-      transform: translateY(0);
-    }
-    
-    .navbar-content {
-      padding: 16px 24px;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      
-      .logo-section {
-        display: flex;
-        align-items: center;
-        gap: 16px;
-        
-        .menu-toggle {
-          cursor: pointer;
-          color: #606266;
-          transition: color 0.3s;
-          
-          &:hover {
-            color: #409eff;
-          }
-        }
-        
-        .logo-icon {
-          color: #409eff;
-        }
-        
-        .logo-text {
-          h2 {
-            margin: 0;
-            font-size: 20px;
-            font-weight: 600;
-            color: #303133;
-          }
-          
-          span {
-            font-size: 12px;
-            color: #909399;
-          }
-        }
-      }
-      
-      .navbar-actions {
-        display: flex;
-        align-items: center;
-        gap: 20px;
-        
-        .balance-display {
-          display: flex;
-          align-items: center;
-          gap: 6px;
-          padding: 8px 16px;
-          background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-          border-radius: 20px;
-          color: white;
-          font-weight: 500;
-          
-          .balance-label {
-            font-size: 14px;
-          }
-          
-          .balance-amount {
-            font-size: 16px;
-            font-weight: 600;
-          }
-        }
-      }
-    }
-  }
-  
-  .main-container {
-    flex: 1;
-    display: flex;
-    overflow: hidden;
-    margin-top: 0; // 因为导航栏隐藏了
-    
-    .sidebar {
-      width: 200px;
-      background: white;
-      box-shadow: 2px 0 8px rgba(0, 0, 0, 0.1);
-      transition: width 0.3s;
-      overflow: hidden;
-      
-      &.collapsed {
-        width: 64px;
-      }
-      
-      .sidebar-menu {
-        border-right: none;
-        height: 100%;
-        
-        :deep(.el-menu-item) {
-          height: 56px;
-          line-height: 56px;
-          
-          &.is-active {
-            background: #ecf5ff;
-            color: #409eff;
-            border-right: 3px solid #409eff;
-          }
-
-          .menu-item-content {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            width: 100%;
-            padding-right: 10px;
-
-            .browser-status-icon {
-              display: flex;
-              align-items: center;
-              justify-content: center;
-              cursor: pointer;
-              transition: transform 0.3s;
-              margin-left: 8px;
-              
-              &:hover {
-                transform: scale(1.2);
-              }
-              
-              &.is-loading {
-                .rotating {
-                  animation: rotate 1s linear infinite;
-                  color: #409eff;
-                }
-              }
-            }
-          }
-        }
-      }
-    }
-    
-    .content-area {
-      flex: 1;
-      padding: 24px;
-      overflow-y: auto;
-      background: #f5f7fa;
-      width: calc(100% - 200px);
-      transition: width 0.3s;
-      
-      &.expanded {
-        width: calc(100% - 64px);
-      }
-    }
-  }
-}
-
-@keyframes rotate {
-  from { transform: rotate(0deg); }
-  to { transform: rotate(360deg); }
-}
-
-.browser-status-tooltip {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  font-size: 12px;
-  
-  .tooltip-row {
-    display: flex;
-    justify-content: space-between;
-    gap: 12px;
-    
-    .status-online {
-      color: #67C23A;
-    }
-    
-    .status-offline {
-      color: #F56C6C;
-    }
-  }
-  
-  .tooltip-hint {
-    margin-top: 4px;
-    font-size: 10px;
-    color: #909399;
-    text-align: center;
-    border-top: 1px solid #4C4D4F;
-    padding-top: 4px;
-  }
-}
-
-@media (max-width: 768px) {
-  .google-business-zone {
-    .main-container {
-      .sidebar {
-        position: fixed;
-        left: 0;
-        top: 64px;
-        bottom: 0;
-        z-index: 999;
-        
-        &.collapsed {
-          transform: translateX(-100%);
-        }
-      }
-      
-      .content-area {
-        width: 100% !important;
-      }
-    }
-  }
-}
-</style>
 

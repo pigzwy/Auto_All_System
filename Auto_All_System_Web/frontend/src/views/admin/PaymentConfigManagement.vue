@@ -1,90 +1,96 @@
 <template>
-  <div class="payment-config">
-    <h1>💳 支付方式配置</h1>
+  <div class="space-y-6 p-5">
+    <div>
+      <h1 class="text-2xl font-semibold text-foreground">支付方式配置</h1>
+      <p class="mt-1 text-sm text-muted-foreground">管理支付网关、启用状态、手续费与金额范围。</p>
+    </div>
 
-    <el-card shadow="hover">
-      <el-table :data="configs" v-loading="loading" stripe>
-        <el-table-column prop="id" label="ID" width="60" />
-        <el-table-column prop="name" label="支付方式" width="150">
+    <Card class="shadow-sm">
+      <CardContent class="p-6">
+      <DataTable :data="configs" v-loading="loading" stripe class="w-full">
+        <DataColumn prop="id" label="ID" width="60" />
+        <DataColumn prop="name" label="支付方式" width="150">
           <template #default="{ row }">
-            <span style="font-size: 16px;">{{ row.icon }} {{ row.name }}</span>
+            <span class="text-base font-medium">{{ row.icon }} {{ row.name }}</span>
           </template>
-        </el-table-column>
-        <el-table-column prop="gateway" label="网关标识" width="120">
+        </DataColumn>
+        <DataColumn prop="gateway" label="网关标识" width="120">
           <template #default="{ row }">
-            <code>{{ row.gateway }}</code>
+            <code class="rounded bg-primary/10 px-1.5 py-0.5 font-mono text-xs text-primary">{{ row.gateway }}</code>
           </template>
-        </el-table-column>
-        <el-table-column label="启用状态" width="100">
+        </DataColumn>
+        <DataColumn label="启用状态" width="100">
           <template #default="{ row }">
-            <el-switch 
+            <Toggle 
               v-model="row.is_enabled" 
               @change="toggleEnable(row)"
               active-color="#13ce66"
               inactive-color="#ff4949"
             />
           </template>
-        </el-table-column>
-        <el-table-column prop="sort_order" label="排序" width="80" />
-        <el-table-column prop="fee_rate" label="手续费率" width="100">
+        </DataColumn>
+        <DataColumn prop="sort_order" label="排序" width="80" />
+        <DataColumn prop="fee_rate" label="手续费率" width="100">
           <template #default="{ row }">
             {{ (row.fee_rate * 100).toFixed(2) }}%
           </template>
-        </el-table-column>
-        <el-table-column label="金额范围" width="180">
+        </DataColumn>
+        <DataColumn label="金额范围" width="180">
           <template #default="{ row }">
             ¥{{ row.min_amount }} - ¥{{ row.max_amount }}
           </template>
-        </el-table-column>
-        <el-table-column prop="description" label="说明" min-width="200" show-overflow-tooltip />
-        <el-table-column label="操作" width="100" fixed="right">
+        </DataColumn>
+        <DataColumn prop="description" label="说明" min-width="200" show-overflow-tooltip />
+        <DataColumn label="操作" width="100" fixed="right">
           <template #default="{ row }">
-            <el-button text type="primary" @click="editConfig(row)">编辑</el-button>
+            <Button text  variant="default" type="button" @click="editConfig(row)">编辑</Button>
           </template>
-        </el-table-column>
-      </el-table>
-    </el-card>
+        </DataColumn>
+      </DataTable>
+      </CardContent>
+    </Card>
 
     <!-- 编辑对话框 -->
-    <el-dialog v-model="showEditDialog" title="编辑支付配置" width="600px">
-      <el-form :model="editForm" label-width="120px">
-        <el-form-item label="支付方式名称">
-          <el-input v-model="editForm.name" />
-        </el-form-item>
-        <el-form-item label="图标">
-          <el-input v-model="editForm.icon" placeholder="emoji或图片URL" />
-        </el-form-item>
-        <el-form-item label="最小金额">
-          <el-input-number v-model="editForm.min_amount" :min="0" :precision="2" />
-          <span style="margin-left: 8px;">元</span>
-        </el-form-item>
-        <el-form-item label="最大金额">
-          <el-input-number v-model="editForm.max_amount" :min="0" :precision="2" />
-          <span style="margin-left: 8px;">元</span>
-        </el-form-item>
-        <el-form-item label="手续费率">
-          <el-input-number v-model="editForm.fee_rate" :min="0" :max="1" :step="0.001" :precision="4" />
-          <span style="margin-left: 8px;">{{ (editForm.fee_rate * 100).toFixed(2) }}%</span>
-        </el-form-item>
-        <el-form-item label="排序">
-          <el-input-number v-model="editForm.sort_order" :min="0" />
-        </el-form-item>
-        <el-form-item label="说明">
-          <el-input v-model="editForm.description" type="textarea" :rows="2" />
-        </el-form-item>
-      </el-form>
+    <Modal v-model="showEditDialog" title="编辑支付配置" width="600px">
+      <SimpleForm :model="editForm" label-width="120px">
+        <SimpleFormItem label="支付方式名称">
+          <TextInput v-model="editForm.name" />
+        </SimpleFormItem>
+        <SimpleFormItem label="图标">
+          <TextInput v-model="editForm.icon" placeholder="emoji或图片URL" />
+        </SimpleFormItem>
+        <SimpleFormItem label="最小金额">
+          <NumberInput v-model="editForm.min_amount" :min="0" :precision="2" />
+          <span class="ml-2 text-sm text-muted-foreground">元</span>
+        </SimpleFormItem>
+        <SimpleFormItem label="最大金额">
+          <NumberInput v-model="editForm.max_amount" :min="0" :precision="2" />
+          <span class="ml-2 text-sm text-muted-foreground">元</span>
+        </SimpleFormItem>
+        <SimpleFormItem label="手续费率">
+          <NumberInput v-model="editForm.fee_rate" :min="0" :max="1" :step="0.001" :precision="4" />
+          <span class="ml-2 text-sm text-muted-foreground">{{ (editForm.fee_rate * 100).toFixed(2) }}%</span>
+        </SimpleFormItem>
+        <SimpleFormItem label="排序">
+          <NumberInput v-model="editForm.sort_order" :min="0" />
+        </SimpleFormItem>
+        <SimpleFormItem label="说明">
+          <TextInput v-model="editForm.description" type="textarea" :rows="2" />
+        </SimpleFormItem>
+      </SimpleForm>
       <template #footer>
-        <el-button @click="showEditDialog = false">取消</el-button>
-        <el-button type="primary" @click="handleSave" :loading="saving">保存</el-button>
+        <Button @click="showEditDialog = false">取消</Button>
+        <Button  variant="default" type="button" @click="handleSave" :loading="saving">保存</Button>
       </template>
-    </el-dialog>
+    </Modal>
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, reactive, onMounted } from 'vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage } from '@/lib/element'
 import { paymentsApi } from '@/api/payments'
+import { Card, CardContent } from '@/components/ui/card'
 
 const loading = ref(false)
 const saving = ref(false)
@@ -174,20 +180,3 @@ onMounted(() => {
   fetchConfigs()
 })
 </script>
-
-<style scoped lang="scss">
-.payment-config {
-  h1 {
-    margin-bottom: 24px;
-  }
-
-  code {
-    background: #f5f7fa;
-    padding: 4px 8px;
-    border-radius: 4px;
-    font-family: 'Courier New', monospace;
-    color: #409eff;
-  }
-}
-</style>
-

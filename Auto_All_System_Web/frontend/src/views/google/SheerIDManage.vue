@@ -1,168 +1,170 @@
 <template>
-  <div class="sheerid-manage">
-    <el-card shadow="never">
-      <template #header>
-        <div class="card-header">
-          <div class="header-left">
-            <el-icon><Check /></el-icon>
-            <span class="header-title">SheerID 验证管理</span>
+  <div class="space-y-6 p-5">
+    <Card class="shadow-sm">
+      <CardHeader>
+        <div class="flex items-center justify-between gap-4">
+          <div class="flex items-center gap-2">
+            <Icon><Check /></Icon>
+            <CardTitle class="text-base">SheerID 验证管理</CardTitle>
           </div>
-          <el-button type="primary" @click="loadAccounts">
-            <el-icon><Refresh /></el-icon>
-            <span style="margin-left: 5px;">刷新列表</span>
-          </el-button>
+          <Button  variant="default" type="button" :disabled="loading" @click="loadAccounts">
+            <Icon><Refresh /></Icon>
+            <span class="ml-1.5">刷新列表</span>
+          </Button>
         </div>
-      </template>
+      </CardHeader>
 
-      <!-- 批量操作区 -->
-      <el-row :gutter="15" style="margin-bottom: 20px;">
-        <el-col :xs="24" :md="12">
-          <el-input
-            v-model="apiKey"
-            type="password"
-            placeholder="SheerID API Key"
-            show-password
-          >
-            <template #prefix>
-              <el-icon><Key /></el-icon>
-            </template>
-          </el-input>
-          <div class="input-hint">用于批量验证 SheerID 链接</div>
-        </el-col>
-        <el-col :xs="12" :md="6">
-          <el-input-number
-            v-model="threadCount"
-            :min="1"
-            :max="10"
-            controls-position="right"
-            style="width: 100%;"
-            placeholder="并发数"
-          />
-        </el-col>
-        <el-col :xs="12" :md="6">
-          <el-button
-            type="success"
-            style="width: 100%;"
-            :disabled="!selectedAccounts.length || !apiKey || loading"
-            :loading="loading"
-            @click="startVerification"
-          >
-            <el-icon><CircleCheck /></el-icon>
-            <span style="margin-left: 5px;">批量验证选中</span>
-          </el-button>
-        </el-col>
-      </el-row>
-
-      <!-- 统计面板 -->
-      <el-row :gutter="15" style="margin-bottom: 20px;">
-        <el-col :xs="12" :sm="6">
-          <el-card class="stat-card info-stat">
-            <div class="stat-number">{{ stats.link_ready }}</div>
-            <div class="stat-label">待验证</div>
-          </el-card>
-        </el-col>
-        <el-col :xs="12" :sm="6">
-          <el-card class="stat-card success-stat">
-            <div class="stat-number">{{ stats.verified }}</div>
-            <div class="stat-label">已验证</div>
-          </el-card>
-        </el-col>
-        <el-col :xs="12" :sm="6">
-          <el-card class="stat-card warning-stat">
-            <div class="stat-number">{{ stats.verifying }}</div>
-            <div class="stat-label">验证中</div>
-          </el-card>
-        </el-col>
-        <el-col :xs="12" :sm="6">
-          <el-card class="stat-card danger-stat">
-            <div class="stat-number">{{ stats.failed }}</div>
-            <div class="stat-label">验证失败</div>
-          </el-card>
-        </el-col>
-      </el-row>
-
-      <!-- 账号列表 -->
-      <el-table
-        :data="accounts"
-        v-loading="loading"
-        @selection-change="handleSelectionChange"
-        stripe
-        style="width: 100%;"
-      >
-        <el-table-column type="selection" width="55" />
-        <el-table-column prop="email" label="邮箱" min-width="200">
-          <template #default="{ row }">
-            <el-tag size="small">{{ row.email }}</el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column prop="status" label="状态" width="120">
-          <template #default="{ row }">
-            <el-tag :type="getStatusType(row.status)" size="small">
-              {{ getStatusText(row.status) }}
-            </el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column prop="verification_link" label="SheerID 链接" min-width="250">
-          <template #default="{ row }">
-            <div v-if="row.verification_link" class="link-cell">
-              <a :href="row.verification_link" target="_blank">{{ row.verification_link }}</a>
-            </div>
-            <span v-else style="color: #909399;">未提取</span>
-          </template>
-        </el-table-column>
-        <el-table-column prop="updated_at" label="更新时间" width="180">
-          <template #default="{ row }">
-            {{ formatTime(row.updated_at) }}
-          </template>
-        </el-table-column>
-        <el-table-column label="操作" width="100" fixed="right">
-          <template #default="{ row }">
-            <el-button
-              v-if="row.status === 'link_ready'"
-              link
-              type="primary"
-              :disabled="!apiKey"
-              @click="verifySingle(row)"
+      <CardContent class="space-y-6">
+        <!-- 批量操作区 -->
+        <div class="grid grid-cols-1 gap-4 md:grid-cols-12">
+          <div class="md:col-span-6">
+            <TextInput
+              v-model="apiKey"
+              type="password"
+              placeholder="SheerID API Key"
+              show-password
             >
-              <el-icon><Check /></el-icon>
-            </el-button>
-            <el-button link type="info" @click="showDetails(row)">
-              <el-icon><InfoFilled /></el-icon>
-            </el-button>
-          </template>
-        </el-table-column>
-      </el-table>
-    </el-card>
+              <template #prefix>
+                <Icon><Key /></Icon>
+              </template>
+            </TextInput>
+            <div class="mt-1 text-xs text-muted-foreground">用于批量验证 SheerID 链接</div>
+          </div>
+
+          <div class="md:col-span-3">
+            <NumberInput
+              v-model="threadCount"
+              :min="1"
+              :max="10"
+              controls-position="right"
+              class="w-full"
+              placeholder="并发数"
+            />
+          </div>
+
+          <div class="md:col-span-3">
+            <Button
+               variant="default" type="button"
+              class="w-full"
+              :disabled="!selectedAccounts.length || !apiKey || loading"
+              :loading="loading"
+              @click="startVerification"
+            >
+              <Icon><CircleCheck /></Icon>
+              <span class="ml-1.5">批量验证选中</span>
+            </Button>
+          </div>
+        </div>
+
+        <!-- 统计面板 -->
+        <div class="grid grid-cols-2 gap-4 sm:grid-cols-4">
+          <div class="rounded-xl bg-gradient-to-br from-indigo-500 to-fuchsia-500 p-5 text-center text-white shadow-sm">
+            <div class="text-3xl font-bold leading-none">{{ stats.link_ready }}</div>
+            <div class="mt-1 text-sm text-white/90">待验证</div>
+          </div>
+          <div class="rounded-xl bg-gradient-to-br from-emerald-500 to-cyan-400 p-5 text-center text-white shadow-sm">
+            <div class="text-3xl font-bold leading-none">{{ stats.verified }}</div>
+            <div class="mt-1 text-sm text-white/90">已验证</div>
+          </div>
+          <div class="rounded-xl bg-gradient-to-br from-rose-500 to-amber-400 p-5 text-center text-white shadow-sm">
+            <div class="text-3xl font-bold leading-none">{{ stats.verifying }}</div>
+            <div class="mt-1 text-sm text-white/90">验证中</div>
+          </div>
+          <div class="rounded-xl bg-gradient-to-br from-orange-500 to-pink-500 p-5 text-center text-white shadow-sm">
+            <div class="text-3xl font-bold leading-none">{{ stats.failed }}</div>
+            <div class="mt-1 text-sm text-white/90">验证失败</div>
+          </div>
+        </div>
+
+        <!-- 账号列表 -->
+        <DataTable
+          :data="accounts"
+          v-loading="loading"
+          @selection-change="handleSelectionChange"
+          stripe
+          class="w-full"
+        >
+          <DataColumn type="selection" width="55" />
+          <DataColumn prop="email" label="邮箱" min-width="200">
+            <template #default="{ row }">
+              <Tag size="small">{{ row.email }}</Tag>
+            </template>
+          </DataColumn>
+          <DataColumn prop="status" label="状态" width="120">
+            <template #default="{ row }">
+              <Tag :type="getStatusType(row.status)" size="small">
+                {{ getStatusText(row.status) }}
+              </Tag>
+            </template>
+          </DataColumn>
+          <DataColumn prop="verification_link" label="SheerID 链接" min-width="250">
+            <template #default="{ row }">
+              <div v-if="row.verification_link" class="max-w-[250px] truncate">
+                <a :href="row.verification_link" target="_blank" class="text-primary hover:underline">
+                  {{ row.verification_link }}
+                </a>
+              </div>
+              <span v-else class="text-muted-foreground">未提取</span>
+            </template>
+          </DataColumn>
+          <DataColumn prop="updated_at" label="更新时间" width="180">
+            <template #default="{ row }">
+              {{ formatTime(row.updated_at) }}
+            </template>
+          </DataColumn>
+          <DataColumn label="操作" width="100" fixed="right">
+            <template #default="{ row }">
+              <Button
+                v-if="row.status === 'link_ready'"
+                link
+                 variant="default" type="button"
+                :disabled="!apiKey"
+                @click="verifySingle(row)"
+              >
+                <Icon><Check /></Icon>
+              </Button>
+              <Button link  variant="secondary" type="button" @click="showDetails(row)">
+                <Icon><InfoFilled /></Icon>
+              </Button>
+            </template>
+          </DataColumn>
+        </DataTable>
+      </CardContent>
+    </Card>
 
     <!-- 日志对话框 -->
-    <el-dialog
+    <Modal
       v-model="logDialog"
       title="验证日志"
       width="800px"
     >
-      <el-scrollbar height="400px">
-        <div v-for="(log, index) in logs" :key="index" class="log-item">
-          <el-tag :type="log.type === 'error' ? 'danger' : 'info'" size="small">
+      <Scrollbar height="400px">
+        <div v-for="(log, index) in logs" :key="index" class="border-b border-border p-2.5">
+          <Tag :type="log.type === 'error' ? 'danger' : 'info'" size="small">
             {{ log.timestamp }}
-          </el-tag>
-          <span class="log-message">{{ log.message }}</span>
+          </Tag>
+          <span class="ml-2 text-sm text-foreground">{{ log.message }}</span>
         </div>
-        <el-empty v-if="logs.length === 0" description="暂无日志" />
-      </el-scrollbar>
-    </el-dialog>
+        <div v-if="logs.length === 0" class="p-8 text-center">
+          <div class="text-sm font-medium text-foreground">暂无日志</div>
+          <div class="mt-1 text-xs text-muted-foreground">开始验证后会在这里显示过程记录</div>
+        </div>
+      </Scrollbar>
+    </Modal>
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, reactive, onMounted } from 'vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessage, ElMessageBox } from '@/lib/element'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import {
   Check,
   Refresh,
   Key,
   CircleCheck,
   InfoFilled
-} from '@element-plus/icons-vue'
+} from '@/icons'
 import { getGoogleAccounts, createGoogleTask } from '@/api/google_business'
 
 interface Account {
@@ -330,90 +332,3 @@ onMounted(() => {
   loadAccounts()
 })
 </script>
-
-<style scoped lang="scss">
-.sheerid-manage {
-  padding: 20px;
-
-  .card-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-
-    .header-left {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-
-      .header-title {
-        font-weight: bold;
-        font-size: 16px;
-      }
-    }
-  }
-
-  .input-hint {
-    font-size: 12px;
-    color: #909399;
-    margin-top: 5px;
-  }
-
-  .stat-card {
-    text-align: center;
-    padding: 20px;
-    color: white;
-
-    &.info-stat {
-      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-    }
-
-    &.success-stat {
-      background: linear-gradient(135deg, #43e97b 0%, #38f9d7 100%);
-    }
-
-    &.warning-stat {
-      background: linear-gradient(135deg, #fa709a 0%, #fee140 100%);
-    }
-
-    &.danger-stat {
-      background: linear-gradient(135deg, #ff6a00 0%, #ee0979 100%);
-    }
-
-    .stat-number {
-      font-size: 32px;
-      font-weight: bold;
-      margin-bottom: 5px;
-    }
-
-    .stat-label {
-      font-size: 14px;
-      opacity: 0.9;
-    }
-  }
-
-  .link-cell {
-    max-width: 250px;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-
-    a {
-      color: #409EFF;
-      text-decoration: none;
-
-      &:hover {
-        text-decoration: underline;
-      }
-    }
-  }
-
-  .log-item {
-    padding: 10px;
-    border-bottom: 1px solid #EBEEF5;
-
-    .log-message {
-      margin-left: 10px;
-    }
-  }
-}
-</style>

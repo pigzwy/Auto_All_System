@@ -1,159 +1,164 @@
 <template>
-  <div class="google-business-task-detail">
-    <el-page-header @back="$router.push('/admin/google-business/tasks')" :content="`任务详情 #${taskId}`" />
+  <div class="space-y-6 p-5">
+    <Card class="shadow-sm">
+      <CardContent class="px-4 py-3">
+        <PageHeader @back="$router.push('/admin/google-business/tasks')" :content="`任务详情 #${taskId}`" />
+      </CardContent>
+    </Card>
 
-    <el-row :gutter="20">
-      <!-- 任务信息 -->
-      <el-col :span="24">
-        <el-card v-loading="loading">
-          <template #header>
-            <div class="card-header">
-              <span>任务信息</span>
-              <div>
-                <el-button
+    <div class="space-y-6">
+      <div v-loading="loading">
+        <Card class="shadow-sm">
+          <CardHeader class="pb-3">
+            <div class="flex items-center justify-between gap-4">
+              <CardTitle class="text-base">任务信息</CardTitle>
+              <div class="flex items-center gap-2">
+                <Button
                   v-if="task.status === 'running'"
-                  type="warning"
+                   variant="secondary" type="button"
                   @click="cancelTask"
                 >
                   取消任务
-                </el-button>
-                <el-button type="primary" @click="loadTask">
-                  <el-icon><Refresh /></el-icon>
+                </Button>
+                <Button  variant="default" type="button" @click="loadTask">
+                  <Icon><Refresh /></Icon>
                   刷新
-                </el-button>
+                </Button>
               </div>
             </div>
-          </template>
+          </CardHeader>
 
-          <el-descriptions :column="3" border>
-            <el-descriptions-item label="任务ID">
+          <CardContent class="space-y-5">
+            <Descriptions :column="3" border>
+            <DescriptionsItem label="任务ID">
               {{ task.id }}
-            </el-descriptions-item>
-            <el-descriptions-item label="任务类型">
-              <el-tag :type="getTaskTypeColor(task.task_type)" size="small">
+            </DescriptionsItem>
+            <DescriptionsItem label="任务类型">
+              <Tag :type="getTaskTypeColor(task.task_type)" size="small">
                 {{ getTaskTypeName(task.task_type) }}
-              </el-tag>
-            </el-descriptions-item>
-            <el-descriptions-item label="状态">
-              <el-tag :type="getStatusColor(task.status)" size="small">
+              </Tag>
+            </DescriptionsItem>
+            <DescriptionsItem label="状态">
+              <Tag :type="getStatusColor(task.status)" size="small">
                 {{ getStatusName(task.status) }}
-              </el-tag>
-            </el-descriptions-item>
+              </Tag>
+            </DescriptionsItem>
 
-            <el-descriptions-item label="总账号数">
+            <DescriptionsItem label="总账号数">
               {{ task.total_count }}
-            </el-descriptions-item>
-            <el-descriptions-item label="成功数">
-              <span style="color: #67C23A; font-weight: bold;">{{ task.success_count }}</span>
-            </el-descriptions-item>
-            <el-descriptions-item label="失败数">
-              <span style="color: #F56C6C; font-weight: bold;">{{ task.failed_count }}</span>
-            </el-descriptions-item>
+            </DescriptionsItem>
+            <DescriptionsItem label="成功数">
+              <span class="font-semibold text-emerald-600">{{ task.success_count }}</span>
+            </DescriptionsItem>
+            <DescriptionsItem label="失败数">
+              <span class="font-semibold text-rose-600">{{ task.failed_count }}</span>
+            </DescriptionsItem>
 
-            <el-descriptions-item label="总费用">
-              <span style="color: #E6A23C; font-weight: bold;">{{ task.total_cost }} 积分</span>
-            </el-descriptions-item>
-            <el-descriptions-item label="创建时间">
+            <DescriptionsItem label="总费用">
+              <span class="font-semibold text-amber-600">{{ task.total_cost }} 积分</span>
+            </DescriptionsItem>
+            <DescriptionsItem label="创建时间">
               {{ task.created_at }}
-            </el-descriptions-item>
-            <el-descriptions-item label="开始时间">
+            </DescriptionsItem>
+            <DescriptionsItem label="开始时间">
               {{ task.started_at || '-' }}
-            </el-descriptions-item>
+            </DescriptionsItem>
 
-            <el-descriptions-item label="完成时间">
+            <DescriptionsItem label="完成时间">
               {{ task.completed_at || '-' }}
-            </el-descriptions-item>
-            <el-descriptions-item label="耗时">
+            </DescriptionsItem>
+            <DescriptionsItem label="耗时">
               {{ getDuration(task) }}
-            </el-descriptions-item>
-            <el-descriptions-item label="错误信息">
+            </DescriptionsItem>
+            <DescriptionsItem label="错误信息">
               {{ task.error_message || '-' }}
-            </el-descriptions-item>
-          </el-descriptions>
+            </DescriptionsItem>
+          </Descriptions>
 
           <!-- 进度条 -->
-          <div style="margin-top: 20px;">
-            <el-progress
+          <div class="mt-5">
+            <ProgressBar
               :percentage="getProgress(task)"
               :status="task.status === 'completed' ? 'success' : task.status === 'failed' ? 'exception' : undefined"
             >
               <template #default="{ percentage }">
                 <span>{{ percentage }}% ({{ task.success_count + task.failed_count }} / {{ task.total_count }})</span>
               </template>
-            </el-progress>
+            </ProgressBar>
           </div>
-        </el-card>
-      </el-col>
+          </CardContent>
+        </Card>
+      </div>
 
       <!-- 任务账号列表 -->
-      <el-col :span="24" style="margin-top: 20px;">
-        <el-card>
-          <template #header>
-            <div class="card-header">
-              <span>任务账号列表</span>
-              <el-radio-group v-model="accountStatusFilter" size="small" @change="loadTaskAccounts">
-                <el-radio-button label="">全部</el-radio-button>
-                <el-radio-button label="pending">待处理</el-radio-button>
-                <el-radio-button label="running">运行中</el-radio-button>
-                <el-radio-button label="completed">已完成</el-radio-button>
-                <el-radio-button label="failed">失败</el-radio-button>
-              </el-radio-group>
-            </div>
-          </template>
+      <Card class="shadow-sm">
+        <CardHeader class="pb-3">
+          <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <CardTitle class="text-base">任务账号列表</CardTitle>
+            <RadioGroup v-model="accountStatusFilter" size="small" @change="loadTaskAccounts">
+              <RadioButton label="">全部</RadioButton>
+              <RadioButton label="pending">待处理</RadioButton>
+              <RadioButton label="running">运行中</RadioButton>
+              <RadioButton label="completed">已完成</RadioButton>
+              <RadioButton label="failed">失败</RadioButton>
+            </RadioGroup>
+          </div>
+        </CardHeader>
 
-          <el-table
+        <CardContent>
+          <DataTable
             v-loading="accountsLoading"
             :data="taskAccounts"
-            style="width: 100%"
+            class="w-full"
           >
-            <el-table-column prop="id" label="ID" width="80" />
+            <DataColumn prop="id" label="ID" width="80" />
             
-            <el-table-column prop="google_account.email" label="账号邮箱" min-width="200">
+            <DataColumn prop="google_account.email" label="账号邮箱" min-width="200">
               <template #default="{ row }">
                 {{ row.google_account?.email || '-' }}
               </template>
-            </el-table-column>
+            </DataColumn>
 
-            <el-table-column prop="status" label="状态" width="120">
+            <DataColumn prop="status" label="状态" width="120">
               <template #default="{ row }">
-                <el-tag :type="getAccountStatusColor(row.status)" size="small">
+                <Tag :type="getAccountStatusColor(row.status)" size="small">
                   {{ getAccountStatusName(row.status) }}
-                </el-tag>
+                </Tag>
               </template>
-            </el-table-column>
+            </DataColumn>
 
-            <el-table-column prop="result_message" label="结果" min-width="200" />
+            <DataColumn prop="result_message" label="结果" min-width="200" />
 
-            <el-table-column prop="cost" label="费用" width="100">
+            <DataColumn prop="cost" label="费用" width="100">
               <template #default="{ row }">
-                <span style="color: #E6A23C;">{{ row.cost }}</span>
+                <span class="text-amber-600">{{ row.cost }}</span>
               </template>
-            </el-table-column>
+            </DataColumn>
 
-            <el-table-column prop="started_at" label="开始时间" width="180" />
+            <DataColumn prop="started_at" label="开始时间" width="180" />
             
-            <el-table-column prop="completed_at" label="完成时间" width="180" />
+            <DataColumn prop="completed_at" label="完成时间" width="180" />
 
-            <el-table-column label="操作" width="150">
+            <DataColumn label="操作" width="150">
               <template #default="{ row }">
-                <el-button size="small" @click="viewAccountDetail(row)">
+                <Button size="small" @click="viewAccountDetail(row)">
                   查看详情
-                </el-button>
-                <el-button
+                </Button>
+                <Button
                   v-if="row.status === 'failed'"
                   size="small"
-                  type="success"
+                   variant="default" type="button"
                   @click="retryAccount(row.id)"
                 >
                   重试
-                </el-button>
+                </Button>
               </template>
-            </el-table-column>
-          </el-table>
+            </DataColumn>
+          </DataTable>
 
           <!-- 分页 -->
-          <div class="pagination">
-            <el-pagination
+          <div class="mt-5 flex justify-end">
+            <Paginator
               v-model:current-page="accountPagination.page"
               v-model:page-size="accountPagination.page_size"
               :page-sizes="[10, 20, 50]"
@@ -163,46 +168,46 @@
               @current-change="loadTaskAccounts"
             />
           </div>
-        </el-card>
-      </el-col>
+        </CardContent>
+      </Card>
 
       <!-- 任务日志 -->
-      <el-col :span="24" style="margin-top: 20px;">
-        <el-card>
-          <template #header>
-            <div class="card-header">
-              <span>任务日志</span>
-              <el-button size="small" @click="loadTaskLogs">
-                <el-icon><Refresh /></el-icon>
-                刷新
-              </el-button>
-            </div>
-          </template>
+      <Card class="shadow-sm">
+        <CardHeader class="pb-3">
+          <div class="flex items-center justify-between gap-4">
+            <CardTitle class="text-base">任务日志</CardTitle>
+            <Button size="small" @click="loadTaskLogs">
+              <Icon><Refresh /></Icon>
+              刷新
+            </Button>
+          </div>
+        </CardHeader>
 
-          <el-table
+        <CardContent>
+          <DataTable
             v-loading="logsLoading"
             :data="taskLogs"
-            style="width: 100%"
+            class="w-full"
             max-height="400"
           >
-            <el-table-column prop="created_at" label="时间" width="180" />
+            <DataColumn prop="created_at" label="时间" width="180" />
             
-            <el-table-column prop="level" label="级别" width="100">
+            <DataColumn prop="level" label="级别" width="100">
               <template #default="{ row }">
-                <el-tag :type="getLogLevelColor(row.level)" size="small">
+                <Tag :type="getLogLevelColor(row.level)" size="small">
                   {{ row.level }}
-                </el-tag>
+                </Tag>
               </template>
-            </el-table-column>
+            </DataColumn>
 
-            <el-table-column prop="message" label="消息" min-width="400" />
+            <DataColumn prop="message" label="消息" min-width="400" />
 
-            <el-table-column prop="account_email" label="账号" width="200" />
-          </el-table>
+            <DataColumn prop="account_email" label="账号" width="200" />
+          </DataTable>
 
           <!-- 分页 -->
-          <div class="pagination">
-            <el-pagination
+          <div class="mt-5 flex justify-end">
+            <Paginator
               v-model:current-page="logPagination.page"
               v-model:page-size="logPagination.page_size"
               :page-sizes="[20, 50, 100]"
@@ -212,55 +217,56 @@
               @current-change="loadTaskLogs"
             />
           </div>
-        </el-card>
-      </el-col>
-    </el-row>
+        </CardContent>
+      </Card>
+    </div>
 
     <!-- 账号详情对话框 -->
-    <el-dialog
+    <Modal
       v-model="accountDetailVisible"
       title="账号详情"
       width="600px"
     >
-      <el-descriptions :column="1" border>
-        <el-descriptions-item label="账号邮箱">
+      <Descriptions :column="1" border>
+        <DescriptionsItem label="账号邮箱">
           {{ selectedAccount?.google_account?.email }}
-        </el-descriptions-item>
-        <el-descriptions-item label="浏览器ID">
+        </DescriptionsItem>
+        <DescriptionsItem label="浏览器ID">
           {{ selectedAccount?.browser_id || '-' }}
-        </el-descriptions-item>
-        <el-descriptions-item label="状态">
-          <el-tag :type="getAccountStatusColor(selectedAccount?.status)" size="small">
+        </DescriptionsItem>
+        <DescriptionsItem label="状态">
+          <Tag :type="getAccountStatusColor(selectedAccount?.status)" size="small">
             {{ getAccountStatusName(selectedAccount?.status) }}
-          </el-tag>
-        </el-descriptions-item>
-        <el-descriptions-item label="结果消息">
+          </Tag>
+        </DescriptionsItem>
+        <DescriptionsItem label="结果消息">
           {{ selectedAccount?.result_message || '-' }}
-        </el-descriptions-item>
-        <el-descriptions-item label="错误消息">
+        </DescriptionsItem>
+        <DescriptionsItem label="错误消息">
           {{ selectedAccount?.error_message || '-' }}
-        </el-descriptions-item>
-        <el-descriptions-item label="费用">
+        </DescriptionsItem>
+        <DescriptionsItem label="费用">
           {{ selectedAccount?.cost }} 积分
-        </el-descriptions-item>
-        <el-descriptions-item label="开始时间">
+        </DescriptionsItem>
+        <DescriptionsItem label="开始时间">
           {{ selectedAccount?.started_at || '-' }}
-        </el-descriptions-item>
-        <el-descriptions-item label="完成时间">
+        </DescriptionsItem>
+        <DescriptionsItem label="完成时间">
           {{ selectedAccount?.completed_at || '-' }}
-        </el-descriptions-item>
-        <el-descriptions-item label="结果数据">
-          <pre style="max-height: 200px; overflow: auto;">{{ JSON.stringify(selectedAccount?.result_data, null, 2) }}</pre>
-        </el-descriptions-item>
-      </el-descriptions>
-    </el-dialog>
+        </DescriptionsItem>
+        <DescriptionsItem label="结果数据">
+          <pre class="mt-2 max-h-[200px] overflow-auto whitespace-pre-wrap break-words rounded-md bg-muted/30 p-3 text-xs text-foreground">{{ JSON.stringify(selectedAccount?.result_data, null, 2) }}</pre>
+        </DescriptionsItem>
+      </Descriptions>
+    </Modal>
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted } from 'vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessage, ElMessageBox } from '@/lib/element'
 import { useRoute } from 'vue-router'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import {
   getTask,
   getTaskAccounts,
@@ -501,35 +507,3 @@ onMounted(async () => {
   })
 })
 </script>
-
-<style scoped lang="scss">
-.google-business-task-detail {
-  padding: 20px;
-
-  .el-page-header {
-    margin-bottom: 20px;
-  }
-
-  .card-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-  }
-
-  .pagination {
-    margin-top: 20px;
-    display: flex;
-    justify-content: flex-end;
-  }
-
-  pre {
-    white-space: pre-wrap;
-    word-wrap: break-word;
-    background: #f5f7fa;
-    padding: 10px;
-    border-radius: 4px;
-    font-size: 12px;
-  }
-}
-</style>
-

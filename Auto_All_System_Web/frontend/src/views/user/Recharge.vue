@@ -1,150 +1,177 @@
 <template>
-  <div class="recharge-page">
-    <el-card shadow="hover" class="page-header">
-      <h1>💰 账户充值</h1>
-      <p class="subtitle">当前余额: <span class="balance">¥{{ balance }}</span></p>
-    </el-card>
+  <div class="space-y-6">
+    <Card class="bg-card text-card-foreground">
+      <CardHeader>
+        <CardTitle class="text-3xl">💰 账户充值</CardTitle>
+        <CardDescription class="text-base flex items-center gap-2">
+          当前余额: <span class="text-emerald-600 font-bold text-xl">¥{{ balance }}</span>
+        </CardDescription>
+      </CardHeader>
+    </Card>
 
-    <el-row :gutter="20">
-      <el-col :span="16">
-        <el-card shadow="hover" header="充值金额">
-          <div class="amount-selection">
-            <div 
-              v-for="amount in amountOptions" 
-              :key="amount"
-              class="amount-card"
-              :class="{ active: selectedAmount === amount }"
-              @click="selectedAmount = amount"
-            >
-              <div class="amount">¥{{ amount }}</div>
-              <div class="bonus" v-if="getBonus(amount)">
-                送 ¥{{ getBonus(amount) }}
-              </div>
-            </div>
-          </div>
-
-          <el-form style="margin-top: 24px;">
-            <el-form-item label="自定义金额">
-              <el-input 
-                v-model.number="customAmount" 
-                placeholder="请输入充值金额"
-                @focus="selectedAmount = 0"
+    <div class="grid gap-6 md:grid-cols-3">
+      <div class="md:col-span-2 space-y-6">
+        <Card class="bg-card text-card-foreground">
+          <CardHeader>
+            <CardTitle>充值金额</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div class="grid grid-cols-3 gap-4">
+              <div
+                v-for="amount in amountOptions"
+                :key="amount"
+                class="relative flex flex-col items-center justify-center p-6 border-2 rounded-lg cursor-pointer transition-all hover:-translate-y-1 hover:shadow-md"
+                :class="selectedAmount === amount ? 'border-primary bg-primary/5' : 'border-border bg-card hover:border-primary/50'"
+                @click="selectedAmount = amount; customAmount = undefined"
               >
-                <template #prepend>¥</template>
-              </el-input>
-            </el-form-item>
-          </el-form>
-
-          <el-divider />
-
-          <h3>支付方式</h3>
-          <div class="payment-methods">
-            <div 
-              v-for="method in availablePaymentMethods" 
-              :key="method.gateway"
-              class="payment-card"
-              :class="{ active: selectedPayment === method.gateway }"
-              @click="selectedPayment = method.gateway"
-            >
-              <div class="payment-icon">{{ method.icon }}</div>
-              <div class="payment-name">{{ method.name }}</div>
-            </div>
-          </div>
-          
-          <!-- 卡密充值表单 -->
-          <div v-if="selectedPayment === 'card_code'" class="card-code-form">
-            <el-form style="margin-top: 20px;">
-              <el-form-item label="充值卡密">
-                <el-input 
-                  v-model="cardCode" 
-                  placeholder="请输入卡密，格式: XXXX-XXXX-XXXX-XXXX"
-                  clearable
-                >
-                  <template #prepend>🎫</template>
-                </el-input>
-              </el-form-item>
-              <el-alert 
-                title="使用卡密充值将忽略上方选择的金额，按卡密面值充值" 
-                type="info" 
-                :closable="false"
-              />
-            </el-form>
-          </div>
-        </el-card>
-      </el-col>
-
-      <el-col :span="8">
-        <el-card shadow="hover" header="订单信息">
-          <div class="order-summary">
-            <div class="summary-item">
-              <span>充值金额</span>
-              <span class="value">¥{{ finalAmount }}</span>
-            </div>
-            <div class="summary-item" v-if="bonusAmount > 0">
-              <span>赠送金额</span>
-              <span class="value bonus-value">+¥{{ bonusAmount }}</span>
-            </div>
-            <el-divider />
-            <div class="summary-item total">
-              <span>实际到账</span>
-              <span class="value">¥{{ totalAmount }}</span>
-            </div>
-          </div>
-
-          <el-button 
-            type="primary" 
-            size="large" 
-            style="width: 100%; margin-top: 20px;"
-            :disabled="!canSubmit"
-            :loading="loading"
-            @click="handleRecharge"
-          >
-            立即充值
-          </el-button>
-
-          <div class="notice">
-            <el-icon><InfoFilled /></el-icon>
-            <div>
-              <p>充值说明：</p>
-              <ul>
-                <li>充值后立即到账</li>
-                <li>单笔最低充值10元</li>
-                <li>充值金额不可退款</li>
-                <li>遇到问题请联系客服</li>
-              </ul>
-            </div>
-          </div>
-        </el-card>
-
-        <el-card shadow="hover" header="充值记录" style="margin-top: 20px;">
-          <el-timeline v-if="rechargeHistory.length > 0">
-            <el-timeline-item 
-              v-for="record in rechargeHistory" 
-              :key="record.id"
-              :timestamp="formatDate(record.created_at)"
-              placement="top"
-            >
-              <div class="record-item">
-                <span>充值 ¥{{ record.amount }}</span>
-                <el-tag type="success" size="small">已完成</el-tag>
+                <div class="text-2xl font-bold">¥{{ amount }}</div>
+                <div class="text-xs text-amber-500 font-medium mt-1" v-if="getBonus(amount)">
+                  送 ¥{{ getBonus(amount) }}
+                </div>
               </div>
-            </el-timeline-item>
-          </el-timeline>
-          <el-empty v-else description="暂无充值记录" :image-size="80" />
-        </el-card>
-      </el-col>
-    </el-row>
+            </div>
+
+            <div class="mt-6">
+              <label class="text-sm font-medium mb-2 block">自定义金额</label>
+              <div class="relative">
+                <span class="absolute left-3 top-2.5 text-muted-foreground">¥</span>
+                <Input
+                  v-model.number="customAmount"
+                  type="number"
+                  placeholder="请输入充值金额"
+                  class="pl-8"
+                  @focus="selectedAmount = 0"
+                />
+              </div>
+            </div>
+
+            <div class="mt-8">
+              <h3 class="text-lg font-semibold mb-4">支付方式</h3>
+              <div class="grid grid-cols-2 sm:grid-cols-3 gap-4">
+                <div
+                  v-for="method in availablePaymentMethods"
+                  :key="method.gateway"
+                  class="flex flex-col items-center justify-center p-4 border-2 rounded-lg cursor-pointer transition-all"
+                  :class="selectedPayment === method.gateway ? 'border-primary bg-primary/5' : 'border-border hover:border-primary/50'"
+                  @click="selectedPayment = method.gateway"
+                >
+                  <div class="text-3xl mb-2">{{ method.icon }}</div>
+                  <div class="text-sm font-medium">{{ method.name }}</div>
+                </div>
+              </div>
+            </div>
+
+            <div v-if="selectedPayment === 'card_code'" class="mt-6 p-4 bg-muted/30 rounded-lg">
+              <div class="space-y-2">
+                <label class="text-sm font-medium">充值卡密</label>
+                <div class="relative">
+                  <span class="absolute left-3 top-2.5">🎫</span>
+                  <Input
+                    v-model="cardCode"
+                    placeholder="请输入卡密，格式: XXXX-XXXX-XXXX-XXXX"
+                    class="pl-9"
+                  />
+                </div>
+              </div>
+              <Alert class="mt-4">
+                <AlertTitle>提示</AlertTitle>
+                <AlertDescription>使用卡密充值将忽略上方选择的金额，按卡密面值充值</AlertDescription>
+              </Alert>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+
+      <div class="space-y-6">
+        <Card class="bg-card text-card-foreground">
+          <CardHeader>
+            <CardTitle>订单信息</CardTitle>
+          </CardHeader>
+          <CardContent class="space-y-4">
+            <div class="flex justify-between text-sm">
+              <span class="text-muted-foreground">充值金额</span>
+              <span class="font-bold">¥{{ finalAmount }}</span>
+            </div>
+            <div class="flex justify-between text-sm" v-if="bonusAmount > 0">
+              <span class="text-muted-foreground">赠送金额</span>
+              <span class="font-bold text-emerald-600">+¥{{ bonusAmount }}</span>
+            </div>
+            <div class="h-px bg-border my-2"></div>
+            <div class="flex justify-between items-end">
+              <span class="text-lg font-semibold">实际到账</span>
+              <span class="text-2xl font-bold text-primary">¥{{ totalAmount }}</span>
+            </div>
+
+            <Button
+              size="lg"
+              class="w-full mt-4"
+              :disabled="!canSubmit"
+              @click="handleRecharge"
+            >
+              <Loader2 v-if="loading" class="mr-2 h-4 w-4 animate-spin" />
+              立即充值
+            </Button>
+
+            <div class="mt-6 p-4 bg-amber-500/10 rounded-lg border border-amber-500/20">
+              <div class="flex gap-2">
+                <Info class="h-5 w-5 text-amber-600 shrink-0" />
+                <div>
+                  <p class="text-sm font-semibold text-amber-700 mb-1">充值说明：</p>
+                  <ul class="text-xs text-amber-700/80 list-disc pl-4 space-y-1">
+                    <li>充值后立即到账</li>
+                    <li>单笔最低充值10元</li>
+                    <li>充值金额不可退款</li>
+                    <li>遇到问题请联系客服</li>
+                  </ul>
+                </div>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card class="bg-card text-card-foreground">
+          <CardHeader>
+            <CardTitle>充值记录</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div v-if="rechargeHistory.length > 0" class="space-y-6 relative pl-4 border-l border-border ml-2">
+              <div v-for="record in rechargeHistory" :key="record.id" class="relative pl-6">
+                <div class="absolute -left-[21px] top-1 h-3 w-3 rounded-full border-2 border-primary bg-background"></div>
+                <div class="text-sm text-muted-foreground mb-1">{{ formatDate(record.created_at) }}</div>
+                <div class="flex items-center justify-between p-3 rounded-lg border border-border bg-muted/20">
+                  <span class="font-medium">充值 ¥{{ record.amount }}</span>
+                  <Badge variant="default" class="bg-emerald-600 hover:bg-emerald-700">已完成</Badge>
+                </div>
+              </div>
+            </div>
+            <div v-else class="py-8 text-center text-sm text-muted-foreground">暂无充值记录</div>
+          </CardContent>
+        </Card>
+      </div>
+    </div>
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
-import { ElMessage } from 'element-plus'
-import { InfoFilled } from '@element-plus/icons-vue'
+import { ElMessage } from '@/lib/element'
+import { Info, Loader2 } from 'lucide-vue-next'
 import { balanceApi, type BalanceLog } from '@/api/balance'
 import { paymentsApi, type PaymentConfig } from '@/api/payments'
 import type { UserBalance } from '@/types'
 import dayjs from 'dayjs'
+
+import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from '@/components/ui/card'
+import { Input } from '@/components/ui/input'
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 
 const balance = ref('0.00')
 const selectedAmount = ref(0)
@@ -295,165 +322,3 @@ onMounted(() => {
   fetchPaymentMethods()
 })
 </script>
-
-<style scoped lang="scss">
-.recharge-page {
-  .page-header {
-    margin-bottom: 20px;
-
-    h1 {
-      margin: 0 0 8px 0;
-      font-size: 28px;
-    }
-
-    .subtitle {
-      margin: 0;
-      color: #909399;
-      font-size: 14px;
-
-      .balance {
-        color: #67c23a;
-        font-size: 24px;
-        font-weight: bold;
-        margin-left: 8px;
-      }
-    }
-  }
-
-  .amount-selection {
-    display: grid;
-    grid-template-columns: repeat(3, 1fr);
-    gap: 16px;
-
-    .amount-card {
-      padding: 20px;
-      border: 2px solid #dcdfe6;
-      border-radius: 8px;
-      text-align: center;
-      cursor: pointer;
-      transition: all 0.3s;
-
-      &:hover {
-        border-color: #409eff;
-        transform: translateY(-2px);
-      }
-
-      &.active {
-        border-color: #409eff;
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        color: white;
-      }
-
-      .amount {
-        font-size: 24px;
-        font-weight: bold;
-        margin-bottom: 8px;
-      }
-
-      .bonus {
-        font-size: 12px;
-        color: #f56c6c;
-      }
-
-      &.active .bonus {
-        color: #ffd700;
-      }
-    }
-  }
-
-  .payment-methods {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
-    gap: 16px;
-
-    .payment-card {
-      padding: 16px;
-      border: 2px solid #dcdfe6;
-      border-radius: 8px;
-      text-align: center;
-      cursor: pointer;
-      transition: all 0.3s;
-
-      &:hover {
-        border-color: #409eff;
-      }
-
-      &.active {
-        border-color: #409eff;
-        background: #ecf5ff;
-      }
-
-      .payment-icon {
-        font-size: 32px;
-        margin-bottom: 8px;
-      }
-
-      .payment-name {
-        font-size: 14px;
-      }
-    }
-  }
-
-  .order-summary {
-    .summary-item {
-      display: flex;
-      justify-content: space-between;
-      margin-bottom: 16px;
-      font-size: 14px;
-
-      .value {
-        font-weight: bold;
-        color: #303133;
-      }
-
-      .bonus-value {
-        color: #67c23a;
-      }
-
-      &.total {
-        font-size: 18px;
-        color: #409eff;
-
-        .value {
-          color: #409eff;
-          font-size: 24px;
-        }
-      }
-    }
-  }
-
-  .notice {
-    margin-top: 20px;
-    padding: 12px;
-    background: #fef0f0;
-    border-radius: 8px;
-    font-size: 12px;
-    color: #909399;
-    display: flex;
-    gap: 8px;
-
-    ul {
-      margin: 4px 0 0 0;
-      padding-left: 20px;
-
-      li {
-        margin-bottom: 4px;
-      }
-    }
-  }
-
-  .record-item {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-  }
-
-  .card-code-form {
-    margin-top: 16px;
-    padding: 16px;
-    background: #f5f7fa;
-    border-radius: 8px;
-  }
-}
-</style>
-

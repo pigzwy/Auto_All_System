@@ -1,652 +1,1017 @@
 <template>
-  <div class="google-accounts-module">
-    <div class="module-header">
-      <div class="left-panel">
-        <h2>谷歌账号管理</h2>
+  <div class="space-y-6">
+    <div class="flex items-end justify-between gap-4">
+      <div>
+        <h2 class="text-2xl font-semibold text-foreground">谷歌账号管理</h2>
+        <p class="mt-1 text-sm text-muted-foreground">批量导入、分组筛选、任务派发与日志查看</p>
       </div>
-      <div class="right-panel">
-        <el-button-group>
-          <el-button type="primary" @click="showDialog = true">
-            <el-icon><Plus /></el-icon>
-            添加账号
-          </el-button>
-          <el-button type="success" @click="showImportDialog = true">
-            <el-icon><Upload /></el-icon>
-            批量导入
-          </el-button>
-          <el-dropdown class="ml-2" trigger="click" @command="handleExportCommand">
-             <el-button type="primary" plain>
-               <el-icon class="mr-1"><Download /></el-icon> 导出 <el-icon class="el-icon--right"><ArrowDown /></el-icon>
-             </el-button>
-             <template #dropdown>
-               <el-dropdown-menu>
-                 <el-dropdown-item command="csv">导出 CSV</el-dropdown-item>
-                 <el-dropdown-item command="txt">导出 TXT</el-dropdown-item>
-               </el-dropdown-menu>
-             </template>
-          </el-dropdown>
-        </el-button-group>
+      <div class="flex items-center gap-2">
+        <Button size="sm" class="gap-2" @click="showDialog = true">
+          <PlusIcon class="h-4 w-4" />
+          添加账号
+        </Button>
+        <Button variant="secondary" size="sm" class="gap-2" @click="showImportDialog = true">
+          <UploadIcon class="h-4 w-4" />
+          批量导入
+        </Button>
+        <DropdownMenu>
+          <DropdownMenuTrigger as-child>
+            <Button variant="outline" size="sm" class="gap-2">
+              <DownloadIcon class="h-4 w-4" />
+              导出
+              <ChevronDownIcon class="h-4 w-4 opacity-70" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" class="w-36">
+            <DropdownMenuItem @select="handleExportCommand('csv')">导出 CSV</DropdownMenuItem>
+            <DropdownMenuItem @select="handleExportCommand('txt')">导出 TXT</DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
       </div>
     </div>
 
     <!-- 筛选和批量操作栏 -->
-    <el-card shadow="never" class="mb-4 operation-panel">
-      <div class="flex-row">
-        <div class="filters">
-          <el-select v-model="filterType" placeholder="账号状态筛选" clearable @change="fetchAccounts" style="width: 160px">
-            <el-option label="全部" value="" />
-            <el-option label="无资格" value="ineligible" />
-            <el-option label="未绑卡" value="unbound_card" />
-            <el-option label="成功" value="success" />
-            <el-option label="其他" value="other" />
-          </el-select>
-          <el-select 
-            v-model="filterGroup" 
-            placeholder="分组筛选" 
-            clearable 
-            @change="fetchAccounts" 
-            style="width: 180px; margin-left: 10px;"
-          >
-            <el-option label="全部分组" value="" />
-            <el-option label="未分组" value="null" />
-            <el-option 
-              v-for="group in groupList" 
-              :key="group.id" 
-              :label="`${group.name} (${group.account_count})`" 
-              :value="group.id" 
-            />
-          </el-select>
-          <el-button @click="fetchAccounts" :icon="Refresh">刷新</el-button>
-        </div>
+    <Card class="bg-card text-card-foreground">
+      <CardContent class="p-4">
+        <div class="flex flex-wrap items-end justify-between gap-3">
+          <div class="flex flex-wrap items-end gap-3">
+            <Select :model-value="filterType" @update:modelValue="(v) => onFilterTypeChange(v)">
+              <SelectTrigger class="h-9 w-40">
+                <SelectValue placeholder="账号状态筛选" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">全部状态</SelectItem>
+                <SelectItem value="ineligible">无资格</SelectItem>
+                <SelectItem value="unbound_card">未绑卡</SelectItem>
+                <SelectItem value="success">成功</SelectItem>
+                <SelectItem value="other">其他</SelectItem>
+              </SelectContent>
+            </Select>
+
+            <Select :model-value="filterGroup" @update:modelValue="(v) => onFilterGroupChange(v)">
+              <SelectTrigger class="h-9 w-44">
+                <SelectValue placeholder="分组筛选" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">全部分组</SelectItem>
+                <SelectItem value="ungrouped">未分组</SelectItem>
+                <SelectItem
+                  v-for="group in groupList"
+                  :key="String(group.id)"
+                  :value="String(group.id)"
+                >
+                  {{ `${group.name} (${group.account_count})` }}
+                </SelectItem>
+              </SelectContent>
+            </Select>
+
+            <Button variant="outline" size="sm" class="gap-2" @click="fetchAccounts">
+              <RefreshCwIcon class="h-4 w-4" />
+              刷新
+            </Button>
+          </div>
         
-        <div class="batch-actions" v-if="selectedAccounts.length > 0">
-          <span class="selection-info">已选 {{ selectedAccounts.length }} 项</span>
+          <div v-if="selectedAccounts.length > 0" class="flex flex-wrap items-center gap-2">
+            <span class="inline-flex items-center rounded-full border border-border bg-muted/30 px-3 py-1 text-xs text-muted-foreground">
+              已选 <span class="ml-1 font-semibold text-foreground">{{ selectedAccounts.length }}</span> 项
+            </span>
           
-           <el-button-group class="ml-2">
-              <el-tooltip content="一键全自动 (登录-检测-验证-订阅)，可选增项安全设置" placement="top">
-                 <el-button type="primary" @click="openOneClickDialog">
-                   <el-icon><VideoPlay /></el-icon> 一键全自动
-                 </el-button>
-              </el-tooltip>
-           </el-button-group>
+           <Button
+             size="sm"
+             class="gap-2"
+             :title="'一键全自动 (登录-检测-验证-订阅)，可选增项安全设置'"
+             @click="openOneClickDialog"
+           >
+             <Wand2Icon class="h-4 w-4" />
+             一键全自动
+           </Button>
 
-          <el-dropdown class="ml-2" trigger="click" @command="handleBatchCommand">
-            <el-button type="warning" plain>
-              <el-icon class="mr-1"><CreditCard /></el-icon> 验证/绑卡 <el-icon class="el-icon--right"><ArrowDown /></el-icon>
-            </el-button>
-            <template #dropdown>
-              <el-dropdown-menu>
-                <el-dropdown-item command="sheerid">SheerID 验证</el-dropdown-item>
-                <el-dropdown-item command="bind_card">自动绑卡</el-dropdown-item>
-              </el-dropdown-menu>
-            </template>
-          </el-dropdown>
+          <DropdownMenu>
+            <DropdownMenuTrigger as-child>
+              <Button variant="outline" size="sm" class="gap-2">
+                <CreditCardIcon class="h-4 w-4" />
+                验证/绑卡
+                <ChevronDownIcon class="h-4 w-4 opacity-70" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" class="w-44">
+              <DropdownMenuItem @select="handleBatchCommand('sheerid')">SheerID 验证</DropdownMenuItem>
+              <DropdownMenuItem @select="handleBatchCommand('bind_card')">自动绑卡</DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
 
-          <el-dropdown class="ml-2" trigger="click" @command="handleSecurityCommand">
-            <el-button type="danger" plain>
-              <el-icon class="mr-1"><Lock /></el-icon> 安全设置 <el-icon class="el-icon--right"><ArrowDown /></el-icon>
-            </el-button>
-            <template #dropdown>
-              <el-dropdown-menu>
-                <el-dropdown-item command="change_2fa">修改 2FA</el-dropdown-item>
-                <el-dropdown-item command="change_recovery">修改辅助邮箱</el-dropdown-item>
-                <el-dropdown-item command="get_backup_codes">获取备份码</el-dropdown-item>
-                <el-dropdown-item command="one_click_update" divided>一键安全更新</el-dropdown-item>
-              </el-dropdown-menu>
-            </template>
-          </el-dropdown>
+          <DropdownMenu>
+            <DropdownMenuTrigger as-child>
+              <Button variant="outline" size="sm" class="gap-2">
+                <ShieldIcon class="h-4 w-4" />
+                安全设置
+                <ChevronDownIcon class="h-4 w-4 opacity-70" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" class="w-44">
+              <DropdownMenuItem @select="handleSecurityCommand('change_2fa')">修改 2FA</DropdownMenuItem>
+              <DropdownMenuItem @select="handleSecurityCommand('change_recovery')">修改辅助邮箱</DropdownMenuItem>
+              <DropdownMenuItem @select="handleSecurityCommand('get_backup_codes')">获取备份码</DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem @select="handleSecurityCommand('one_click_update')">一键安全更新</DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
 
-          <el-dropdown class="ml-2" trigger="click" @command="handleSubscriptionCommand">
-            <el-button type="info" plain>
-              <el-icon class="mr-1"><Monitor /></el-icon> 订阅管理 <el-icon class="el-icon--right"><ArrowDown /></el-icon>
-            </el-button>
-            <template #dropdown>
-              <el-dropdown-menu>
-                <el-dropdown-item command="verify_status">验证订阅状态</el-dropdown-item>
-                <el-dropdown-item command="click_subscribe">点击订阅按钮</el-dropdown-item>
-              </el-dropdown-menu>
-            </template>
-          </el-dropdown>
+          <DropdownMenu>
+            <DropdownMenuTrigger as-child>
+              <Button variant="outline" size="sm" class="gap-2">
+                <MonitorIcon class="h-4 w-4" />
+                订阅管理
+                <ChevronDownIcon class="h-4 w-4 opacity-70" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" class="w-44">
+              <DropdownMenuItem @select="handleSubscriptionCommand('verify_status')">验证订阅状态</DropdownMenuItem>
+              <DropdownMenuItem @select="handleSubscriptionCommand('click_subscribe')">点击订阅按钮</DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
 
-          <el-button class="ml-2" type="danger" @click="handleBulkDelete">
-            <el-icon class="mr-1"><Delete /></el-icon> 批量删除
-          </el-button>
+          <Button variant="destructive" size="sm" class="gap-2" @click="handleBulkDelete">
+            <Trash2Icon class="h-4 w-4" />
+            批量删除
+          </Button>
+          </div>
         </div>
-      </div>
-    </el-card>
+      </CardContent>
+    </Card>
 
-    <el-card shadow="hover">
-      <el-table 
-        :data="accounts" 
-        v-loading="loading" 
-        stripe 
-        @selection-change="handleSelectionChange"
-        row-key="id"
-      >
-        <el-table-column type="selection" width="55" />
-        <el-table-column prop="id" label="ID" width="80" sortable />
-        <el-table-column prop="email" label="邮箱" width="280" show-overflow-tooltip>
-          <template #default="{ row }">
-            <el-link type="primary" :underline="false" @click="viewAccount(row)">
-              {{ row.email }}
-            </el-link>
-          </template>
-        </el-table-column>
-        
-        <el-table-column label="分组" width="130">
-          <template #default="{ row }">
-            <el-tag v-if="row.group_name" type="warning" effect="plain" size="small">
-              {{ row.group_name }}
-            </el-tag>
-            <span v-else class="text-gray-400">未分组</span>
-          </template>
-        </el-table-column>
-        
-        <!-- 列表收敛：分类/状态/SheerID/Gemini订阅 移到详情弹窗展示 -->
+    <Card class="bg-card text-card-foreground">
+      <CardContent class="p-0">
+        <div class="overflow-x-auto rounded-xl border border-border">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead class="w-10">
+                  <Checkbox
+                    :checked="allSelectedOnPage || (someSelectedOnPage ? 'indeterminate' : false)"
+                    @update:checked="onToggleAllOnPage"
+                  />
+                </TableHead>
+                <TableHead class="w-20">ID</TableHead>
+                <TableHead class="min-w-[260px]">邮箱</TableHead>
+                <TableHead class="w-44">分组</TableHead>
+                <TableHead class="w-52">New-2FA</TableHead>
+                <TableHead class="w-40">Geek</TableHead>
+                <TableHead class="w-20 text-center">绑卡</TableHead>
+                <TableHead class="w-44">创建时间</TableHead>
+                <TableHead class="w-[260px] text-right">操作</TableHead>
+              </TableRow>
+            </TableHeader>
 
-        <el-table-column label="New-2FA" width="180" show-overflow-tooltip>
-          <template #default="{ row }">
-            <div class="flex flex-col items-start">
-              <code v-if="row.new_2fa_display || row.new_2fa" class="mono">{{ format2fa(row.new_2fa_display || row.new_2fa) }}</code>
-              <span v-else class="text-gray-500">-</span>
-              <span v-if="row.new_2fa_updated_at" class="text-xs text-gray-500 mt-1">
-                {{ formatDate(row.new_2fa_updated_at) }}
-              </span>
+            <TableBody>
+              <TableRow v-if="loading">
+                <TableCell colspan="9" class="py-10">
+                  <div class="flex items-center justify-center gap-2 text-sm text-muted-foreground">
+                    <Loader2Icon class="h-4 w-4 animate-spin" />
+                    加载中...
+                  </div>
+                </TableCell>
+              </TableRow>
+
+              <TableRow v-else-if="accounts.length === 0">
+                <TableCell colspan="9" class="py-10 text-center text-sm text-muted-foreground">
+                  暂无数据
+                </TableCell>
+              </TableRow>
+
+              <TableRow v-else v-for="row in accounts" :key="row.id" class="hover:bg-muted/20">
+                <TableCell>
+                  <Checkbox
+                    :checked="isRowSelected(row)"
+                    @update:checked="(v: boolean) => onToggleRow(row, v)"
+                  />
+                </TableCell>
+
+                <TableCell class="font-mono text-xs text-muted-foreground">#{{ row.id }}</TableCell>
+
+                <TableCell>
+                  <button
+                    type="button"
+                    class="max-w-[320px] truncate text-left text-primary hover:underline underline-offset-4"
+                    :title="row.email"
+                    @click="viewAccount(row)"
+                  >
+                    {{ row.email }}
+                  </button>
+                </TableCell>
+
+                <TableCell>
+                  <Badge v-if="row.group_name" variant="outline" class="rounded-full">
+                    {{ row.group_name }}
+                  </Badge>
+                  <span v-else class="text-xs text-muted-foreground">未分组</span>
+                </TableCell>
+
+                <TableCell>
+                  <div class="flex flex-col items-start gap-1">
+                    <code v-if="row.new_2fa_display || row.new_2fa" class="rounded bg-muted px-2 py-1 font-mono text-xs">
+                      {{ format2fa(row.new_2fa_display || row.new_2fa) }}
+                    </code>
+                    <span v-else class="text-xs text-muted-foreground">-</span>
+                    <span v-if="row.new_2fa_updated_at" class="text-xs text-muted-foreground">
+                      {{ formatDate(row.new_2fa_updated_at) }}
+                    </span>
+                  </div>
+                </TableCell>
+
+                <TableCell>
+                  <div class="flex flex-col items-start gap-1">
+                    <Badge :variant="row.geekez_profile_exists ? 'default' : 'secondary'" class="rounded-full">
+                      {{ row.geekez_profile_exists ? '已创建' : '未创建' }}
+                    </Badge>
+                    <Badge v-if="row.geekez_env" variant="outline" class="rounded-full">
+                      已打开 {{ row.geekez_env.debug_port || '' }}
+                    </Badge>
+                  </div>
+                </TableCell>
+
+                <TableCell class="text-center">
+                  <CheckCircle2 v-if="row.card_bound" class="inline-block h-5 w-5 text-emerald-600" />
+                  <XCircle v-else class="inline-block h-5 w-5 text-muted-foreground" />
+                </TableCell>
+
+                <TableCell class="text-muted-foreground">
+                  {{ formatDate(row.created_at) }}
+                </TableCell>
+
+                <TableCell class="text-right">
+                  <div class="inline-flex flex-wrap justify-end gap-x-3 gap-y-1">
+                    <Button variant="link" size="xs" class="h-auto p-0" @click="handleLaunchGeekez(row)">
+                      {{ getGeekezActionLabel(row) }}
+                    </Button>
+                    <Button variant="link" size="xs" class="h-auto p-0" @click="openEditDialog(row)">编辑</Button>
+                    <Button variant="link" size="xs" class="h-auto p-0 text-amber-600 hover:text-amber-600" @click="viewTasks(row)">
+                      任务日志
+                    </Button>
+                    <Button
+                      variant="link"
+                      size="xs"
+                      class="h-auto p-0 text-destructive hover:text-destructive"
+                      @click="deleteAccount(row)"
+                    >
+                      删除
+                    </Button>
+                  </div>
+                </TableCell>
+              </TableRow>
+            </TableBody>
+          </Table>
+        </div>
+
+        <div class="p-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div class="text-sm text-muted-foreground">
+            共 <span class="font-medium text-foreground">{{ total }}</span> 条
+          </div>
+
+          <div v-if="total > pageSize" class="flex flex-wrap items-center justify-end gap-2">
+            <Button variant="outline" size="sm" :disabled="currentPage <= 1" @click="goPrevPage">上一页</Button>
+            <div class="text-sm text-muted-foreground tabular-nums">
+              第 <span class="text-foreground font-medium">{{ currentPage }}</span> / {{ totalPages }} 页
             </div>
-          </template>
-        </el-table-column>
-        <el-table-column label="Geek" width="110">
-           <template #default="{ row }">
-              <div class="flex flex-col items-start gap-1">
-                 <el-tag v-if="row.geekez_profile_exists" type="primary" size="small" effect="plain">已创建</el-tag>
-                 <el-tag v-else type="info" size="small" effect="plain">未创建</el-tag>
-                 
-                 <el-tag v-if="row.geekez_env" type="success" size="small" effect="dark">
-                   已打开 {{ row.geekez_env.debug_port || '' }}
-                 </el-tag>
-              </div>
-           </template>
-        </el-table-column>
-        <el-table-column label="绑卡" width="80" align="center">
-          <template #default="{ row }">
-            <el-icon v-if="row.card_bound" color="#67c23a" :size="18"><Check /></el-icon>
-            <el-icon v-else color="#909399" :size="18"><Close /></el-icon>
-          </template>
-        </el-table-column>
-        <el-table-column prop="created_at" label="创建时间" width="160">
-          <template #default="{ row }">
-            {{ formatDate(row.created_at) }}
-          </template>
-        </el-table-column>
-        <el-table-column label="操作" width="220" fixed="right">
-          <template #default="{ row }">
-            <el-button link type="primary" size="small" @click="handleLaunchGeekez(row)">{{ getGeekezActionLabel(row) }}</el-button>
-            <el-button link type="primary" size="small" @click="openEditDialog(row)">编辑</el-button>
-            <el-button link type="warning" size="small" @click="viewTasks(row)">任务日志</el-button>
-            <el-button link type="danger" size="small" @click="deleteAccount(row)">删除</el-button>
-          </template>
-        </el-table-column>
-      </el-table>
+            <Button variant="outline" size="sm" :disabled="currentPage >= totalPages" @click="goNextPage">下一页</Button>
 
-      <el-pagination
-        v-if="total > pageSize"
-        v-model:current-page="currentPage"
-        v-model:page-size="pageSize"
-        :total="total"
-        :page-sizes="[10, 20, 50, 100]"
-        layout="total, sizes, prev, pager, next, jumper"
-        @size-change="fetchAccounts"
-        @current-change="fetchAccounts"
-        class="mt-4"
-      />
-    </el-card>
+            <Select :model-value="String(pageSize)" @update:modelValue="(v) => onPageSizeChange(v)">
+              <SelectTrigger class="h-9 w-[120px]">
+                <SelectValue placeholder="每页" />
+              </SelectTrigger>
+              <SelectContent align="end">
+                <SelectItem value="10">10 / 页</SelectItem>
+                <SelectItem value="20">20 / 页</SelectItem>
+                <SelectItem value="50">50 / 页</SelectItem>
+                <SelectItem value="100">100 / 页</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+      </CardContent>
+    </Card>
 
     <!-- 添加账号对话框 -->
-    <el-dialog v-model="showDialog" title="添加Google账号" width="500px">
-      <el-form :model="accountForm" label-width="100px">
-        <el-form-item label="邮箱" required>
-          <el-input v-model="accountForm.email" placeholder="请输入Google邮箱" />
-        </el-form-item>
-        <el-form-item label="密码" required>
-          <el-input v-model="accountForm.password" type="password" placeholder="请输入密码" show-password />
-        </el-form-item>
-        <el-form-item label="恢复邮箱">
-          <el-input v-model="accountForm.recovery_email" placeholder="选填" />
-        </el-form-item>
-        <el-form-item label="备注">
-          <el-input v-model="accountForm.notes" type="textarea" :rows="2" placeholder="选填" />
-        </el-form-item>
-      </el-form>
-      <template #footer>
-        <el-button @click="showDialog = false">取消</el-button>
-        <el-button type="primary" @click="handleAddAccount" :loading="submitting">添加</el-button>
-      </template>
-    </el-dialog>
+    <Dialog v-model:open="showDialog">
+      <DialogContent class="sm:max-w-[520px]">
+        <DialogHeader>
+          <DialogTitle>添加 Google 账号</DialogTitle>
+          <DialogDescription>用于批量任务的账号信息（恢复邮箱/备注可选）。</DialogDescription>
+        </DialogHeader>
+
+        <div class="grid gap-4 py-2">
+          <div class="grid gap-2">
+            <label class="text-sm font-medium">邮箱</label>
+            <Input v-model="accountForm.email" placeholder="请输入 Google 邮箱" />
+          </div>
+
+          <div class="grid gap-2">
+            <label class="text-sm font-medium">密码</label>
+            <Input v-model="accountForm.password" type="password" placeholder="请输入密码" />
+          </div>
+
+          <div class="grid gap-2">
+            <label class="text-sm font-medium">恢复邮箱</label>
+            <Input v-model="accountForm.recovery_email" placeholder="选填" />
+          </div>
+
+          <div class="grid gap-2">
+            <label class="text-sm font-medium">备注</label>
+            <textarea
+              v-model="accountForm.notes"
+              rows="2"
+              placeholder="选填"
+              class="min-h-[80px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+            />
+          </div>
+        </div>
+
+        <DialogFooter class="gap-2">
+          <Button variant="outline" @click="showDialog = false">取消</Button>
+          <Button :disabled="submitting" class="gap-2" @click="handleAddAccount">
+            <Loader2Icon v-if="submitting" class="h-4 w-4 animate-spin" />
+            添加
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
 
     <!-- 批量导入对话框 -->
-    <el-dialog v-model="showImportDialog" title="批量导入Google账号" width="700px">
-      <el-alert
-        title="导入格式说明"
-        type="info"
-        :closable="false"
-        show-icon
-        class="mb-4"
-      >
-        <p>每行一个账号，格式：<code>email----password----recovery----secret</code></p>
-        <p>示例：<code>test@gmail.com----Pass123----recovery@mail.com----</code></p>
-        <p style="color: #909399; font-size: 12px;">注意：使用 ---- 分隔各字段，恢复邮箱和密钥可留空</p>
-      </el-alert>
-      
-      <el-form :model="importForm" label-width="120px">
-        <el-form-item label="分组名称">
-          <el-input 
-            v-model="importForm.group_name" 
-            placeholder="可选，如：售后、2FA（留空则使用当前时间）"
-            clearable
-          />
-          <div class="text-xs text-gray-400 mt-1">
-            导入后自动创建分组，如"售后_10个"或"2025-01-25_1030_10个"
+    <Dialog v-model:open="showImportDialog">
+      <DialogContent class="sm:max-w-[760px]">
+        <DialogHeader>
+          <DialogTitle>批量导入 Google 账号</DialogTitle>
+          <DialogDescription>支持导入并自动分组；可选择覆盖已存在账号。</DialogDescription>
+        </DialogHeader>
+
+        <Alert class="mt-2">
+          <AlertTitle>导入格式说明</AlertTitle>
+          <AlertDescription>
+            <div class="space-y-1">
+              <div>
+                每行一个账号，格式：
+                <code class="rounded bg-muted px-1.5 py-0.5 font-mono text-primary">email----password----recovery----secret</code>
+              </div>
+              <div>
+                示例：
+                <code class="rounded bg-muted px-1.5 py-0.5 font-mono text-primary">test@gmail.com----Pass123----recovery@mail.com----</code>
+              </div>
+              <div class="text-xs text-muted-foreground">注意：使用 ---- 分隔各字段，恢复邮箱和密钥可留空</div>
+            </div>
+          </AlertDescription>
+        </Alert>
+
+        <div class="grid gap-4 py-2">
+          <div class="grid gap-2">
+            <label class="text-sm font-medium">分组名称</label>
+            <Input v-model="importForm.group_name" placeholder="可选，如：售后、2FA（留空则使用当前时间）" />
+            <div class="text-xs text-muted-foreground">导入后自动创建分组，如“售后_10个”或“2025-01-25_1030_10个”</div>
           </div>
-        </el-form-item>
-        <el-form-item label="账号列表">
-          <el-input
-            v-model="importText"
-            type="textarea"
-            :rows="12"
-            placeholder="粘贴账号数据，每行一个账号"
-          />
-        </el-form-item>
-        <el-form-item label="覆盖已存在">
-          <el-switch v-model="importForm.overwrite_existing" />
-          <span class="ml-2 text-sm text-gray-500">开启后将更新已存在的账号</span>
-        </el-form-item>
-      </el-form>
-      
-      <template #footer>
-        <el-button @click="showImportDialog = false">取消</el-button>
-        <el-button type="primary" @click="handleImportAccounts" :loading="importing">
-          导入 ({{ importCount }} 个账号)
-        </el-button>
-      </template>
-    </el-dialog>
+
+          <div class="grid gap-2">
+            <label class="text-sm font-medium">账号列表</label>
+            <textarea
+              v-model="importText"
+              rows="12"
+              placeholder="粘贴账号数据，每行一个账号"
+              class="min-h-[240px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+            />
+          </div>
+
+          <label class="flex items-center gap-3">
+            <input
+              v-model="importForm.overwrite_existing"
+              type="checkbox"
+              class="h-4 w-4 rounded border-border accent-primary"
+            />
+            <span class="text-sm text-muted-foreground">覆盖已存在（开启后将更新已存在的账号）</span>
+          </label>
+        </div>
+
+        <DialogFooter class="gap-2">
+          <Button variant="outline" @click="showImportDialog = false">取消</Button>
+          <Button :disabled="importing" class="gap-2" @click="handleImportAccounts">
+            <Loader2Icon v-if="importing" class="h-4 w-4 animate-spin" />
+            导入 ({{ importCount }} 个账号)
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
 
     <!-- 编辑账号对话框 -->
-    <el-dialog v-model="showEditDialog" title="编辑Google账号" width="500px">
-      <el-form :model="editForm" label-width="100px">
-        <el-form-item label="邮箱">
-           <el-input v-model="editForm.email" disabled />
-        </el-form-item>
-        <el-form-item label="密码">
-          <el-input v-model="editForm.password" type="password" placeholder="留空则不修改" show-password />
-        </el-form-item>
-        <el-form-item label="恢复邮箱">
-          <el-input v-model="editForm.recovery_email" placeholder="选填" />
-        </el-form-item>
-        <el-form-item label="2FA 密钥">
-           <el-input v-model="editForm.secret_key" placeholder="选填" />
-        </el-form-item>
-        <el-form-item label="备注">
-          <el-input v-model="editForm.notes" type="textarea" :rows="2" placeholder="选填" />
-        </el-form-item>
-      </el-form>
-      <template #footer>
-        <el-button @click="showEditDialog = false">取消</el-button>
-        <el-button type="primary" @click="submitEditAccount" :loading="submitting">保存</el-button>
-      </template>
-    </el-dialog>
+    <Dialog v-model:open="showEditDialog">
+      <DialogContent class="sm:max-w-[520px]">
+        <DialogHeader>
+          <DialogTitle>编辑 Google 账号</DialogTitle>
+          <DialogDescription>仅修改你填写的字段；密码留空则保持不变。</DialogDescription>
+        </DialogHeader>
+
+        <div class="grid gap-4 py-2">
+          <div class="grid gap-2">
+            <label class="text-sm font-medium">邮箱</label>
+            <Input v-model="editForm.email" disabled />
+          </div>
+
+          <div class="grid gap-2">
+            <label class="text-sm font-medium">密码</label>
+            <Input v-model="editForm.password" type="password" placeholder="留空则不修改" />
+          </div>
+
+          <div class="grid gap-2">
+            <label class="text-sm font-medium">恢复邮箱</label>
+            <Input v-model="editForm.recovery_email" placeholder="选填" />
+          </div>
+
+          <div class="grid gap-2">
+            <label class="text-sm font-medium">2FA 密钥</label>
+            <Input v-model="editForm.secret_key" placeholder="选填" />
+          </div>
+
+          <div class="grid gap-2">
+            <label class="text-sm font-medium">备注</label>
+            <textarea
+              v-model="editForm.notes"
+              rows="2"
+              placeholder="选填"
+              class="min-h-[80px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+            />
+          </div>
+        </div>
+
+        <DialogFooter class="gap-2">
+          <Button variant="outline" @click="showEditDialog = false">取消</Button>
+          <Button :disabled="submitting" class="gap-2" @click="submitEditAccount">
+            <Loader2Icon v-if="submitting" class="h-4 w-4 animate-spin" />
+            保存
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
 
     <!-- 查看账号详情对话框 -->
-    <el-dialog v-model="showViewDialog" title="账号详情" width="600px">
-      <el-descriptions v-if="selectedAccount" :column="2" border>
-        <el-descriptions-item label="ID">{{ selectedAccount.id }}</el-descriptions-item>
-        <el-descriptions-item label="邮箱">{{ selectedAccount.email }}</el-descriptions-item>
+    <Dialog v-model:open="showViewDialog">
+      <DialogContent class="sm:max-w-[860px]">
+        <DialogHeader>
+          <DialogTitle>账号详情</DialogTitle>
+          <DialogDescription>查看账号关键字段与状态信息</DialogDescription>
+        </DialogHeader>
 
-        <el-descriptions-item label="分组">
-          <el-tag v-if="selectedAccount.group_name" type="warning" effect="plain">
-            {{ selectedAccount.group_name }}
-          </el-tag>
-          <span v-else class="text-gray-500">未分组</span>
-        </el-descriptions-item>
-        <el-descriptions-item label="分类">
-          <el-tag :type="getDerivedTypeTag(selectedAccount.type_tag || '')" effect="dark" size="small">
-            {{ selectedAccount.type_display || selectedAccount.type_tag || '-' }}
-          </el-tag>
-        </el-descriptions-item>
-        <el-descriptions-item label="状态">
-          <el-tag :type="getStatusType(selectedAccount.status)">
-            {{ selectedAccount.status_display || selectedAccount.status }}
-          </el-tag>
-        </el-descriptions-item>
-        <el-descriptions-item label="SheerID状态">
-          <el-tag :type="selectedAccount.sheerid_verified ? 'success' : 'info'">
-            {{ selectedAccount.sheerid_verified ? '已验证' : '未验证' }}
-          </el-tag>
-        </el-descriptions-item>
-        <el-descriptions-item label="Gemini状态">
-          <el-tag :type="getGeminiStatusType(selectedAccount.gemini_status || '')">
-            {{ getGeminiStatusText(selectedAccount.gemini_status || 'not_subscribed') }}
-          </el-tag>
-        </el-descriptions-item>
-        <el-descriptions-item label="是否绑卡">
-          <el-tag :type="selectedAccount.card_bound ? 'success' : 'info'">
-            {{ selectedAccount.card_bound ? '已绑卡' : '未绑卡' }}
-          </el-tag>
-        </el-descriptions-item>
-        <el-descriptions-item label="恢复邮箱" :span="2">
-          {{ selectedAccount.recovery_email || '无' }}
-        </el-descriptions-item>
-        <el-descriptions-item label="SheerID链接" :span="2">
-          <el-link v-if="selectedAccount.sheerid_link" :href="selectedAccount.sheerid_link" type="primary" target="_blank">
-            {{ selectedAccount.sheerid_link }}
-          </el-link>
-          <span v-else class="text-gray-500">无</span>
-        </el-descriptions-item>
-        <el-descriptions-item label="最后登录" :span="2">
-          {{ selectedAccount.last_login_at ? formatDate(selectedAccount.last_login_at) : '从未登录' }}
-        </el-descriptions-item>
-        <el-descriptions-item label="创建时间" :span="2">
-          {{ formatDate(selectedAccount.created_at) }}
-        </el-descriptions-item>
-        <el-descriptions-item label="备注" :span="2">
-          {{ selectedAccount.notes || '无' }}
-        </el-descriptions-item>
+        <div v-if="selectedAccount" class="grid gap-4 py-2 sm:grid-cols-2">
+          <div class="space-y-1">
+            <div class="text-xs text-muted-foreground">ID</div>
+            <div class="font-mono text-sm">#{{ selectedAccount.id }}</div>
+          </div>
 
-        <el-descriptions-item label="New-2FA" :span="2">
-          <template v-if="selectedAccount.new_2fa_display || selectedAccount.new_2fa">
-            <code class="mono">{{ format2fa(selectedAccount.new_2fa_display || selectedAccount.new_2fa) }}</code>
-            <span v-if="selectedAccount.new_2fa_updated_at" class="ml-2 text-xs text-gray-500">
-              {{ formatDate(selectedAccount.new_2fa_updated_at) }}
-            </span>
-          </template>
-          <template v-else>
-            -
-          </template>
-        </el-descriptions-item>
-      </el-descriptions>
-      <template #footer>
-        <el-button @click="showViewDialog = false">关闭</el-button>
-      </template>
-    </el-dialog>
+          <div class="space-y-1">
+            <div class="text-xs text-muted-foreground">邮箱</div>
+            <div class="text-sm break-all">{{ selectedAccount.email }}</div>
+          </div>
+
+          <div class="space-y-1">
+            <div class="text-xs text-muted-foreground">分组</div>
+            <div>
+              <Badge v-if="selectedAccount.group_name" variant="outline" class="rounded-full">{{ selectedAccount.group_name }}</Badge>
+              <span v-else class="text-sm text-muted-foreground">未分组</span>
+            </div>
+          </div>
+
+          <div class="space-y-1">
+            <div class="text-xs text-muted-foreground">分类</div>
+            <div>
+              <Badge variant="secondary" class="rounded-full">
+                {{ selectedAccount.type_display || selectedAccount.type_tag || '-' }}
+              </Badge>
+            </div>
+          </div>
+
+          <div class="space-y-1">
+            <div class="text-xs text-muted-foreground">状态</div>
+            <div>
+              <Badge variant="secondary" class="rounded-full">
+                {{ selectedAccount.status_display || selectedAccount.status }}
+              </Badge>
+            </div>
+          </div>
+
+          <div class="space-y-1">
+            <div class="text-xs text-muted-foreground">SheerID 状态</div>
+            <div>
+              <Badge :variant="selectedAccount.sheerid_verified ? 'default' : 'secondary'" class="rounded-full">
+                {{ selectedAccount.sheerid_verified ? '已验证' : '未验证' }}
+              </Badge>
+            </div>
+          </div>
+
+          <div class="space-y-1">
+            <div class="text-xs text-muted-foreground">Gemini 状态</div>
+            <div>
+              <Badge variant="outline" class="rounded-full">
+                {{ getGeminiStatusText(selectedAccount.gemini_status || 'not_subscribed') }}
+              </Badge>
+            </div>
+          </div>
+
+          <div class="space-y-1">
+            <div class="text-xs text-muted-foreground">是否绑卡</div>
+            <div>
+              <Badge :variant="selectedAccount.card_bound ? 'default' : 'secondary'" class="rounded-full">
+                {{ selectedAccount.card_bound ? '已绑卡' : '未绑卡' }}
+              </Badge>
+            </div>
+          </div>
+
+          <div class="space-y-1 sm:col-span-2">
+            <div class="text-xs text-muted-foreground">恢复邮箱</div>
+            <div class="text-sm break-all">{{ selectedAccount.recovery_email || '无' }}</div>
+          </div>
+
+          <div class="space-y-1 sm:col-span-2">
+            <div class="text-xs text-muted-foreground">SheerID 链接</div>
+            <div>
+              <a
+                v-if="selectedAccount.sheerid_link"
+                :href="selectedAccount.sheerid_link"
+                target="_blank"
+                rel="noreferrer"
+                class="text-sm text-primary hover:underline underline-offset-4 break-all"
+              >
+                {{ selectedAccount.sheerid_link }}
+              </a>
+              <span v-else class="text-sm text-muted-foreground">无</span>
+            </div>
+          </div>
+
+          <div class="space-y-1 sm:col-span-2">
+            <div class="text-xs text-muted-foreground">最后登录</div>
+            <div class="text-sm">{{ selectedAccount.last_login_at ? formatDate(selectedAccount.last_login_at) : '从未登录' }}</div>
+          </div>
+
+          <div class="space-y-1 sm:col-span-2">
+            <div class="text-xs text-muted-foreground">创建时间</div>
+            <div class="text-sm">{{ formatDate(selectedAccount.created_at) }}</div>
+          </div>
+
+          <div class="space-y-1 sm:col-span-2">
+            <div class="text-xs text-muted-foreground">备注</div>
+            <div class="text-sm whitespace-pre-wrap">{{ selectedAccount.notes || '无' }}</div>
+          </div>
+
+          <div class="space-y-1 sm:col-span-2">
+            <div class="text-xs text-muted-foreground">New-2FA</div>
+            <div class="flex flex-wrap items-center gap-2">
+              <template v-if="selectedAccount.new_2fa_display || selectedAccount.new_2fa">
+                <code class="rounded bg-muted px-2 py-1 font-mono text-xs">{{ format2fa(selectedAccount.new_2fa_display || selectedAccount.new_2fa) }}</code>
+                <span v-if="selectedAccount.new_2fa_updated_at" class="text-xs text-muted-foreground">
+                  {{ formatDate(selectedAccount.new_2fa_updated_at) }}
+                </span>
+              </template>
+              <span v-else class="text-sm text-muted-foreground">-</span>
+            </div>
+          </div>
+        </div>
+
+        <div v-else class="py-8 text-center text-sm text-muted-foreground">暂无账号详情</div>
+
+        <DialogFooter class="gap-2">
+          <Button variant="outline" @click="showViewDialog = false">关闭</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
 
     <!-- 任务日志抽屉 -->
-    <el-drawer v-model="showTasksDrawer" title="任务记录" size="900px">
-      <div v-if="drawerLoading" class="p-4 text-center">
-        <el-icon class="mr-1"><Loading /></el-icon> 加载中...
-      </div>
-      <div v-else class="drawer-content">
-          <el-table :data="accountTasks.tasks" stripe border size="small" row-key="record_id">
-            <el-table-column label="来源" width="90">
-              <template #default="{ row }">
-                <el-tag v-if="row.source === 'google'" type="primary" effect="light" size="small">任务</el-tag>
-                <el-tag v-else type="info" effect="light" size="small">任务</el-tag>
-              </template>
-            </el-table-column>
+    <Sheet v-model:open="showTasksDrawer">
+      <SheetContent side="right" class="w-full sm:max-w-[900px]">
+        <SheetHeader>
+          <SheetTitle>任务记录</SheetTitle>
+          <SheetDescription>当前账号的任务与执行日志入口</SheetDescription>
+        </SheetHeader>
 
-            <el-table-column prop="name" label="类型" min-width="180" show-overflow-tooltip />
+        <div class="mt-4">
+          <div v-if="drawerLoading" class="py-10 text-center text-sm text-muted-foreground">
+            <span class="inline-flex items-center gap-2">
+              <Loader2Icon class="h-4 w-4 animate-spin" />
+              加载中...
+            </span>
+          </div>
 
-            <el-table-column label="状态" width="120">
-              <template #default="{ row }">
-                <template v-if="row.source === 'google'">
-                  <el-tag
-                    :type="row.status === 'completed' ? 'success' : (row.status === 'failed' ? 'danger' : (row.status === 'cancelled' ? 'info' : 'warning'))"
-                    size="small"
-                  >
-                    {{ row.status_display || row.status }}
-                  </el-tag>
-                </template>
-                <template v-else>
-                  <el-tag
-                    v-if="row.state"
-                    :type="row.state === 'SUCCESS' ? 'success' : (row.state === 'FAILURE' ? 'danger' : (row.state === 'REVOKED' ? 'info' : 'warning'))"
-                    size="small"
-                  >
-                    {{ row.state }}
-                  </el-tag>
-                  <span v-else>-</span>
-                </template>
-              </template>
-            </el-table-column>
+          <div v-else class="space-y-6">
+            <div class="overflow-x-auto rounded-xl border border-border">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead class="w-24">来源</TableHead>
+                    <TableHead class="min-w-[220px]">类型</TableHead>
+                    <TableHead class="w-28">状态</TableHead>
+                    <TableHead class="w-20">进度</TableHead>
+                    <TableHead class="w-56">步骤</TableHead>
+                    <TableHead class="min-w-[180px]">增项</TableHead>
+                    <TableHead class="w-44">时间</TableHead>
+                    <TableHead class="w-20 text-right">操作</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  <TableRow v-for="row in accountTasks.tasks" :key="row.record_id" class="hover:bg-muted/20">
+                    <TableCell>
+                      <Badge :variant="row.source === 'google' ? 'default' : 'secondary'" class="rounded-full">
+                        任务
+                      </Badge>
+                    </TableCell>
+                    <TableCell class="truncate">{{ row.name }}</TableCell>
+                    <TableCell>
+                      <Badge
+                        v-if="row.source === 'google'"
+                        :variant="row.status === 'completed' ? 'default' : (row.status === 'failed' ? 'destructive' : 'secondary')"
+                        class="rounded-full"
+                      >
+                        {{ row.status_display || row.status }}
+                      </Badge>
+                      <Badge
+                        v-else-if="row.state"
+                        :variant="row.state === 'SUCCESS' ? 'default' : (row.state === 'FAILURE' ? 'destructive' : 'secondary')"
+                        class="rounded-full"
+                      >
+                        {{ row.state }}
+                      </Badge>
+                      <span v-else class="text-xs text-muted-foreground">-</span>
+                    </TableCell>
+                    <TableCell class="text-muted-foreground">
+                      <span v-if="row.source === 'google'">{{ row.progress_percentage ?? 0 }}%</span>
+                      <span v-else>-</span>
+                    </TableCell>
+                    <TableCell>
+                      <span v-if="row.source === 'google' && row.task_type === 'one_click'">
+                        <span class="font-medium">{{ row.main_flow_step_num ? `${row.main_flow_step_num}/6` : '-' }}</span>
+                        <span class="ml-2 text-xs text-muted-foreground">{{ row.main_flow_step_title || '' }}</span>
+                      </span>
+                      <span v-else class="text-xs text-muted-foreground">-</span>
+                    </TableCell>
+                    <TableCell>
+                      <div
+                        v-if="row.source === 'google' && row.task_type === 'one_click' && Array.isArray(row.main_flow_extras) && row.main_flow_extras.length > 0"
+                        class="flex flex-wrap gap-1"
+                      >
+                        <Badge v-for="ex in row.main_flow_extras" :key="ex" variant="outline" class="rounded-full">
+                          {{ ex }}
+                        </Badge>
+                      </div>
+                      <span v-else class="text-xs text-muted-foreground">-</span>
+                    </TableCell>
+                    <TableCell class="text-muted-foreground">{{ formatDate(row.created_at) }}</TableCell>
+                    <TableCell class="text-right">
+                      <Button
+                        variant="link"
+                        size="xs"
+                        class="h-auto p-0"
+                        @click="row.source === 'google' ? viewTaskLog(row.google_task_id) : openCeleryTask(String(row.celery_task_id), selectedAccount?.email)"
+                      >
+                        日志
+                      </Button>
+                    </TableCell>
+                  </TableRow>
 
-            <el-table-column label="进度" width="90">
-              <template #default="{ row }">
-                <span v-if="row.source === 'google'">{{ row.progress_percentage ?? 0 }}%</span>
-                <span v-else>-</span>
-              </template>
-            </el-table-column>
+                  <TableRow v-if="accountTasks.tasks.length === 0">
+                    <TableCell colspan="8" class="py-10 text-center text-sm text-muted-foreground">暂无任务记录</TableCell>
+                  </TableRow>
+                </TableBody>
+              </Table>
+            </div>
 
-            <el-table-column label="步骤" width="160">
-              <template #default="{ row }">
-                <span v-if="row.source === 'google' && row.task_type === 'one_click'">
-                  {{ row.main_flow_step_num ? `${row.main_flow_step_num}/6` : '-' }}
-                  <span class="ml-1 text-gray-500">{{ row.main_flow_step_title || '' }}</span>
-                </span>
-                <span v-else>-</span>
-              </template>
-            </el-table-column>
+            <div class="h-px w-full bg-border" />
 
-            <el-table-column label="增项" min-width="140" show-overflow-tooltip>
-              <template #default="{ row }">
-                <div v-if="row.source === 'google' && row.task_type === 'one_click' && Array.isArray(row.main_flow_extras) && row.main_flow_extras.length > 0" class="flex gap-1 flex-wrap">
-                  <el-tag v-for="ex in row.main_flow_extras" :key="ex" type="warning" size="small" effect="light">{{ ex }}</el-tag>
-                </div>
-                <span v-else>-</span>
-              </template>
-            </el-table-column>
+            <div class="overflow-x-auto rounded-xl border border-border">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead class="w-24">任务ID</TableHead>
+                    <TableHead class="w-28">账号状态</TableHead>
+                    <TableHead class="min-w-[260px]">结果</TableHead>
+                    <TableHead class="min-w-[260px]">错误</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  <TableRow v-for="row in accountTasks.task_accounts" :key="row.task_id" class="hover:bg-muted/20">
+                    <TableCell class="font-mono text-xs text-muted-foreground">#{{ row.task_id }}</TableCell>
+                    <TableCell class="text-muted-foreground">{{ row.status_display || '-' }}</TableCell>
+                    <TableCell class="text-muted-foreground">{{ row.result_message || '-' }}</TableCell>
+                    <TableCell class="text-destructive">{{ row.error_message || '-' }}</TableCell>
+                  </TableRow>
 
-            <el-table-column prop="created_at" label="时间" width="170">
-              <template #default="{ row }">
-                {{ formatDate(row.created_at) }}
-              </template>
-            </el-table-column>
-
-            <el-table-column label="操作" width="90" fixed="right">
-              <template #default="{ row }">
-                <el-button
-                  v-if="row.source === 'google'"
-                  link
-                  type="primary"
-                  size="small"
-                  @click="viewTaskLog(row.google_task_id)"
-                >
-                  日志
-                </el-button>
-                <el-button
-                  v-else
-                  link
-                  type="primary"
-                  size="small"
-                  @click="openCeleryTask(String(row.celery_task_id), selectedAccount?.email)"
-                >
-                  日志
-                </el-button>
-              </template>
-            </el-table-column>
-          </el-table>
-
-          <el-divider />
-
-          <el-table :data="accountTasks.task_accounts" stripe border size="small">
-            <el-table-column prop="task_id" label="任务ID" width="90" />
-            <el-table-column prop="status_display" label="账号状态" width="110" />
-            <el-table-column prop="result_message" label="结果" min-width="220" show-overflow-tooltip />
-            <el-table-column prop="error_message" label="错误" min-width="220" show-overflow-tooltip />
-          </el-table>
-      </div>
-    </el-drawer>
+                  <TableRow v-if="accountTasks.task_accounts.length === 0">
+                    <TableCell colspan="4" class="py-10 text-center text-sm text-muted-foreground">暂无账号任务记录</TableCell>
+                  </TableRow>
+                </TableBody>
+              </Table>
+            </div>
+          </div>
+        </div>
+      </SheetContent>
+    </Sheet>
 
     <!-- 通用日志查看Dialog -->
-    <el-dialog v-model="showLogDialog" title="任务日志" width="800px">
-      <div v-if="currentSteps.length > 0" class="mb-4 p-4 bg-gray-50 rounded">
-         <el-steps :active="activeStep" finish-status="success" align-center>
-            <el-step v-for="(step, index) in currentSteps" :key="index" :title="step.title" :description="step.time" />
-         </el-steps>
-         
-         <div v-if="currentLogExtras.length > 0" class="mt-4 flex gap-2 justify-center">
-            <el-tag v-for="extra in currentLogExtras" :key="extra" type="warning" effect="dark">{{ extra }}</el-tag>
-         </div>
-      </div>
+    <Dialog v-model:open="showLogDialog">
+      <DialogContent class="sm:max-w-[900px]">
+        <DialogHeader>
+          <DialogTitle>任务日志</DialogTitle>
+          <DialogDescription>步骤、增项与日志内容</DialogDescription>
+        </DialogHeader>
 
-       <div class="log-container">
-          <pre>{{ currentLogContent }}</pre>
-       </div>
-    </el-dialog>
+        <div v-if="currentSteps.length > 0" class="mb-4 rounded-xl border border-border bg-muted/20 p-4">
+          <div class="mb-3 flex items-center justify-between">
+            <div class="text-sm font-semibold">流程步骤</div>
+            <div class="text-xs text-muted-foreground">
+              {{ Math.min(activeStep + 1, currentSteps.length) }}/{{ currentSteps.length }}
+            </div>
+          </div>
+
+          <div class="h-2 w-full rounded-full bg-muted overflow-hidden">
+            <div
+              class="h-full bg-primary transition-all"
+              :style="{ width: `${currentSteps.length ? Math.round(((activeStep + 1) / currentSteps.length) * 100) : 0}%` }"
+            />
+          </div>
+
+          <div class="mt-4 grid gap-2">
+            <div
+              v-for="(step, index) in currentSteps"
+              :key="index"
+              class="flex items-start gap-3 rounded-lg border border-border bg-background/60 px-3 py-2"
+              :class="index === activeStep ? 'ring-1 ring-ring' : ''"
+            >
+              <div class="mt-0.5 h-6 w-6 rounded-full bg-muted flex items-center justify-center text-xs font-semibold">
+                {{ index + 1 }}
+              </div>
+              <div class="min-w-0 flex-1">
+                <div class="font-medium truncate">{{ step.title }}</div>
+                <div class="text-xs text-muted-foreground">{{ step.time }}</div>
+              </div>
+            </div>
+          </div>
+
+          <div v-if="currentLogExtras.length > 0" class="mt-4 flex flex-wrap gap-2">
+            <span
+              v-for="extra in currentLogExtras"
+              :key="extra"
+              class="inline-flex items-center rounded-full border border-amber-500/20 bg-amber-500/10 px-2 py-0.5 text-xs text-amber-700"
+            >
+              {{ extra }}
+            </span>
+          </div>
+        </div>
+
+        <div class="max-h-[520px] overflow-auto rounded-xl border border-border bg-muted/20 p-4">
+          <pre class="whitespace-pre-wrap font-mono text-xs text-foreground">{{ currentLogContent }}</pre>
+        </div>
+      </DialogContent>
+    </Dialog>
 
     <!-- Celery 任务：实时 trace 日志（滚动 + 轮询） -->
-    <el-dialog
-      v-model="showCeleryDialog"
-      :title="celeryDialogTitle"
-      width="980px"
-      @closed="onCeleryDialogClosed"
+    <Dialog
+      :open="showCeleryDialog"
+      @update:open="(open) => { showCeleryDialog = open; if (!open) onCeleryDialogClosed() }"
     >
-      <div class="celery-status" v-loading="celeryStatusLoading">
-        <el-descriptions :column="2" border size="small">
-          <el-descriptions-item label="任务ID">{{ celeryTaskId }}</el-descriptions-item>
-          <el-descriptions-item label="账号">{{ celeryEmail }}</el-descriptions-item>
-          <el-descriptions-item label="state">
-            <el-tag size="small">{{ celeryState || '-' }}</el-tag>
-          </el-descriptions-item>
-          <el-descriptions-item label="trace_file">
-            <span class="trace-path">{{ traceFile || '-' }}</span>
-          </el-descriptions-item>
-        </el-descriptions>
+      <DialogContent class="sm:max-w-[1000px]">
+        <DialogHeader>
+          <DialogTitle>{{ celeryDialogTitle }}</DialogTitle>
+          <DialogDescription>实时 trace（支持上滑加载历史）</DialogDescription>
+        </DialogHeader>
 
-        <div class="mt-3 flex gap-2 justify-end">
-          <el-button size="small" @click="refreshCeleryStatus">刷新状态</el-button>
-          <el-button size="small" type="primary" @click="reloadTrace">重载日志</el-button>
+        <div class="rounded-xl border border-border bg-muted/20 p-4">
+          <div class="grid gap-3 sm:grid-cols-2">
+            <div>
+              <div class="text-xs text-muted-foreground">任务ID</div>
+              <div class="font-mono text-sm">{{ celeryTaskId || '-' }}</div>
+            </div>
+            <div>
+              <div class="text-xs text-muted-foreground">账号</div>
+              <div class="text-sm break-all">{{ celeryEmail || '-' }}</div>
+            </div>
+            <div>
+              <div class="text-xs text-muted-foreground">state</div>
+              <Badge variant="outline" class="rounded-full">{{ celeryState || '-' }}</Badge>
+            </div>
+            <div>
+              <div class="text-xs text-muted-foreground">trace_file</div>
+              <div class="font-mono text-xs break-all">{{ traceFile || '-' }}</div>
+            </div>
+          </div>
+
+          <div class="mt-4 flex flex-wrap justify-end gap-2">
+            <Button variant="outline" size="sm" @click="refreshCeleryStatus">刷新状态</Button>
+            <Button size="sm" @click="reloadTrace">重载日志</Button>
+          </div>
+
+          <Accordion type="single" collapsible class="mt-4">
+            <AccordionItem value="status">
+              <AccordionTrigger>状态详情</AccordionTrigger>
+              <AccordionContent>
+                <pre class="mt-2 max-h-[200px] overflow-auto rounded-md border border-border bg-background p-3 text-xs">{{ celeryStatusText }}</pre>
+              </AccordionContent>
+            </AccordionItem>
+          </Accordion>
         </div>
 
-        <el-collapse class="mt-3">
-          <el-collapse-item title="状态详情" name="status">
-            <pre class="status-pre">{{ celeryStatusText }}</pre>
-          </el-collapse-item>
-        </el-collapse>
-      </div>
+        <div class="my-4 h-px w-full bg-border" />
 
-      <el-divider />
-
-      <div class="trace-toolbar">
-        <div class="left">
-          <el-switch
-            v-model="traceFollowLatest"
-            active-text="跟随最新"
-            inactive-text="停止跟随"
-          />
-          <span class="trace-hint">向上滚动加载历史；滚动离开底部会自动停止跟随</span>
+        <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div class="flex items-center gap-3">
+            <div class="flex items-center gap-2">
+              <Switch :checked="traceFollowLatest" @update:checked="traceFollowLatest = $event" />
+              <span class="text-sm">跟随最新</span>
+            </div>
+            <span class="text-xs text-muted-foreground">向上滚动加载历史；滚动离开底部会自动停止跟随</span>
+          </div>
+          <div class="flex items-center justify-end gap-2">
+            <Button variant="outline" size="sm" @click="copyTrace">复制</Button>
+            <Button variant="outline" size="sm" @click="clearTrace">清空</Button>
+          </div>
         </div>
-        <div class="right">
-          <el-button size="small" @click="copyTrace">复制</el-button>
-          <el-button size="small" @click="clearTrace">清空</el-button>
-        </div>
-      </div>
 
-      <div
-        ref="traceScrollRef"
-        class="trace-container"
-        @scroll="onTraceScroll"
-      >
-        <div v-if="traceLoadingOlder" class="trace-loader">加载更早日志...</div>
-        <div v-else-if="traceHasMoreBackward" class="trace-loader trace-loader-idle">继续上滑加载更早日志</div>
-
-        <div class="trace-lines">
+        <div
+          ref="traceScrollRef"
+          class="h-[520px] overflow-auto rounded-xl border border-border bg-slate-950 text-slate-100 p-3"
+          @scroll="onTraceScroll"
+        >
           <div
-            v-for="ln in traceLines"
-            :key="ln.id"
-            class="trace-line"
-            :class="{ json: ln.isJson }"
-          >{{ ln.text }}</div>
+            v-if="traceLoadingOlder"
+            class="sticky top-0 z-10 -mx-3 -mt-3 mb-3 border-b border-slate-700/40 bg-slate-950/80 px-3 py-2 text-xs text-slate-100/90 backdrop-blur"
+          >
+            加载更早日志...
+          </div>
+          <div
+            v-else-if="traceHasMoreBackward"
+            class="sticky top-0 z-10 -mx-3 -mt-3 mb-3 border-b border-slate-700/40 bg-slate-950/60 px-3 py-2 text-xs text-slate-100/60 backdrop-blur"
+          >
+            继续上滑加载更早日志
+          </div>
+
+          <div class="font-mono text-xs leading-relaxed whitespace-pre-wrap break-words">
+            <div
+              v-for="ln in traceLines"
+              :key="ln.id"
+              class="py-[1px]"
+              :class="ln.isJson ? 'text-slate-300/60' : ''"
+            >{{ ln.text }}</div>
+          </div>
         </div>
-      </div>
-    </el-dialog>
+      </DialogContent>
+    </Dialog>
 
     <!-- 一键全自动配置（主流程增项） -->
-    <el-dialog v-model="showOneClickDialog" title="一键全自动" width="520px">
-      <el-alert
-        type="info"
-        :closable="false"
-        class="mb-4"
-        title="主流程：登录账号 -> 打开 Google One -> 检查学生资格 -> 学生验证 -> 订阅服务 -> 完成处理"
-      />
-      <el-form :model="oneClickForm" label-width="140px">
-        <el-form-item label="增项：修改2FA">
-          <el-switch v-model="oneClickForm.security_change_2fa" />
-        </el-form-item>
-        <el-form-item label="增项：修改辅助邮箱">
-          <el-input v-model="oneClickForm.security_new_recovery_email" placeholder="可选，不填则不修改" />
-        </el-form-item>
-      </el-form>
-      <template #footer>
-        <el-button @click="showOneClickDialog = false">取消</el-button>
-        <el-button type="primary" @click="submitOneClickTask">开始执行</el-button>
-      </template>
-    </el-dialog>
+    <Dialog v-model:open="showOneClickDialog">
+      <DialogContent class="sm:max-w-[560px]">
+        <DialogHeader>
+          <DialogTitle>一键全自动</DialogTitle>
+          <DialogDescription>主流程：登录 -> Google One -> 检查学生资格 -> 学生验证 -> 订阅 -> 完成</DialogDescription>
+        </DialogHeader>
+
+        <Alert class="mb-4">
+          <AlertTitle>提示</AlertTitle>
+          <AlertDescription>可选增项：安全设置（2FA/辅助邮箱）</AlertDescription>
+        </Alert>
+
+        <div class="grid gap-4 py-2">
+          <div class="flex items-center justify-between">
+            <div>
+              <div class="text-sm font-medium">增项：修改 2FA</div>
+              <div class="text-xs text-muted-foreground">开启后会执行安全更新步骤</div>
+            </div>
+              <Switch
+                :checked="oneClickForm.security_change_2fa"
+                @update:checked="oneClickForm.security_change_2fa = $event"
+              />
+          </div>
+          <div class="grid gap-2">
+            <label class="text-sm font-medium">增项：修改辅助邮箱</label>
+            <Input v-model="oneClickForm.security_new_recovery_email" placeholder="可选，不填则不修改" />
+          </div>
+        </div>
+
+        <DialogFooter class="gap-2">
+          <Button variant="outline" @click="showOneClickDialog = false">取消</Button>
+          <Button @click="submitOneClickTask">开始执行</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
 
     <!-- SheerID 验证配置 Dialog -->
-     <el-dialog v-model="showSheerIDDialog" title="SheerID 批量验证" width="500px">
-        <el-form :model="sheerIDForm" label-width="100px">
-           <el-form-item label="学生姓名" required>
-              <el-input v-model="sheerIDForm.student_name" placeholder="如: John Doe" />
-           </el-form-item>
-           <el-form-item label="学生邮箱" required>
-              <el-input v-model="sheerIDForm.student_email" placeholder="如: student@edu.com" />
-           </el-form-item>
-           <el-form-item label="学校名称" required>
-              <el-input v-model="sheerIDForm.school_name" placeholder="如: University of ..." />
-           </el-form-item>
-        </el-form>
-        <template #footer>
-           <el-button @click="showSheerIDDialog = false">取消</el-button>
-           <el-button type="primary" @click="submitSheerIDTask">开始验证</el-button>
-        </template>
-     </el-dialog>
+    <Dialog v-model:open="showSheerIDDialog">
+      <DialogContent class="sm:max-w-[560px]">
+        <DialogHeader>
+          <DialogTitle>SheerID 批量验证</DialogTitle>
+          <DialogDescription>填写学生信息后执行验证流程</DialogDescription>
+        </DialogHeader>
+
+        <div class="grid gap-4 py-2">
+          <div class="grid gap-2">
+            <label class="text-sm font-medium">学生姓名</label>
+            <Input v-model="sheerIDForm.student_name" placeholder="如: John Doe" />
+          </div>
+          <div class="grid gap-2">
+            <label class="text-sm font-medium">学生邮箱</label>
+            <Input v-model="sheerIDForm.student_email" placeholder="如: student@edu.com" />
+          </div>
+          <div class="grid gap-2">
+            <label class="text-sm font-medium">学校名称</label>
+            <Input v-model="sheerIDForm.school_name" placeholder="如: University of ..." />
+          </div>
+        </div>
+
+        <DialogFooter class="gap-2">
+          <Button variant="outline" @click="showSheerIDDialog = false">取消</Button>
+          <Button @click="submitSheerIDTask">开始验证</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
 
     <!-- 自动绑卡配置 Dialog -->
-     <el-dialog v-model="showBindCardDialog" title="自动绑卡" width="500px">
-        <el-form :model="bindCardForm" label-width="120px">
-           <el-alert title="注意：将自动从卡池中分配卡片进行绑定" type="warning" show-icon :closable="false" class="mb-4" />
-           <el-form-item label="卡池">
-             <el-select v-model="bindCardForm.card_pool" style="width: 180px">
-               <el-option label="公共卡池" value="public" />
-               <el-option label="私有卡池" value="private" />
-             </el-select>
-           </el-form-item>
-           <el-form-item label="策略">
-             <el-select v-model="bindCardForm.card_strategy" style="width: 180px">
-               <el-option label="顺序" value="sequential" />
-               <el-option label="并发" value="parallel" />
-             </el-select>
-           </el-form-item>
-        </el-form>
-        <template #footer>
-           <el-button @click="showBindCardDialog = false">取消</el-button>
-           <el-button type="primary" @click="submitBindCardTask">开始绑卡</el-button>
-        </template>
-     </el-dialog>
+    <Dialog v-model:open="showBindCardDialog">
+      <DialogContent class="sm:max-w-[560px]">
+        <DialogHeader>
+          <DialogTitle>自动绑卡</DialogTitle>
+          <DialogDescription>将自动从卡池中分配卡片进行绑定</DialogDescription>
+        </DialogHeader>
+
+        <Alert class="mb-4" variant="destructive">
+          <AlertTitle>注意</AlertTitle>
+          <AlertDescription>将占用卡池资源，请确认策略与卡池选择</AlertDescription>
+        </Alert>
+
+        <div class="grid gap-4 py-2">
+          <div class="grid gap-2">
+            <label class="text-sm font-medium">卡池</label>
+            <Select v-model="bindCardForm.card_pool">
+              <SelectTrigger class="w-full">
+                <SelectValue placeholder="选择卡池" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="public">公共卡池</SelectItem>
+                <SelectItem value="private">私有卡池</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <div class="grid gap-2">
+            <label class="text-sm font-medium">策略</label>
+            <Select v-model="bindCardForm.card_strategy">
+              <SelectTrigger class="w-full">
+                <SelectValue placeholder="选择策略" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="sequential">顺序</SelectItem>
+                <SelectItem value="parallel">并发</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+
+        <DialogFooter class="gap-2">
+          <Button variant="outline" @click="showBindCardDialog = false">取消</Button>
+          <Button @click="submitBindCardTask">开始绑卡</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
 
     <!-- 安全设置 - 修改辅助邮箱 -->
-    <el-dialog v-model="showRecoveryEmailDialog" title="修改辅助邮箱" width="500px">
-       <el-form label-width="100px">
-          <el-form-item label="新辅助邮箱" required>
-             <el-input v-model="newRecoveryEmail" placeholder="请输入新的辅助邮箱" />
-          </el-form-item>
-       </el-form>
-       <template #footer>
-          <el-button @click="showRecoveryEmailDialog = false">取消</el-button>
-          <el-button type="primary" @click="submitChangeRecoveryEmail">确定修改</el-button>
-       </template>
-    </el-dialog>
-    
+    <Dialog v-model:open="showRecoveryEmailDialog">
+      <DialogContent class="sm:max-w-[560px]">
+        <DialogHeader>
+          <DialogTitle>修改辅助邮箱</DialogTitle>
+          <DialogDescription>为空则不修改</DialogDescription>
+        </DialogHeader>
+
+        <div class="grid gap-2 py-2">
+          <label class="text-sm font-medium">新辅助邮箱</label>
+          <Input v-model="newRecoveryEmail" placeholder="请输入新的辅助邮箱" />
+        </div>
+
+        <DialogFooter class="gap-2">
+          <Button variant="outline" @click="showRecoveryEmailDialog = false">取消</Button>
+          <Button @click="submitChangeRecoveryEmail">确定修改</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+
     <!-- 订阅验证选项 -->
-    <el-dialog v-model="showVerifySubDialog" title="验证订阅状态" width="400px">
-       <el-form label-width="100px">
-          <el-form-item label="开启截图">
-             <el-switch v-model="verifySubScreenshot" active-text="截图保存" inactive-text="不截图" />
-          </el-form-item>
-       </el-form>
-       <template #footer>
-          <el-button @click="showVerifySubDialog = false">取消</el-button>
-          <el-button type="primary" @click="submitVerifyStatus">开始验证</el-button>
-       </template>
-    </el-dialog>
+    <Dialog v-model:open="showVerifySubDialog">
+      <DialogContent class="sm:max-w-[520px]">
+        <DialogHeader>
+          <DialogTitle>验证订阅状态</DialogTitle>
+          <DialogDescription>可选开启截图保存</DialogDescription>
+        </DialogHeader>
+
+        <div class="flex items-center justify-between py-2">
+          <div>
+            <div class="text-sm font-medium">开启截图</div>
+            <div class="text-xs text-muted-foreground">开启后将保存截图用于排查问题</div>
+          </div>
+            <Switch :checked="verifySubScreenshot" @update:checked="verifySubScreenshot = $event" />
+        </div>
+
+        <DialogFooter class="gap-2">
+          <Button variant="outline" @click="showVerifySubDialog = false">取消</Button>
+          <Button @click="submitVerifyStatus">开始验证</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
 
   </div>
 </template>
@@ -654,11 +1019,66 @@
 
 <script setup lang="ts">
 import { ref, reactive, onMounted, computed, nextTick, watch, onBeforeUnmount } from 'vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
-import { 
-  Plus, Upload, Check, Close, Refresh, VideoPlay, CreditCard, Lock, 
-  Monitor, ArrowDown, Loading, Download, Delete
-} from '@element-plus/icons-vue'
+import { ElMessage, ElMessageBox } from '@/lib/element'
+import {
+  CheckCircle2,
+  ChevronDown as ChevronDownIcon,
+  CreditCard as CreditCardIcon,
+  Download as DownloadIcon,
+  Loader2 as Loader2Icon,
+  Monitor as MonitorIcon,
+  Plus as PlusIcon,
+  RefreshCw as RefreshCwIcon,
+  Shield as ShieldIcon,
+  Trash2 as Trash2Icon,
+  Upload as UploadIcon,
+  Wand2 as Wand2Icon,
+  XCircle,
+} from 'lucide-vue-next'
+
+import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
+import { Card, CardContent } from '@/components/ui/card'
+import { Checkbox } from '@/components/ui/checkbox'
+import { Input } from '@/components/ui/input'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+} from '@/components/ui/sheet'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table'
 import { 
   googleAccountsApi, googleTasksApi, googleSecurityApi, 
   googleSubscriptionApi, googleCeleryTasksApi, googleGroupsApi 
@@ -678,10 +1098,87 @@ const showEditDialog = ref(false)
 const showViewDialog = ref(false)
 const selectedAccount = ref<GoogleAccount | null>(null)
 const importText = ref('')
-const filterType = ref('')
-const filterGroup = ref<string | number>('')
+const filterType = ref('all')
+const filterGroup = ref('all')
 const groupList = ref<Array<{id: number | null, name: string, account_count: number}>>([])
 const selectedAccounts = ref<GoogleAccount[]>([])
+
+const totalPages = computed(() => {
+  const t = Number(total.value) || 0
+  const ps = Number(pageSize.value) || 1
+  return Math.max(1, Math.ceil(t / ps))
+})
+
+const selectedIds = computed(() => new Set(selectedAccounts.value.map(a => a.id)))
+
+const isRowSelected = (row: GoogleAccount) => {
+  return selectedIds.value.has(row.id)
+}
+
+const allSelectedOnPage = computed(() => {
+  return accounts.value.length > 0 && accounts.value.every(a => selectedIds.value.has(a.id))
+})
+
+const someSelectedOnPage = computed(() => {
+  const any = accounts.value.some(a => selectedIds.value.has(a.id))
+  return any && !allSelectedOnPage.value
+})
+
+const onToggleAllOnPage = (checked: boolean | 'indeterminate') => {
+  const isChecked = checked === true
+  const idsOnPage = new Set(accounts.value.map(a => a.id))
+
+  if (isChecked) {
+    const merged: GoogleAccount[] = []
+    const seen = new Set<number>()
+    for (const a of selectedAccounts.value) {
+      if (!seen.has(a.id)) {
+        merged.push(a)
+        seen.add(a.id)
+      }
+    }
+    for (const a of accounts.value) {
+      if (!seen.has(a.id)) {
+        merged.push(a)
+        seen.add(a.id)
+      }
+    }
+    selectedAccounts.value = merged
+    return
+  }
+
+  selectedAccounts.value = selectedAccounts.value.filter(a => !idsOnPage.has(a.id))
+}
+
+const onToggleRow = (row: GoogleAccount, checked: boolean) => {
+  if (checked) {
+    if (!selectedIds.value.has(row.id)) {
+      selectedAccounts.value = [...selectedAccounts.value, row]
+    }
+    return
+  }
+  selectedAccounts.value = selectedAccounts.value.filter(a => a.id !== row.id)
+}
+
+const goPrevPage = async () => {
+  if (currentPage.value <= 1) return
+  currentPage.value -= 1
+  await fetchAccounts()
+}
+
+const goNextPage = async () => {
+  if (currentPage.value >= totalPages.value) return
+  currentPage.value += 1
+  await fetchAccounts()
+}
+
+const onPageSizeChange = async (v: unknown) => {
+  const n = Number.parseInt(String(v ?? ''), 10)
+  if (!Number.isFinite(n) || n <= 0) return
+  pageSize.value = n
+  currentPage.value = 1
+  await fetchAccounts()
+}
 
 // Dialog visibility
 const showTasksDrawer = ref(false)
@@ -832,6 +1329,25 @@ const importCount = computed(() => {
   return importText.value.trim().split('\n').filter(line => line.trim()).length
 })
 
+const normalizeSelectValue = (v: unknown, fallback: string) => {
+  const s = String(v ?? '').trim()
+  return s ? s : fallback
+}
+
+const onFilterTypeChange = async (v: unknown) => {
+  filterType.value = normalizeSelectValue(v, 'all')
+  currentPage.value = 1
+  selectedAccounts.value = []
+  await fetchAccounts()
+}
+
+const onFilterGroupChange = async (v: unknown) => {
+  filterGroup.value = normalizeSelectValue(v, 'all')
+  currentPage.value = 1
+  selectedAccounts.value = []
+  await fetchAccounts()
+}
+
 const fetchAccounts = async () => {
   loading.value = true
   try {
@@ -839,12 +1355,12 @@ const fetchAccounts = async () => {
       page: currentPage.value,
       page_size: pageSize.value
     }
-    if (filterType.value) {
+    if (filterType.value && filterType.value !== 'all') {
       params.type_tag = filterType.value
     }
-    if (filterGroup.value !== '') {
-      if (filterGroup.value === 'null') {
-        params.group = 'null'  // 未分组
+    if (filterGroup.value && filterGroup.value !== 'all') {
+      if (filterGroup.value === 'ungrouped') {
+        params.group = 'null' // 未分组
       } else {
         params.group = filterGroup.value
       }
@@ -885,10 +1401,6 @@ const fetchGroups = async () => {
   } catch (error) {
     console.error('获取分组列表失败:', error)
   }
-}
-
-const handleSelectionChange = (val: GoogleAccount[]) => {
-  selectedAccounts.value = val
 }
 
 const getSelectedIds = () => {
@@ -1525,39 +2037,6 @@ const deleteAccount = async (account: GoogleAccount) => {
   }
 }
 
-const getStatusType = (status: string) => {
-  const types: Record<string, any> = {
-    'active': 'success',
-    'locked': 'danger',
-    'disabled': 'info',
-    'pending_verify': 'warning',
-    'verified': 'success',
-    'pending_check': 'info'
-  }
-  return types[status] || 'info'
-}
-
-const getDerivedTypeTag = (tag: string) => {
-    const map: Record<string, string> = {
-        'ineligible': 'info',
-        'unbound_card': 'warning',
-        'success': 'success',
-        'other': 'info'
-    }
-    return map[tag] || 'info'
-}
-
-const getGeminiStatusType = (status: string) => {
-  const types: Record<string, any> = {
-    'not_subscribed': 'info',
-    'pending': 'warning',
-    'active': 'success',
-    'expired': 'danger',
-    'cancelled': 'info'
-  }
-  return types[status] || 'info'
-}
-
 const getGeminiStatusText = (status: string) => {
   const texts: Record<string, string> = {
     'not_subscribed': '未订阅',
@@ -1590,218 +2069,3 @@ onMounted(() => {
   fetchGroups()
 })
 </script>
-
-<style scoped lang="scss">
-.google-accounts-module {
-  .module-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 20px;
-    padding: 0 4px;
-
-    h2 {
-      margin: 0;
-      font-size: 24px;
-      font-weight: 600;
-      color: #303133;
-    }
-  }
-
-  .operation-panel {
-    background-color: #fcfcfc;
-    border: 1px solid #ebeef5;
-    
-    .flex-row {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      flex-wrap: wrap;
-      gap: 12px;
-    }
-    
-    .filters {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-    }
-
-    .batch-actions {
-      display: flex;
-      align-items: center;
-      
-      .selection-info {
-        font-size: 13px;
-        color: #606266;
-        margin-right: 12px;
-        background: #f4f4f5;
-        padding: 4px 8px;
-        border-radius: 4px;
-      }
-    }
-  }
-
-  .mt-4 {
-    margin-top: 16px;
-  }
-
-  .mb-4 {
-    margin-bottom: 16px;
-  }
-
-  .ml-2 {
-    margin-left: 8px;
-  }
-  
-  .mr-1 {
-    margin-right: 4px;
-  }
-
-  .text-sm {
-    font-size: 12px;
-  }
-
-  .text-gray-500 {
-    color: #909399;
-  }
-
-  .bg-gray-50 {
-    background-color: #f9fafb;
-  }
-  
-  .rounded {
-    border-radius: 4px;
-  }
-  
-  .flex-col {
-    display: flex;
-    flex-direction: column;
-  }
-  
-  .gap-1 {
-    gap: 4px;
-  }
-  
-  .items-start {
-    align-items: flex-start;
-  }
-
-  .log-container {
-    max-height: 500px;
-    overflow-y: auto;
-    background: #1e1e1e;
-    color: #d4d4d4;
-    padding: 12px;
-    border-radius: 4px;
-    
-    pre {
-      white-space: pre-wrap;
-      word-wrap: break-word;
-      margin: 0;
-      font-family: Consolas, Monaco, 'Courier New', monospace;
-      font-size: 13px;
-    }
-  }
-
-  .trace-toolbar {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 12px;
-    margin-bottom: 10px;
-
-    .left {
-      display: flex;
-      align-items: center;
-      gap: 12px;
-      flex-wrap: wrap;
-    }
-
-    .right {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-    }
-  }
-
-  .trace-hint {
-    font-size: 12px;
-    color: #909399;
-  }
-
-  .trace-path {
-    font-family: Consolas, Monaco, 'Courier New', monospace;
-    font-size: 12px;
-    color: #606266;
-  }
-
-  .status-pre {
-    max-height: 240px;
-    overflow: auto;
-    padding: 10px 12px;
-    background: #f7f9fc;
-    border: 1px solid #ebeef5;
-    border-radius: 8px;
-    font-family: Consolas, Monaco, 'Courier New', monospace;
-    font-size: 12px;
-    line-height: 1.45;
-    white-space: pre-wrap;
-    word-break: break-word;
-  }
-
-  .trace-container {
-    height: 520px;
-    overflow: auto;
-    padding: 10px 12px;
-    border-radius: 10px;
-    border: 1px solid #ebeef5;
-    background: #0b1020;
-    color: #dbe7ff;
-  }
-
-  .trace-loader {
-    position: sticky;
-    top: 0;
-    padding: 6px 8px;
-    font-size: 12px;
-    color: rgba(219, 231, 255, 0.9);
-    background: rgba(11, 16, 32, 0.85);
-    border-bottom: 1px solid rgba(219, 231, 255, 0.12);
-    z-index: 1;
-  }
-
-  .trace-loader-idle {
-    opacity: 0.75;
-  }
-
-  .trace-lines {
-    font-family: Consolas, Monaco, 'Courier New', monospace;
-    font-size: 12px;
-    line-height: 1.5;
-    white-space: pre-wrap;
-    word-break: break-word;
-  }
-
-  .trace-line {
-    padding: 1px 0;
-
-    &.json {
-      color: rgba(219, 231, 255, 0.55);
-    }
-  }
-
-  code {
-    background: #f4f4f5;
-    padding: 2px 6px;
-    border-radius: 3px;
-    font-family: 'Courier New', monospace;
-    font-size: 13px;
-    color: #e96900;
-  }
-
-  .mono {
-    font-family: Consolas, Monaco, 'Courier New', monospace;
-    font-size: 12px;
-  }
-}
-</style>

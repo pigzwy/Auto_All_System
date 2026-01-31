@@ -1,211 +1,215 @@
 <template>
-  <div class="auto-bind-card">
-    <el-card shadow="never">
-      <template #header>
-        <div class="card-header">
-          <div class="header-left">
-            <el-icon><CreditCard /></el-icon>
-            <span class="header-title">自动绑卡订阅</span>
+  <div class="space-y-6 p-5">
+    <Card class="shadow-sm">
+      <CardHeader>
+        <div class="flex items-center justify-between gap-4">
+          <div class="flex items-center gap-2">
+            <Icon><CreditCard /></Icon>
+            <CardTitle class="text-base">自动绑卡订阅</CardTitle>
           </div>
-          <el-button type="primary" @click="loadData">
-            <el-icon><Refresh /></el-icon>
-            <span style="margin-left: 5px;">刷新</span>
-          </el-button>
+          <Button  variant="default" type="button" :disabled="loading" @click="loadData">
+            <Icon><Refresh /></Icon>
+            <span class="ml-1.5">刷新</span>
+          </Button>
         </div>
-      </template>
+      </CardHeader>
 
-      <!-- 配置区域 -->
-      <el-row :gutter="15" style="margin-bottom: 20px;">
-        <el-col :xs="24" :md="8">
-          <el-input-number
-            v-model="config.cardsPerAccount"
-            :min="1"
-            :max="100"
-            controls-position="right"
-            style="width: 100%;"
-          >
-            <template #prefix>
-              一卡几绑
-            </template>
-          </el-input-number>
-          <div class="input-hint">一张卡可以绑定多少个账号</div>
-        </el-col>
-        <el-col :xs="24" :md="8">
-          <el-input-number
-            v-model="config.threadCount"
-            :min="1"
-            :max="20"
-            controls-position="right"
-            style="width: 100%;"
-          >
-            <template #prefix>
-              并发数
-            </template>
-          </el-input-number>
-          <div class="input-hint">同时处理的账号数量</div>
-        </el-col>
-        <el-col :xs="24" :md="8">
-          <el-upload
-            action="#"
-            :before-upload="uploadCards"
-            :show-file-list="false"
-            accept=".txt"
-          >
-            <el-button type="primary" :loading="uploading" style="width: 100%;">
-              <el-icon><Upload /></el-icon>
-              <span style="margin-left: 5px;">上传卡片文件</span>
-            </el-button>
-          </el-upload>
-          <div class="input-hint">格式: cards.txt (每行一张卡)</div>
-        </el-col>
-      </el-row>
+      <CardContent class="space-y-6">
+        <!-- 配置区域 -->
+        <div class="grid grid-cols-1 gap-4 md:grid-cols-12">
+          <div class="md:col-span-4">
+            <NumberInput
+              v-model="config.cardsPerAccount"
+              :min="1"
+              :max="100"
+              controls-position="right"
+              class="w-full"
+            >
+              <template #prefix>
+                一卡几绑
+              </template>
+            </NumberInput>
+            <div class="mt-1 text-xs text-muted-foreground">一张卡可以绑定多少个账号</div>
+          </div>
 
-      <!-- 延迟设置 -->
-      <el-collapse v-model="activeCollapse" style="margin-bottom: 20px;">
-        <el-collapse-item title="延迟设置（秒）" name="delays">
-          <el-row :gutter="15">
-            <el-col :xs="24" :sm="12" :md="6">
-              <el-form-item label="点击 Offer 后">
-                <el-input-number v-model="config.delays.afterOffer" :min="1" :max="60" style="width: 100%;" />
-              </el-form-item>
-            </el-col>
-            <el-col :xs="24" :sm="12" :md="6">
-              <el-form-item label="点击 Add Card 后">
-                <el-input-number v-model="config.delays.afterAddCard" :min="1" :max="60" style="width: 100%;" />
-              </el-form-item>
-            </el-col>
-            <el-col :xs="24" :sm="12" :md="6">
-              <el-form-item label="点击 Save 后">
-                <el-input-number v-model="config.delays.afterSave" :min="1" :max="60" style="width: 100%;" />
-              </el-form-item>
-            </el-col>
-            <el-col :xs="24" :sm="12" :md="6">
-              <el-form-item label="订阅完成后">
-                <el-input-number v-model="config.delays.afterSubscribe" :min="1" :max="60" style="width: 100%;" />
-              </el-form-item>
-            </el-col>
-          </el-row>
-        </el-collapse-item>
-      </el-collapse>
+          <div class="md:col-span-4">
+            <NumberInput
+              v-model="config.threadCount"
+              :min="1"
+              :max="20"
+              controls-position="right"
+              class="w-full"
+            >
+              <template #prefix>
+                并发数
+              </template>
+            </NumberInput>
+            <div class="mt-1 text-xs text-muted-foreground">同时处理的账号数量</div>
+          </div>
 
-      <!-- 统计信息 -->
-      <el-row :gutter="15" style="margin-bottom: 20px;">
-        <el-col :xs="12" :sm="6">
-          <el-statistic title="可用卡片" :value="stats.availableCards">
-            <template #prefix>
-              <el-icon><Tickets /></el-icon>
-            </template>
-          </el-statistic>
-        </el-col>
-        <el-col :xs="12" :sm="6">
-          <el-statistic title="已验证账号" :value="stats.verifiedAccounts">
-            <template #prefix>
-              <el-icon><User /></el-icon>
-            </template>
-          </el-statistic>
-        </el-col>
-        <el-col :xs="12" :sm="6">
-          <el-statistic title="待绑卡" :value="stats.pendingBindCard">
-            <template #prefix>
-              <el-icon><Clock /></el-icon>
-            </template>
-          </el-statistic>
-        </el-col>
-        <el-col :xs="12" :sm="6">
-          <el-statistic title="已订阅" :value="stats.subscribed">
-            <template #prefix>
-              <el-icon><CircleCheck /></el-icon>
-            </template>
-          </el-statistic>
-        </el-col>
-      </el-row>
+          <div class="md:col-span-4">
+            <FileUpload
+              action="#"
+              :before-upload="uploadCards"
+              :show-file-list="false"
+              accept=".txt"
+            >
+              <Button  variant="default" type="button" :loading="uploading" class="w-full">
+                <Icon><Upload /></Icon>
+                <span class="ml-1.5">上传卡片文件</span>
+              </Button>
+            </FileUpload>
+            <div class="mt-1 text-xs text-muted-foreground">格式: cards.txt (每行一张卡)</div>
+          </div>
+        </div>
 
-      <!-- 账号列表 -->
-      <el-table
-        :data="accounts"
-        v-loading="loading"
-        @selection-change="handleSelectionChange"
-        stripe
-        style="width: 100%;"
-      >
-        <el-table-column type="selection" width="55" />
-        <el-table-column prop="email" label="邮箱" min-width="200" />
-        <el-table-column prop="status" label="状态" width="120">
-          <template #default="{ row }">
-            <el-tag :type="getStatusType(row.status)" size="small">
-              {{ getStatusText(row.status) }}
-            </el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column prop="assigned_card" label="已分配卡片" width="150">
-          <template #default="{ row }">
-            <code v-if="row.assigned_card" class="card-number">{{ row.assigned_card }}</code>
-            <span v-else style="color: #909399;">未分配</span>
-          </template>
-        </el-table-column>
-        <el-table-column prop="updated_at" label="更新时间" width="180">
-          <template #default="{ row }">
-            {{ formatTime(row.updated_at) }}
-          </template>
-        </el-table-column>
-      </el-table>
+        <!-- 延迟设置 -->
+        <Collapse v-model="activeCollapse">
+          <CollapseItem title="延迟设置（秒）" name="delays">
+            <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 md:grid-cols-4">
+              <SimpleFormItem label="点击 Offer 后">
+                <NumberInput v-model="config.delays.afterOffer" :min="1" :max="60" class="w-full" />
+              </SimpleFormItem>
+              <SimpleFormItem label="点击 Add Card 后">
+                <NumberInput v-model="config.delays.afterAddCard" :min="1" :max="60" class="w-full" />
+              </SimpleFormItem>
+              <SimpleFormItem label="点击 Save 后">
+                <NumberInput v-model="config.delays.afterSave" :min="1" :max="60" class="w-full" />
+              </SimpleFormItem>
+              <SimpleFormItem label="订阅完成后">
+                <NumberInput v-model="config.delays.afterSubscribe" :min="1" :max="60" class="w-full" />
+              </SimpleFormItem>
+            </div>
+          </CollapseItem>
+        </Collapse>
 
-      <!-- 操作按钮 -->
-      <div class="action-buttons">
-        <el-button
-          type="success"
-          size="large"
-          :disabled="!selectedAccounts.length || loading"
-          :loading="loading"
-          @click="startBinding"
+        <!-- 统计信息 -->
+        <div class="grid grid-cols-2 gap-4 sm:grid-cols-4">
+          <div class="rounded-xl border border-border bg-background/60 p-4 shadow-sm">
+            <Statistic title="可用卡片" :value="stats.availableCards">
+              <template #prefix>
+                <Icon><Tickets /></Icon>
+              </template>
+            </Statistic>
+          </div>
+          <div class="rounded-xl border border-border bg-background/60 p-4 shadow-sm">
+            <Statistic title="已验证账号" :value="stats.verifiedAccounts">
+              <template #prefix>
+                <Icon><User /></Icon>
+              </template>
+            </Statistic>
+          </div>
+          <div class="rounded-xl border border-border bg-background/60 p-4 shadow-sm">
+            <Statistic title="待绑卡" :value="stats.pendingBindCard">
+              <template #prefix>
+                <Icon><Clock /></Icon>
+              </template>
+            </Statistic>
+          </div>
+          <div class="rounded-xl border border-border bg-background/60 p-4 shadow-sm">
+            <Statistic title="已订阅" :value="stats.subscribed">
+              <template #prefix>
+                <Icon><CircleCheck /></Icon>
+              </template>
+            </Statistic>
+          </div>
+        </div>
+
+        <!-- 账号列表 -->
+        <DataTable
+          :data="accounts"
+          v-loading="loading"
+          @selection-change="handleSelectionChange"
+          stripe
+          class="w-full"
         >
-          <el-icon><CircleCheck /></el-icon>
-          <span style="margin-left: 5px;">开始绑卡订阅</span>
-        </el-button>
-        <el-button
-          type="warning"
-          size="large"
-          :disabled="loading"
-          @click="stopBinding"
-        >
-          <el-icon><CircleClose /></el-icon>
-          <span style="margin-left: 5px;">停止任务</span>
-        </el-button>
-      </div>
-    </el-card>
+          <DataColumn type="selection" width="55" />
+          <DataColumn prop="email" label="邮箱" min-width="200" />
+          <DataColumn prop="status" label="状态" width="120">
+            <template #default="{ row }">
+              <Tag :type="getStatusType(row.status)" size="small">
+                {{ getStatusText(row.status) }}
+              </Tag>
+            </template>
+          </DataColumn>
+          <DataColumn prop="assigned_card" label="已分配卡片" width="150">
+            <template #default="{ row }">
+              <code
+                v-if="row.assigned_card"
+                class="rounded bg-primary/10 px-1.5 py-0.5 font-mono text-xs text-primary"
+              >
+                {{ row.assigned_card }}
+              </code>
+              <span v-else class="text-muted-foreground">未分配</span>
+            </template>
+          </DataColumn>
+          <DataColumn prop="updated_at" label="更新时间" width="180">
+            <template #default="{ row }">
+              {{ formatTime(row.updated_at) }}
+            </template>
+          </DataColumn>
+        </DataTable>
+
+        <!-- 操作按钮 -->
+        <div class="flex flex-col items-stretch justify-center gap-3 pt-2 sm:flex-row sm:items-center">
+          <Button
+             variant="default" type="button"
+            size="large"
+            class="w-full sm:w-auto"
+            :disabled="!selectedAccounts.length || loading"
+            :loading="loading"
+            @click="startBinding"
+          >
+            <Icon><CircleCheck /></Icon>
+            <span class="ml-1.5">开始绑卡订阅</span>
+          </Button>
+          <Button
+             variant="secondary" type="button"
+            size="large"
+            class="w-full sm:w-auto"
+            :disabled="loading"
+            @click="stopBinding"
+          >
+            <Icon><CircleClose /></Icon>
+            <span class="ml-1.5">停止任务</span>
+          </Button>
+        </div>
+      </CardContent>
+    </Card>
 
     <!-- 进度对话框 -->
-    <el-dialog
+    <Modal
       v-model="progressDialog"
       title="绑卡进度"
       width="700px"
       :close-on-click-modal="false"
     >
-      <el-progress
+      <ProgressBar
         :percentage="progress"
         :status="progressStatus"
         :stroke-width="20"
       />
-      <div class="progress-info">
+      <div class="mt-4 space-y-1 text-center text-sm text-muted-foreground">
         <p>当前: {{ currentAccount }}</p>
         <p>进度: {{ completedCount }} / {{ totalCount }}</p>
       </div>
 
-      <el-scrollbar height="300px" style="margin-top: 20px;">
-        <div v-for="(log, index) in logs" :key="index" class="log-item">
-          <el-tag :type="log.type === 'error' ? 'danger' : 'info'" size="small">
+      <Scrollbar height="300px" class="mt-5">
+        <div v-for="(log, index) in logs" :key="index" class="border-b border-border p-2.5">
+          <Tag :type="log.type === 'error' ? 'danger' : 'info'" size="small">
             {{ log.timestamp }}
-          </el-tag>
-          <span class="log-message">{{ log.message }}</span>
+          </Tag>
+          <span class="ml-2 text-sm text-foreground">{{ log.message }}</span>
         </div>
-      </el-scrollbar>
-    </el-dialog>
+      </Scrollbar>
+    </Modal>
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, reactive, onMounted } from 'vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage } from '@/lib/element'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import {
   CreditCard,
   Refresh,
@@ -215,7 +219,7 @@ import {
   Clock,
   CircleCheck,
   CircleClose
-} from '@element-plus/icons-vue'
+} from '@/icons'
 import { getGoogleAccounts, createGoogleTask, uploadGoogleCards } from '@/api/google_business'
 
 interface Account {
@@ -369,68 +373,3 @@ onMounted(() => {
   loadData()
 })
 </script>
-
-<style scoped lang="scss">
-.auto-bind-card {
-  padding: 20px;
-
-  .card-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-
-    .header-left {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-
-      .header-title {
-        font-weight: bold;
-        font-size: 16px;
-      }
-    }
-  }
-
-  .input-hint {
-    font-size: 12px;
-    color: #909399;
-    margin-top: 5px;
-  }
-
-  .card-number {
-    font-size: 12px;
-    color: #409EFF;
-    background: #ecf5ff;
-    padding: 2px 6px;
-    border-radius: 3px;
-  }
-
-  .action-buttons {
-    margin-top: 20px;
-    text-align: center;
-
-    .el-button {
-      margin: 0 10px;
-    }
-  }
-
-  .progress-info {
-    margin-top: 15px;
-    text-align: center;
-
-    p {
-      margin: 5px 0;
-      color: #606266;
-    }
-  }
-
-  .log-item {
-    padding: 10px;
-    border-bottom: 1px solid #EBEEF5;
-
-    .log-message {
-      margin-left: 10px;
-    }
-  }
-}
-</style>

@@ -1,57 +1,61 @@
 <template>
-  <div class="user-balance">
-    <h1>用户余额管理</h1>
+  <div class="space-y-6 p-5">
+    <h1 class="text-2xl font-semibold text-foreground">用户余额管理</h1>
 
-    <el-card shadow="hover">
-      <el-table :data="balances" v-loading="loading" stripe>
-        <el-table-column prop="user" label="用户" width="150">
+    <Card class="shadow-sm">
+      <CardContent class="p-6">
+        <DataTable :data="balances" v-loading="loading" stripe class="w-full">
+        <DataColumn prop="user" label="用户" width="150">
           <template #default="{ row }">
-            <el-tag>{{ row.user_info?.username || row.user }}</el-tag>
+            <Tag>{{ row.user_info?.username || row.user }}</Tag>
           </template>
-        </el-table-column>
-        <el-table-column label="余额" width="150">
+        </DataColumn>
+        <DataColumn label="余额" width="150">
           <template #default="{ row }">
-            <span style="color: #67c23a; font-weight: bold; font-size: 18px;">¥{{ row.balance }}</span>
+            <span class="text-lg font-semibold text-emerald-600">¥{{ row.balance }}</span>
           </template>
-        </el-table-column>
-        <el-table-column label="冻结金额" width="150">
+        </DataColumn>
+        <DataColumn label="冻结金额" width="150">
           <template #default="{ row }">
-            <span style="color: #e6a23c;">¥{{ row.frozen_amount }}</span>
+            <span class="text-amber-600">¥{{ row.frozen_amount }}</span>
           </template>
-        </el-table-column>
-        <el-table-column label="可用余额" width="150">
+        </DataColumn>
+        <DataColumn label="可用余额" width="150">
           <template #default="{ row }">
-            <span style="color: #409eff; font-weight: bold;">¥{{ row.available_balance }}</span>
+            <span class="font-semibold text-primary">¥{{ row.available_balance }}</span>
           </template>
-        </el-table-column>
-        <el-table-column prop="currency" label="货币" width="80" />
-        <el-table-column prop="updated_at" label="最后更新" width="180" />
-        <el-table-column label="操作" width="200" fixed="right">
+        </DataColumn>
+        <DataColumn prop="currency" label="货币" width="80" />
+        <DataColumn prop="updated_at" label="最后更新" width="180" />
+        <DataColumn label="操作" width="200" fixed="right">
           <template #default="{ row }">
-            <el-button text type="primary" @click="showRecharge(row)">充值</el-button>
-            <el-button text type="warning" @click="showFreeze(row)">冻结</el-button>
-            <el-button text @click="viewLogs(row)">日志</el-button>
+            <Button text  variant="default" type="button" @click="showRecharge(row)">充值</Button>
+            <Button text  variant="secondary" type="button" @click="showFreeze(row)">冻结</Button>
+            <Button text @click="viewLogs(row)">日志</Button>
           </template>
-        </el-table-column>
-      </el-table>
+        </DataColumn>
+        </DataTable>
 
-      <el-pagination
-        v-model:current-page="currentPage"
-        v-model:page-size="pageSize"
-        :total="total"
-        :page-sizes="[10, 20, 50, 100]"
-        layout="total, sizes, prev, pager, next, jumper"
-        @size-change="fetchBalances"
-        @current-change="fetchBalances"
-      />
-    </el-card>
+        <Paginator
+          v-model:current-page="currentPage"
+          v-model:page-size="pageSize"
+          :total="total"
+          :page-sizes="[10, 20, 50, 100]"
+          layout="total, sizes, prev, pager, next, jumper"
+          class="mt-5 justify-center"
+          @size-change="fetchBalances"
+          @current-change="fetchBalances"
+        />
+      </CardContent>
+    </Card>
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage } from '@/lib/element'
 import usersApi, { type UserBalance } from '@/api/users'
+import { Card, CardContent } from '@/components/ui/card'
 
 const loading = ref(false)
 const balances = ref<UserBalance[]>([])
@@ -92,11 +96,3 @@ onMounted(() => {
   fetchBalances()
 })
 </script>
-
-<style scoped lang="scss">
-.user-balance {
-  h1 {
-    margin-bottom: 24px;
-  }
-}
-</style>

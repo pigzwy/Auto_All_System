@@ -1,173 +1,183 @@
 <template>
-  <div class="account-manage">
+  <div class="space-y-6 p-5">
     <!-- 页头 -->
-    <div class="page-header">
-      <div class="header-left">
-        <h2>Google 账号管理</h2>
-        <p class="subtitle">管理所有 Google 账号信息</p>
+    <div class="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+      <div>
+        <h2 class="text-2xl font-bold tracking-tight text-foreground">Google 账号管理</h2>
+        <p class="mt-1 text-sm text-muted-foreground">管理所有 Google 账号信息</p>
       </div>
-      <div class="header-right">
-        <el-button type="primary" @click="showImportDialog = true">
-          <el-icon><Upload /></el-icon>
-          <span style="margin-left: 5px;">批量导入</span>
-        </el-button>
-        <el-button type="success" @click="showAddDialog = true">
-          <el-icon><Plus /></el-icon>
-          <span style="margin-left: 5px;">添加账号</span>
-        </el-button>
+      <div class="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-3">
+        <Button  variant="default" type="button" @click="showImportDialog = true">
+          <Icon><Upload /></Icon>
+          <span class="ml-1.5">批量导入</span>
+        </Button>
+        <Button  variant="default" type="button" @click="showAddDialog = true">
+          <Icon><Plus /></Icon>
+          <span class="ml-1.5">添加账号</span>
+        </Button>
       </div>
     </div>
 
     <!-- 筛选和搜索 -->
-    <el-card shadow="never" class="filter-card">
-      <el-row :gutter="15">
-        <el-col :xs="24" :sm="8" :md="6">
-          <el-select
+    <Card class="shadow-sm">
+      <CardContent class="p-5">
+        <div class="grid grid-cols-1 gap-4 md:grid-cols-12">
+          <div class="md:col-span-3">
+          <SelectNative
             v-model="statusFilter"
             placeholder="状态筛选"
             clearable
             @change="loadAccounts"
-            style="width: 100%;"
+            class="w-full"
           >
-            <el-option
+            <SelectOption
               v-for="item in statusOptions"
               :key="item.value"
               :label="item.label"
               :value="item.value"
             />
-          </el-select>
-        </el-col>
+          </SelectNative>
+          </div>
 
-        <el-col :xs="24" :sm="12" :md="14">
-          <el-input
+          <div class="md:col-span-7">
+          <TextInput
             v-model="searchQuery"
             placeholder="搜索邮箱或备注"
             clearable
             @input="loadAccounts"
+            class="w-full"
           >
             <template #prefix>
-              <el-icon><Search /></el-icon>
+              <Icon><Search /></Icon>
             </template>
-          </el-input>
-        </el-col>
+          </TextInput>
+          </div>
 
-        <el-col :xs="24" :sm="4" :md="4">
-          <el-button type="info" style="width: 100%;" @click="loadAccounts">
-            <el-icon><Refresh /></el-icon>
-            <span style="margin-left: 5px;">刷新</span>
-          </el-button>
-        </el-col>
-      </el-row>
-    </el-card>
+          <div class="md:col-span-2">
+          <Button  variant="secondary" type="button" class="w-full" @click="loadAccounts">
+            <Icon><Refresh /></Icon>
+            <span class="ml-1.5">刷新</span>
+          </Button>
+          </div>
+        </div>
+      </CardContent>
+    </Card>
 
     <!-- 数据表格 -->
-    <el-card shadow="never" class="table-card">
-      <template #header>
-        <div class="card-header">
-          <span class="card-title">账号列表</span>
-          <div class="header-actions">
-            <el-button
+    <Card class="shadow-sm">
+      <CardHeader class="pb-3">
+        <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <CardTitle class="text-base">账号列表</CardTitle>
+          <div class="flex flex-wrap items-center gap-2">
+            <Button
               v-if="selectedAccounts.length > 0"
               type="danger"
               size="small"
               @click="handleBulkDelete"
             >
-              <el-icon><Delete /></el-icon>
-              <span style="margin-left: 5px;">批量删除 ({{ selectedAccounts.length }})</span>
-            </el-button>
-            <el-tag type="info">共 {{ accounts.length }} 个账号</el-tag>
+              <Icon><Delete /></Icon>
+              <span class="ml-1.5">批量删除 ({{ selectedAccounts.length }})</span>
+            </Button>
+            <Badge variant="secondary">共 {{ accounts.length }} 个账号</Badge>
           </div>
         </div>
-      </template>
+      </CardHeader>
 
-      <el-table
-        :data="accounts"
-        v-loading="loading"
-        stripe
-        style="width: 100%;"
-        @selection-change="handleSelectionChange"
-      >
-        <el-table-column type="selection" width="55" />
-        <el-table-column prop="email" label="邮箱" min-width="200" />
-        <el-table-column prop="browser_id" label="浏览器ID" width="150">
+      <CardContent>
+        <DataTable
+          :data="accounts"
+          v-loading="loading"
+          stripe
+          class="w-full"
+          @selection-change="handleSelectionChange"
+        >
+        <DataColumn type="selection" width="55" />
+        <DataColumn prop="email" label="邮箱" min-width="200" />
+        <DataColumn prop="browser_id" label="浏览器ID" width="150">
           <template #default="{ row }">
-            <code v-if="row.browser_id" class="browser-id">{{ row.browser_id.substring(0, 8) }}...</code>
-            <span v-else>-</span>
+            <code
+              v-if="row.browser_id"
+              class="rounded bg-primary/10 px-1.5 py-0.5 font-mono text-xs text-primary"
+            >
+              {{ row.browser_id.substring(0, 8) }}...
+            </code>
+            <span v-else class="text-muted-foreground">-</span>
           </template>
-        </el-table-column>
-        <el-table-column prop="status" label="状态" width="150">
+        </DataColumn>
+        <DataColumn prop="status" label="状态" width="150">
           <template #default="{ row }">
-            <el-tag :type="getStatusType(row.status)" size="small">
+            <Tag :type="getStatusType(row.status)" size="small">
               {{ row.status_display }}
-            </el-tag>
+            </Tag>
           </template>
-        </el-table-column>
-        <el-table-column prop="last_checked_at" label="最后检测" width="180">
+        </DataColumn>
+        <DataColumn prop="last_checked_at" label="最后检测" width="180">
           <template #default="{ row }">
             {{ formatTime(row.last_checked_at) || '-' }}
           </template>
-        </el-table-column>
-        <el-table-column label="操作" width="120" fixed="right">
+        </DataColumn>
+        <DataColumn label="操作" width="120" fixed="right">
           <template #default="{ row }">
-            <el-button link type="primary" @click="editAccount(row)">
-              <el-icon><Edit /></el-icon>
-            </el-button>
-            <el-button link type="danger" @click="deleteAccount(row)">
-              <el-icon><Delete /></el-icon>
-            </el-button>
+            <Button link  variant="default" type="button" @click="editAccount(row)">
+              <Icon><Edit /></Icon>
+            </Button>
+            <Button link  variant="destructive" type="button" @click="deleteAccount(row)">
+              <Icon><Delete /></Icon>
+            </Button>
           </template>
-        </el-table-column>
-      </el-table>
-    </el-card>
+        </DataColumn>
+        </DataTable>
+      </CardContent>
+    </Card>
 
     <!-- 添加账号对话框 -->
-    <el-dialog
+    <Modal
       v-model="showAddDialog"
       title="添加 Google 账号"
       width="600px"
     >
-      <el-form :model="newAccount" label-width="100px">
-        <el-form-item label="邮箱" required>
-          <el-input v-model="newAccount.email" type="email" placeholder="user@gmail.com" />
-        </el-form-item>
+      <SimpleForm :model="newAccount" label-width="100px">
+        <SimpleFormItem label="邮箱" required>
+          <TextInput v-model="newAccount.email" type="email" placeholder="user@gmail.com" />
+        </SimpleFormItem>
 
-        <el-form-item label="密码" required>
-          <el-input v-model="newAccount.password" type="password" show-password placeholder="账号密码" />
-        </el-form-item>
+        <SimpleFormItem label="密码" required>
+          <TextInput v-model="newAccount.password" type="password" show-password placeholder="账号密码" />
+        </SimpleFormItem>
 
-        <el-form-item label="辅助邮箱">
-          <el-input v-model="newAccount.recovery_email" type="email" placeholder="recovery@gmail.com" />
-        </el-form-item>
+        <SimpleFormItem label="辅助邮箱">
+          <TextInput v-model="newAccount.recovery_email" type="email" placeholder="recovery@gmail.com" />
+        </SimpleFormItem>
 
-        <el-form-item label="2FA密钥">
-          <el-input v-model="newAccount.secret_key" placeholder="ABCD1234EFGH5678" />
-        </el-form-item>
+        <SimpleFormItem label="2FA密钥">
+          <TextInput v-model="newAccount.secret_key" placeholder="ABCD1234EFGH5678" />
+        </SimpleFormItem>
 
-        <el-form-item label="浏览器ID">
-          <el-input v-model="newAccount.browser_id" placeholder="Bitbrowser 浏览器ID" />
-        </el-form-item>
+        <SimpleFormItem label="浏览器ID">
+          <TextInput v-model="newAccount.browser_id" placeholder="Bitbrowser 浏览器ID" />
+        </SimpleFormItem>
 
-        <el-form-item label="备注">
-          <el-input v-model="newAccount.notes" type="textarea" :rows="3" placeholder="备注信息" />
-        </el-form-item>
-      </el-form>
+        <SimpleFormItem label="备注">
+          <TextInput v-model="newAccount.notes" type="textarea" :rows="3" placeholder="备注信息" />
+        </SimpleFormItem>
+      </SimpleForm>
 
       <template #footer>
-        <el-button @click="showAddDialog = false">取消</el-button>
-        <el-button type="primary" @click="saveAccount">保存</el-button>
+        <Button @click="showAddDialog = false">取消</Button>
+        <Button  variant="default" type="button" @click="saveAccount">保存</Button>
       </template>
-    </el-dialog>
+    </Modal>
 
     <!-- 批量导入对话框 -->
-    <el-dialog
+    <Modal
       v-model="showImportDialog"
       title="批量导入账号"
       width="800px"
     >
-      <el-alert
+      <InfoAlert
         type="info"
         :closable="false"
-        style="margin-bottom: 15px;"
+        class="mb-4"
       >
         <template #title>
           <div>
@@ -175,9 +185,9 @@
             每行一个账号
           </div>
         </template>
-      </el-alert>
+      </InfoAlert>
 
-      <el-input
+      <TextInput
         v-model="importText"
         type="textarea"
         :rows="12"
@@ -185,16 +195,18 @@
       />
 
       <template #footer>
-        <el-button @click="showImportDialog = false">取消</el-button>
-        <el-button type="primary" @click="importAccounts">导入</el-button>
+        <Button @click="showImportDialog = false">取消</Button>
+        <Button  variant="default" type="button" @click="importAccounts">导入</Button>
       </template>
-    </el-dialog>
+    </Modal>
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessage, ElMessageBox } from '@/lib/element'
+import { Badge } from '@/components/ui/badge'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import {
   Upload,
   Plus,
@@ -202,7 +214,7 @@ import {
   Refresh,
   Edit,
   Delete
-} from '@element-plus/icons-vue'
+} from '@/icons'
 import { getGoogleAccounts, createGoogleAccount, deleteGoogleAccount, batchImportGoogleAccounts, batchDeleteAccounts } from '@/api/google_business'
 
 interface Account {
@@ -399,79 +411,3 @@ onMounted(() => {
   loadAccounts()
 })
 </script>
-
-<style scoped lang="scss">
-.account-manage {
-  padding: 20px;
-}
-
-.page-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 20px;
-
-  @media (max-width: 768px) {
-    flex-direction: column;
-    align-items: flex-start;
-
-    .header-right {
-      margin-top: 15px;
-    }
-  }
-
-  h2 {
-    font-size: 24px;
-    font-weight: bold;
-    color: #303133;
-    margin: 0 0 5px 0;
-  }
-
-  .subtitle {
-    color: #909399;
-    font-size: 14px;
-    margin: 0;
-  }
-
-  .header-right {
-    .el-button {
-      margin-left: 10px;
-
-      &:first-child {
-        margin-left: 0;
-      }
-    }
-  }
-}
-
-.filter-card {
-  margin-bottom: 20px;
-}
-
-.table-card {
-  .card-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-
-    .card-title {
-      font-weight: bold;
-      font-size: 16px;
-    }
-
-    .header-actions {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-    }
-  }
-
-  .browser-id {
-    font-size: 12px;
-    color: #409EFF;
-    background: #ecf5ff;
-    padding: 2px 6px;
-    border-radius: 3px;
-  }
-}
-</style>

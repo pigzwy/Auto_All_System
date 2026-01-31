@@ -1,246 +1,251 @@
 <template>
-  <div class="auto-all-in-one">
-    <el-card shadow="never">
-      <template #header>
-        <div class="card-header">
-          <div class="header-left">
-            <el-icon color="#9C27B0"><MagicStick /></el-icon>
-            <span class="header-title">一键全自动处理</span>
+  <div class="space-y-6 p-5">
+    <Card class="shadow-sm">
+      <CardHeader>
+        <div class="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+          <div class="flex items-center gap-2">
+            <Icon color="#9C27B0"><MagicStick /></Icon>
+            <CardTitle class="text-base">一键全自动处理</CardTitle>
           </div>
-          <el-tag type="info" size="large">
+          <Tag type="info" size="large">
             登录 → 检测 → 验证 → 绑卡 → 订阅
-          </el-tag>
+          </Tag>
         </div>
-      </template>
+      </CardHeader>
 
-      <el-alert
-        type="info"
-        :closable="false"
-        style="margin-bottom: 20px;"
-      >
-        <template #title>
-          <strong>自动执行完整流程：</strong>Google登录、状态检测、SheerID验证、绑卡订阅
-        </template>
-      </el-alert>
+      <CardContent class="space-y-6">
+        <InfoAlert type="info" :closable="false">
+          <template #title>
+            <strong>自动执行完整流程：</strong>Google登录、状态检测、SheerID验证、绑卡订阅
+          </template>
+        </InfoAlert>
 
-      <!-- 配置区域 -->
-      <el-form :model="config" label-width="150px">
-        <el-row :gutter="15">
-          <el-col :xs="24" :md="12">
-            <el-form-item label="SheerID API Key" required>
-              <el-input
-                v-model="config.apiKey"
-                type="password"
-                show-password
-                placeholder="必填：用于SheerID验证"
-              >
-                <template #prefix>
-                  <el-icon><Key /></el-icon>
-                </template>
-              </el-input>
-            </el-form-item>
-          </el-col>
-          <el-col :xs="24" :md="6">
-            <el-form-item label="一卡几绑">
-              <el-input-number
-                v-model="config.cardsPerAccount"
-                :min="1"
-                :max="100"
-                controls-position="right"
-                style="width: 100%;"
+        <!-- 配置区域 -->
+        <SimpleForm :model="config" label-width="150px">
+          <div class="grid grid-cols-1 gap-4 md:grid-cols-12">
+            <div class="md:col-span-6">
+              <SimpleFormItem label="SheerID API Key" required>
+                <TextInput
+                  v-model="config.apiKey"
+                  type="password"
+                  show-password
+                  placeholder="必填：用于SheerID验证"
+                >
+                  <template #prefix>
+                    <Icon><Key /></Icon>
+                  </template>
+                </TextInput>
+              </SimpleFormItem>
+            </div>
+            <div class="md:col-span-3">
+              <SimpleFormItem label="一卡几绑">
+                <NumberInput
+                  v-model="config.cardsPerAccount"
+                  :min="1"
+                  :max="100"
+                  controls-position="right"
+                  class="w-full"
+                />
+              </SimpleFormItem>
+            </div>
+            <div class="md:col-span-3">
+              <SimpleFormItem label="并发数">
+                <NumberInput
+                  v-model="config.threadCount"
+                  :min="1"
+                  :max="20"
+                  controls-position="right"
+                  class="w-full"
+                />
+              </SimpleFormItem>
+            </div>
+          </div>
+
+          <!-- 延迟设置 -->
+          <Collapse v-model="activeCollapse" class="mt-5">
+            <CollapseItem title="高级延迟设置（秒）" name="delays">
+              <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 md:grid-cols-4">
+                <SimpleFormItem label="点击 Get Offer 后">
+                  <NumberInput v-model="config.delays.afterOffer" :min="1" :max="60" class="w-full" />
+                </SimpleFormItem>
+                <SimpleFormItem label="点击 Add Card 后">
+                  <NumberInput v-model="config.delays.afterAddCard" :min="1" :max="60" class="w-full" />
+                </SimpleFormItem>
+                <SimpleFormItem label="点击 Save 后">
+                  <NumberInput v-model="config.delays.afterSave" :min="1" :max="60" class="w-full" />
+                </SimpleFormItem>
+                <SimpleFormItem label="订阅完成后">
+                  <NumberInput v-model="config.delays.afterSubscribe" :min="1" :max="60" class="w-full" />
+                </SimpleFormItem>
+              </div>
+            </CollapseItem>
+
+            <CollapseItem title="高级选项" name="advanced">
+              <div class="grid grid-cols-1 gap-4 md:grid-cols-2">
+                <SimpleFormItem label="跳过状态检测">
+                  <Toggle v-model="config.skipStatusCheck" />
+                  <div class="mt-1 text-xs text-muted-foreground">直接进行验证和绑卡</div>
+                </SimpleFormItem>
+                <SimpleFormItem label="失败后重试">
+                  <Toggle v-model="config.retryOnFailure" />
+                  <div class="mt-1 text-xs text-muted-foreground">任务失败后自动重试</div>
+                </SimpleFormItem>
+              </div>
+            </CollapseItem>
+          </Collapse>
+        </SimpleForm>
+
+        <!-- 统计信息 -->
+        <div class="grid grid-cols-2 gap-4 sm:grid-cols-4 lg:grid-cols-8">
+          <div class="rounded-xl border border-border bg-background/60 p-4 shadow-sm">
+            <Statistic title="总账号" :value="stats.totalAccounts" />
+          </div>
+          <div class="rounded-xl border border-border bg-background/60 p-4 shadow-sm">
+            <Statistic title="可用卡片" :value="stats.availableCards" />
+          </div>
+          <div class="rounded-xl border border-border bg-background/60 p-4 shadow-sm">
+            <Statistic title="待处理" :value="stats.pending" />
+          </div>
+          <div class="rounded-xl border border-border bg-background/60 p-4 shadow-sm">
+            <Statistic title="处理中" :value="stats.processing" />
+          </div>
+          <div class="rounded-xl border border-border bg-background/60 p-4 shadow-sm">
+            <Statistic title="已完成" :value="stats.completed" />
+          </div>
+          <div class="rounded-xl border border-border bg-background/60 p-4 shadow-sm">
+            <Statistic title="失败" :value="stats.failed" />
+          </div>
+          <div class="rounded-xl border border-border bg-background/60 p-4 shadow-sm">
+            <Statistic title="已订阅" :value="stats.subscribed" />
+          </div>
+          <div class="rounded-xl border border-border bg-background/60 p-4 shadow-sm">
+            <Statistic title="成功率" :value="successRate" suffix="%" />
+          </div>
+        </div>
+
+        <!-- 账号列表 -->
+        <DataTable
+          :data="accounts"
+          v-loading="loading"
+          @selection-change="handleSelectionChange"
+          stripe
+          max-height="400"
+          class="w-full"
+        >
+          <DataColumn type="selection" width="55" />
+          <DataColumn prop="email" label="邮箱" min-width="200" />
+          <DataColumn prop="status" label="状态" width="120">
+            <template #default="{ row }">
+              <Tag :type="getStatusType(row.status)" size="small">
+                {{ getStatusText(row.status) }}
+              </Tag>
+            </template>
+          </DataColumn>
+          <DataColumn prop="current_step" label="当前步骤" width="150">
+            <template #default="{ row }">
+              <span v-if="row.current_step">{{ row.current_step }}</span>
+              <span v-else class="text-muted-foreground">-</span>
+            </template>
+          </DataColumn>
+          <DataColumn prop="progress" label="进度" width="150">
+            <template #default="{ row }">
+              <ProgressBar
+                v-if="row.progress !== undefined"
+                :percentage="row.progress"
+                :status="getProgressStatus(row.status)"
               />
-            </el-form-item>
-          </el-col>
-          <el-col :xs="24" :md="6">
-            <el-form-item label="并发数">
-              <el-input-number
-                v-model="config.threadCount"
-                :min="1"
-                :max="20"
-                controls-position="right"
-                style="width: 100%;"
-              />
-            </el-form-item>
-          </el-col>
-        </el-row>
+            </template>
+          </DataColumn>
+          <DataColumn prop="updated_at" label="更新时间" width="180">
+            <template #default="{ row }">
+              {{ formatTime(row.updated_at) }}
+            </template>
+          </DataColumn>
+        </DataTable>
 
-        <!-- 延迟设置 -->
-        <el-collapse v-model="activeCollapse" style="margin-bottom: 20px;">
-          <el-collapse-item title="高级延迟设置（秒）" name="delays">
-            <el-row :gutter="15">
-              <el-col :xs="24" :sm="12" :md="6">
-                <el-form-item label="点击 Get Offer 后">
-                  <el-input-number v-model="config.delays.afterOffer" :min="1" :max="60" style="width: 100%;" />
-                </el-form-item>
-              </el-col>
-              <el-col :xs="24" :sm="12" :md="6">
-                <el-form-item label="点击 Add Card 后">
-                  <el-input-number v-model="config.delays.afterAddCard" :min="1" :max="60" style="width: 100%;" />
-                </el-form-item>
-              </el-col>
-              <el-col :xs="24" :sm="12" :md="6">
-                <el-form-item label="点击 Save 后">
-                  <el-input-number v-model="config.delays.afterSave" :min="1" :max="60" style="width: 100%;" />
-                </el-form-item>
-              </el-col>
-              <el-col :xs="24" :sm="12" :md="6">
-                <el-form-item label="订阅完成后">
-                  <el-input-number v-model="config.delays.afterSubscribe" :min="1" :max="60" style="width: 100%;" />
-                </el-form-item>
-              </el-col>
-            </el-row>
-          </el-collapse-item>
-
-          <el-collapse-item title="高级选项" name="advanced">
-            <el-row :gutter="15">
-              <el-col :xs="24" :md="12">
-                <el-form-item label="跳过状态检测">
-                  <el-switch v-model="config.skipStatusCheck" />
-                  <div class="option-hint">直接进行验证和绑卡</div>
-                </el-form-item>
-              </el-col>
-              <el-col :xs="24" :md="12">
-                <el-form-item label="失败后重试">
-                  <el-switch v-model="config.retryOnFailure" />
-                  <div class="option-hint">任务失败后自动重试</div>
-                </el-form-item>
-              </el-col>
-            </el-row>
-          </el-collapse-item>
-        </el-collapse>
-
-      </el-form>
-
-      <!-- 统计信息 -->
-      <el-row :gutter="15" style="margin: 20px 0;">
-        <el-col :xs="12" :sm="6" :md="3">
-          <el-statistic title="总账号" :value="stats.totalAccounts" />
-        </el-col>
-        <el-col :xs="12" :sm="6" :md="3">
-          <el-statistic title="可用卡片" :value="stats.availableCards" />
-        </el-col>
-        <el-col :xs="12" :sm="6" :md="3">
-          <el-statistic title="待处理" :value="stats.pending" />
-        </el-col>
-        <el-col :xs="12" :sm="6" :md="3">
-          <el-statistic title="处理中" :value="stats.processing" />
-        </el-col>
-        <el-col :xs="12" :sm="6" :md="3">
-          <el-statistic title="已完成" :value="stats.completed" />
-        </el-col>
-        <el-col :xs="12" :sm="6" :md="3">
-          <el-statistic title="失败" :value="stats.failed" />
-        </el-col>
-        <el-col :xs="12" :sm="6" :md="3">
-          <el-statistic title="已订阅" :value="stats.subscribed" />
-        </el-col>
-        <el-col :xs="12" :sm="6" :md="3">
-          <el-statistic title="成功率" :value="successRate" suffix="%" />
-        </el-col>
-      </el-row>
-
-      <!-- 账号列表 -->
-      <el-table
-        :data="accounts"
-        v-loading="loading"
-        @selection-change="handleSelectionChange"
-        stripe
-        max-height="400"
-        style="margin-bottom: 20px;"
-      >
-        <el-table-column type="selection" width="55" />
-        <el-table-column prop="email" label="邮箱" min-width="200" />
-        <el-table-column prop="status" label="状态" width="120">
-          <template #default="{ row }">
-            <el-tag :type="getStatusType(row.status)" size="small">
-              {{ getStatusText(row.status) }}
-            </el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column prop="current_step" label="当前步骤" width="150">
-          <template #default="{ row }">
-            <span v-if="row.current_step">{{ row.current_step }}</span>
-            <span v-else style="color: #909399;">-</span>
-          </template>
-        </el-table-column>
-        <el-table-column prop="progress" label="进度" width="150">
-          <template #default="{ row }">
-            <el-progress
-              v-if="row.progress !== undefined"
-              :percentage="row.progress"
-              :status="getProgressStatus(row.status)"
-            />
-          </template>
-        </el-table-column>
-        <el-table-column prop="updated_at" label="更新时间" width="180">
-          <template #default="{ row }">
-            {{ formatTime(row.updated_at) }}
-          </template>
-        </el-table-column>
-      </el-table>
-
-      <!-- 操作按钮 -->
-      <div class="action-buttons">
-        <el-button
-          type="success"
-          size="large"
-          :disabled="!config.apiKey || !selectedAccounts.length || processing"
-          :loading="processing"
-          @click="startAutoAll"
-        >
-          <el-icon><VideoPlay /></el-icon>
-          <span style="margin-left: 5px;">开始执行选中账号</span>
-        </el-button>
-        <el-button
-          type="warning"
-          size="large"
-          :disabled="!processing"
-          @click="stopAutoAll"
-        >
-          <el-icon><VideoPause /></el-icon>
-          <span style="margin-left: 5px;">暂停任务</span>
-        </el-button>
-        <el-button
-          type="danger"
-          size="large"
-          @click="resetAll"
-        >
-          <el-icon><RefreshLeft /></el-icon>
-          <span style="margin-left: 5px;">重置所有</span>
-        </el-button>
-      </div>
-    </el-card>
+        <!-- 操作按钮 -->
+        <div class="flex flex-col items-stretch justify-center gap-3 sm:flex-row sm:items-center">
+          <Button
+             variant="default" type="button"
+            size="large"
+            class="w-full sm:w-auto"
+            :disabled="!config.apiKey || !selectedAccounts.length || processing"
+            :loading="processing"
+            @click="startAutoAll"
+          >
+            <Icon><VideoPlay /></Icon>
+            <span class="ml-1.5">开始执行选中账号</span>
+          </Button>
+          <Button
+             variant="secondary" type="button"
+            size="large"
+            class="w-full sm:w-auto"
+            :disabled="!processing"
+            @click="stopAutoAll"
+          >
+            <Icon><VideoPause /></Icon>
+            <span class="ml-1.5">暂停任务</span>
+          </Button>
+          <Button
+             variant="destructive" type="button"
+            size="large"
+            class="w-full sm:w-auto"
+            @click="resetAll"
+          >
+            <Icon><RefreshLeft /></Icon>
+            <span class="ml-1.5">重置所有</span>
+          </Button>
+        </div>
+      </CardContent>
+    </Card>
 
     <!-- 实时日志对话框 -->
-    <el-dialog
+    <Modal
       v-model="logDialog"
       title="实时日志"
       width="900px"
       :close-on-click-modal="false"
     >
-      <el-scrollbar height="500px">
-        <div v-for="(log, index) in logs" :key="index" class="log-item" :class="`log-${log.type}`">
-          <el-tag :type="getLogType(log.type)" size="small">
+      <Scrollbar height="500px">
+        <div
+          v-for="(log, index) in logs"
+          :key="index"
+          class="flex items-start gap-2 border-b border-border p-2.5"
+          :class="
+            log.type === 'success'
+              ? 'bg-emerald-500/10'
+              : log.type === 'error'
+                ? 'bg-rose-500/10'
+                : log.type === 'warning'
+                  ? 'bg-amber-500/10'
+                  : ''
+          "
+        >
+          <Tag :type="getLogType(log.type)" size="small">
             {{ log.timestamp }}
-          </el-tag>
-          <span class="log-message">{{ log.message }}</span>
+          </Tag>
+          <span class="break-words text-sm text-foreground">{{ log.message }}</span>
         </div>
-        <el-empty v-if="logs.length === 0" description="暂无日志" />
-      </el-scrollbar>
-    </el-dialog>
+        <div v-if="logs.length === 0" class="p-8 text-center">
+          <div class="text-sm font-medium text-foreground">暂无日志</div>
+          <div class="mt-1 text-xs text-muted-foreground">开始任务后会在这里显示实时输出</div>
+        </div>
+      </Scrollbar>
+    </Modal>
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted } from 'vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessage, ElMessageBox } from '@/lib/element'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import {
   MagicStick,
   Key,
   VideoPlay,
   VideoPause,
   RefreshLeft
-} from '@element-plus/icons-vue'
+} from '@/icons'
 import { getGoogleAccounts, createGoogleTask, getCards } from '@/api/google_business'
 
 interface Account {
@@ -459,69 +464,3 @@ onMounted(() => {
   loadCards()
 })
 </script>
-
-<style scoped lang="scss">
-.auto-all-in-one {
-  padding: 20px;
-
-  .card-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-
-    @media (max-width: 768px) {
-      flex-direction: column;
-      align-items: flex-start;
-      gap: 10px;
-    }
-
-    .header-left {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-
-      .header-title {
-        font-weight: bold;
-        font-size: 18px;
-      }
-    }
-  }
-
-  .option-hint,
-  .upload-hint {
-    font-size: 12px;
-    color: #909399;
-    margin-top: 5px;
-  }
-
-  .action-buttons {
-    margin-top: 20px;
-    text-align: center;
-
-    .el-button {
-      margin: 5px 10px;
-    }
-  }
-
-  .log-item {
-    padding: 10px;
-    border-bottom: 1px solid #EBEEF5;
-
-    &.log-success {
-      background: #f0f9ff;
-    }
-
-    &.log-error {
-      background: #fef0f0;
-    }
-
-    &.log-warning {
-      background: #fdf6ec;
-    }
-
-    .log-message {
-      margin-left: 10px;
-    }
-  }
-}
-</style>

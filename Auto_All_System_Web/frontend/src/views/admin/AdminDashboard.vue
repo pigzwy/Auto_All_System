@@ -1,126 +1,175 @@
 <template>
-  <div class="admin-dashboard">
-    <h1>管理后台</h1>
-    
+  <div class="space-y-6">
+    <div class="flex items-end justify-between gap-4">
+      <div>
+        <h1 class="text-2xl font-semibold text-foreground">管理后台</h1>
+        <p class="mt-1 text-sm text-muted-foreground">系统概览与快捷入口</p>
+      </div>
+    </div>
+
     <!-- 统计卡片 -->
-    <el-row :gutter="20" class="stats-row">
-      <el-col :span="6">
-        <el-card shadow="hover" class="stat-card users">
-          <div class="stat-content">
-            <el-icon class="stat-icon"><User /></el-icon>
-            <div class="stat-info">
-              <div class="stat-value">{{ stats.totalUsers || 0 }}</div>
-              <div class="stat-label">总用户数</div>
+    <div class="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-4">
+      <Card class="shadow-sm transition-shadow hover:shadow-md">
+        <CardContent class="p-6">
+          <div class="flex items-center gap-4">
+            <div class="flex h-12 w-12 items-center justify-center rounded-xl bg-gradient-to-br from-indigo-500 to-fuchsia-500 text-white shadow-sm">
+              <Icon :size="22"><User /></Icon>
+            </div>
+            <div class="min-w-0">
+              <div class="text-2xl font-semibold leading-none">{{ stats.totalUsers || 0 }}</div>
+              <div class="mt-1 text-xs text-muted-foreground">总用户数</div>
             </div>
           </div>
-        </el-card>
-      </el-col>
-      
-      <el-col :span="6">
-        <el-card shadow="hover" class="stat-card tasks">
-          <div class="stat-content">
-            <el-icon class="stat-icon"><List /></el-icon>
-            <div class="stat-info">
-              <div class="stat-value">{{ stats.totalTasks || 0 }}</div>
-              <div class="stat-label">总任务数</div>
+        </CardContent>
+      </Card>
+
+      <Card class="shadow-sm transition-shadow hover:shadow-md">
+        <CardContent class="p-6">
+          <div class="flex items-center gap-4">
+            <div class="flex h-12 w-12 items-center justify-center rounded-xl bg-gradient-to-br from-emerald-500 to-sky-500 text-white shadow-sm">
+              <Icon :size="22"><List /></Icon>
+            </div>
+            <div class="min-w-0">
+              <div class="text-2xl font-semibold leading-none">{{ stats.totalTasks || 0 }}</div>
+              <div class="mt-1 text-xs text-muted-foreground">总任务数</div>
             </div>
           </div>
-        </el-card>
-      </el-col>
-      
-      <el-col :span="6">
-        <el-card shadow="hover" class="stat-card revenue">
-          <div class="stat-content">
-            <el-icon class="stat-icon"><Money /></el-icon>
-            <div class="stat-info">
-              <div class="stat-value">¥{{ stats.totalRevenue || 0 }}</div>
-              <div class="stat-label">总收入</div>
+        </CardContent>
+      </Card>
+
+      <Card class="shadow-sm transition-shadow hover:shadow-md">
+        <CardContent class="p-6">
+          <div class="flex items-center gap-4">
+            <div class="flex h-12 w-12 items-center justify-center rounded-xl bg-gradient-to-br from-amber-500 to-orange-500 text-white shadow-sm">
+              <Icon :size="22"><Money /></Icon>
+            </div>
+            <div class="min-w-0">
+              <div class="text-2xl font-semibold leading-none">¥{{ stats.totalRevenue || 0 }}</div>
+              <div class="mt-1 text-xs text-muted-foreground">总收入</div>
             </div>
           </div>
-        </el-card>
-      </el-col>
-      
-      <el-col :span="6">
-        <el-card shadow="hover" class="stat-card cards">
-          <div class="stat-content">
-            <el-icon class="stat-icon"><CreditCard /></el-icon>
-            <div class="stat-info">
-              <div class="stat-value">{{ stats.totalCards || 0 }}</div>
-              <div class="stat-label">虚拟卡总数</div>
+        </CardContent>
+      </Card>
+
+      <Card class="shadow-sm transition-shadow hover:shadow-md">
+        <CardContent class="p-6">
+          <div class="flex items-center gap-4">
+            <div class="flex h-12 w-12 items-center justify-center rounded-xl bg-gradient-to-br from-cyan-500 to-emerald-500 text-white shadow-sm">
+              <Icon :size="22"><CreditCard /></Icon>
+            </div>
+            <div class="min-w-0">
+              <div class="text-2xl font-semibold leading-none">{{ stats.totalCards || 0 }}</div>
+              <div class="mt-1 text-xs text-muted-foreground">虚拟卡总数</div>
             </div>
           </div>
-        </el-card>
-      </el-col>
-    </el-row>
+        </CardContent>
+      </Card>
+    </div>
 
     <!-- 图表区域 -->
-    <el-row :gutter="20" class="charts-row">
-      <el-col :span="12">
-        <el-card shadow="hover">
-          <template #header>
-            <h3>用户增长趋势</h3>
-          </template>
-          <div style="height: 300px">
-            <!-- 这里可以集成ECharts图表 -->
-            <div class="chart-placeholder">用户增长图表</div>
+    <div class="grid grid-cols-1 gap-5 lg:grid-cols-2">
+      <Card class="shadow-sm transition-shadow hover:shadow-md">
+        <CardHeader>
+          <div class="flex items-center justify-between">
+            <CardTitle class="text-base">用户增长趋势</CardTitle>
+            <CardDescription class="text-xs">占位</CardDescription>
           </div>
-        </el-card>
-      </el-col>
-      
-      <el-col :span="12">
-        <el-card shadow="hover">
-          <template #header>
-            <h3>任务完成率</h3>
-          </template>
-          <div style="height: 300px">
-            <div class="chart-placeholder">任务完成率图表</div>
+        </CardHeader>
+        <CardContent>
+          <div class="h-[300px]">
+            <div class="flex h-full items-center justify-center rounded-xl border border-border bg-muted/30 text-sm text-muted-foreground">
+              用户增长图表
+            </div>
           </div>
-        </el-card>
-      </el-col>
-    </el-row>
+        </CardContent>
+      </Card>
+
+      <Card class="shadow-sm transition-shadow hover:shadow-md">
+        <CardHeader>
+          <div class="flex items-center justify-between">
+            <CardTitle class="text-base">任务完成率</CardTitle>
+            <CardDescription class="text-xs">占位</CardDescription>
+          </div>
+        </CardHeader>
+        <CardContent>
+          <div class="h-[300px]">
+            <div class="flex h-full items-center justify-center rounded-xl border border-border bg-muted/30 text-sm text-muted-foreground">
+              任务完成率图表
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+    </div>
 
     <!-- 快速操作 -->
-    <el-card shadow="hover" class="quick-actions">
-      <template #header>
-        <h3>快速操作</h3>
-      </template>
-      <el-row :gutter="16">
-        <el-col :span="6" v-for="action in quickActions" :key="action.name">
-          <div class="action-card" @click="handleAction(action.route)">
-            <el-icon :size="40" :color="action.color">
-              <component :is="action.icon" />
-            </el-icon>
-            <div class="action-name">{{ action.name }}</div>
-          </div>
-        </el-col>
-      </el-row>
-    </el-card>
+    <Card class="shadow-sm">
+      <CardHeader>
+        <div class="flex items-center justify-between">
+          <CardTitle class="text-base">快速操作</CardTitle>
+          <CardDescription class="text-xs">常用入口</CardDescription>
+        </div>
+      </CardHeader>
+      <CardContent>
+        <div class="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4">
+          <button
+            v-for="action in quickActions"
+            :key="action.name"
+            type="button"
+            class="group w-full rounded-xl border border-border bg-background/60 p-4 text-left shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md"
+            @click="handleAction(action.route)"
+          >
+            <div class="flex items-center gap-3">
+              <div class="flex h-11 w-11 items-center justify-center rounded-xl bg-muted">
+                <Icon :size="24" :color="action.color">
+                  <component :is="action.icon" />
+                </Icon>
+              </div>
+              <div class="min-w-0">
+                <div class="truncate text-sm font-medium text-foreground">{{ action.name }}</div>
+                <div class="mt-1 truncate text-xs text-muted-foreground">点击进入</div>
+              </div>
+            </div>
+          </button>
+        </div>
+      </CardContent>
+    </Card>
 
     <!-- 最近活动 -->
-    <el-card shadow="hover" class="recent-activity">
-      <template #header>
-        <h3>最近活动</h3>
-      </template>
-      <el-timeline>
-        <el-timeline-item
-          v-for="activity in recentActivities"
-          :key="activity.id"
-          :timestamp="activity.time"
-          :type="activity.type"
-        >
-          {{ activity.content }}
-        </el-timeline-item>
-      </el-timeline>
-    </el-card>
+    <Card class="shadow-sm">
+      <CardHeader>
+        <div class="flex items-center justify-between">
+          <CardTitle class="text-base">最近活动</CardTitle>
+          <CardDescription class="text-xs">系统事件</CardDescription>
+        </div>
+      </CardHeader>
+      <CardContent>
+        <div class="relative pl-5">
+          <div class="absolute left-2 top-0 h-full w-px bg-border" />
+          <div
+            v-for="(activity, idx) in recentActivities"
+            :key="activity.id"
+            class="relative pb-4"
+            :class="idx === recentActivities.length - 1 ? 'pb-0' : ''"
+          >
+            <div class="absolute -left-[1px] top-1.5 h-2.5 w-2.5 rounded-full bg-primary/60" />
+            <div class="flex items-start justify-between gap-4">
+              <span class="text-sm text-foreground">{{ activity.content }}</span>
+              <span class="shrink-0 text-xs text-muted-foreground">{{ activity.time }}</span>
+            </div>
+          </div>
+        </div>
+      </CardContent>
+    </Card>
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { User, List, Money, CreditCard, Setting, DataAnalysis, UserFilled, Tickets } from '@element-plus/icons-vue'
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { User, List, Money, CreditCard, Setting, DataAnalysis, UserFilled, Tickets } from '@/icons'
 import adminApi, { type DashboardStats } from '@/api/admin'
-import { ElMessage } from 'element-plus'
+import { ElMessage } from '@/lib/element'
 
 const router = useRouter()
 
@@ -170,120 +219,3 @@ onMounted(() => {
   fetchStats()
 })
 </script>
-
-<style scoped lang="scss">
-.admin-dashboard {
-  h1 {
-    margin-bottom: 24px;
-    font-size: 28px;
-    color: #303133;
-  }
-
-  .stats-row {
-    margin-bottom: 20px;
-
-    .stat-card {
-      border-radius: 8px;
-      transition: all 0.3s;
-
-      &:hover {
-        transform: translateY(-4px);
-        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
-      }
-
-      &.users .stat-icon { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); }
-      &.tasks .stat-icon { background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%); }
-      &.revenue .stat-icon { background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%); }
-      &.cards .stat-icon { background: linear-gradient(135deg, #43e97b 0%, #38f9d7 100%); }
-
-      .stat-content {
-        display: flex;
-        align-items: center;
-        gap: 20px;
-
-        .stat-icon {
-          font-size: 48px;
-          padding: 16px;
-          border-radius: 12px;
-          color: #fff;
-        }
-
-        .stat-info {
-          flex: 1;
-
-          .stat-value {
-            font-size: 32px;
-            font-weight: bold;
-            color: #303133;
-            margin-bottom: 4px;
-          }
-
-          .stat-label {
-            font-size: 14px;
-            color: #909399;
-          }
-        }
-      }
-    }
-  }
-
-  .charts-row {
-    margin-bottom: 20px;
-
-    h3 {
-      margin: 0;
-      font-size: 16px;
-    }
-
-    .chart-placeholder {
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      height: 100%;
-      color: #909399;
-      font-size: 16px;
-      background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
-      border-radius: 8px;
-    }
-  }
-
-  .quick-actions {
-    margin-bottom: 20px;
-
-    h3 {
-      margin: 0;
-      font-size: 18px;
-    }
-
-    .action-card {
-      text-align: center;
-      padding: 32px 16px;
-      cursor: pointer;
-      border: 2px solid #ebeef5;
-      border-radius: 12px;
-      transition: all 0.3s;
-
-      &:hover {
-        border-color: #409EFF;
-        background: linear-gradient(135deg, #f5f7fa 0%, #e8f4f8 100%);
-        transform: translateY(-4px);
-        box-shadow: 0 8px 16px rgba(0, 0, 0, 0.1);
-      }
-
-      .action-name {
-        margin-top: 12px;
-        font-size: 16px;
-        font-weight: 500;
-        color: #606266;
-      }
-    }
-  }
-
-  .recent-activity {
-    h3 {
-      margin: 0;
-      font-size: 18px;
-    }
-  }
-}
-</style>

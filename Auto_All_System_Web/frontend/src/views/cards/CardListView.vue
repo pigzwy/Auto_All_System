@@ -1,209 +1,310 @@
 <template>
-  <div class="card-list">
-    <div class="page-header">
-      <h1>虚拟卡管理</h1>
-      <el-button-group>
-        <el-button type="primary" @click="showCreateDialog = true">
-          <el-icon><Plus /></el-icon>
+  <div class="space-y-6 p-5">
+    <div class="flex items-center justify-between">
+      <h1 class="text-2xl font-semibold text-foreground">虚拟卡管理</h1>
+      <div class="flex items-center gap-2">
+        <Button size="sm" class="gap-2" @click="showCreateDialog = true">
+          <Plus class="h-4 w-4" />
           添加虚拟卡
-        </el-button>
-        <el-button type="success" @click="showImportDialog = true">
-          <el-icon><Upload /></el-icon>
+        </Button>
+        <Button variant="secondary" size="sm" class="gap-2" @click="showImportDialog = true">
+          <Upload class="h-4 w-4" />
           批量导入
-        </el-button>
-      </el-button-group>
+        </Button>
+      </div>
     </div>
 
-    <el-tabs v-model="activeTab" @tab-click="handleTabChange">
-      <el-tab-pane label="我的虚拟卡" name="my">
-        <el-table :data="myCards" v-loading="loading" stripe>
-          <el-table-column prop="id" label="ID" width="80" />
-          <el-table-column prop="masked_card_number" label="卡号" width="200">
-            <template #default="{ row }">
-              <span class="font-mono">{{ row.masked_card_number }}</span>
-            </template>
-          </el-table-column>
-          <el-table-column label="持卡人" width="150">
-            <template #default="{ row }">
-              {{ row.card_holder || '-' }}
-            </template>
-          </el-table-column>
-          <el-table-column label="有效期" width="100">
-            <template #default="{ row }">
-              {{ String(row.expiry_month).padStart(2, '0') }}/{{ row.expiry_year }}
-            </template>
-          </el-table-column>
-          <el-table-column label="卡类型/银行" width="180">
-            <template #default="{ row }">
-              <div class="flex items-center gap-2">
-                <el-tag size="small" :type="row.card_type === 'visa' ? 'primary' : 'warning'">
-                  {{ row.card_type || 'Unknown' }}
-                </el-tag>
-                <span class="text-xs text-gray-500">{{ row.bank_name || '' }}</span>
-              </div>
-            </template>
-          </el-table-column>
-          <el-table-column prop="status" label="状态" width="100">
-            <template #default="{ row }">
-              <el-tag :type="getCardStatusType(row.status)">{{ getCardStatusText(row.status) }}</el-tag>
-            </template>
-          </el-table-column>
-          <el-table-column prop="use_count" label="使用次数" width="100" />
-          <el-table-column prop="balance" label="余额" width="100">
-            <template #default="{ row }">
-              {{ row.balance ? `¥${row.balance}` : '-' }}
-            </template>
-          </el-table-column>
-          <el-table-column v-if="isAdmin" prop="owner_user_name" label="所有者" width="120">
-            <template #default="{ row }">
-              {{ row.owner_user_name || '-' }}
-            </template>
-          </el-table-column>
-          <el-table-column label="操作" width="100" fixed="right">
-            <template #default="{ row }">
-              <el-button link type="danger" @click="handleDeleteCard(row)">删除</el-button>
-            </template>
-          </el-table-column>
-        </el-table>
-      </el-tab-pane>
+    <Tabs v-model:modelValue="activeTab" class="w-full" @update:modelValue="handleTabChange">
+      <TabsList>
+        <TabsTrigger value="my">我的虚拟卡</TabsTrigger>
+        <TabsTrigger value="public">公共卡池</TabsTrigger>
+      </TabsList>
 
-      <el-tab-pane label="公共卡池" name="public">
-        <el-table :data="publicCards" v-loading="loading" stripe>
-          <el-table-column prop="id" label="ID" width="80" />
-          <el-table-column label="卡类型/银行" width="180">
-            <template #default="{ row }">
-              <div class="flex items-center gap-2">
-                <el-tag size="small" :type="row.card_type === 'visa' ? 'primary' : 'warning'">
-                  {{ row.card_type || 'Unknown' }}
-                </el-tag>
-                <span class="text-xs text-gray-500">{{ row.bank_name || '' }}</span>
-              </div>
-            </template>
-          </el-table-column>
-          <el-table-column prop="status" label="状态" width="100">
-            <template #default="{ row }">
-              <el-tag :type="getCardStatusType(row.status)">{{ getCardStatusText(row.status) }}</el-tag>
-            </template>
-          </el-table-column>
-          <el-table-column prop="use_count" label="已用/最大" width="120">
-            <template #default="{ row }">
-              {{ row.use_count }} / {{ row.max_use_count || '∞' }}
-            </template>
-          </el-table-column>
-          <el-table-column prop="balance" label="余额" width="100">
-            <template #default="{ row }">
-              {{ row.balance ? `¥${row.balance}` : '-' }}
-            </template>
-          </el-table-column>
-          <el-table-column v-if="isAdmin" prop="owner_user_name" label="所有者" width="120" />
-        </el-table>
-      </el-tab-pane>
-    </el-tabs>
+      <TabsContent value="my" class="mt-4">
+        <Card class="bg-card text-card-foreground">
+          <CardContent class="p-0">
+            <div class="overflow-x-auto rounded-xl border border-border">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead class="w-20">ID</TableHead>
+                    <TableHead class="min-w-[200px]">卡号</TableHead>
+                    <TableHead class="w-32">持卡人</TableHead>
+                    <TableHead class="w-24">有效期</TableHead>
+                    <TableHead class="min-w-[180px]">卡类型/银行</TableHead>
+                    <TableHead class="w-24">状态</TableHead>
+                    <TableHead class="w-24">使用次数</TableHead>
+                    <TableHead class="w-24">余额</TableHead>
+                    <TableHead v-if="isAdmin" class="w-32">所有者</TableHead>
+                    <TableHead class="w-20 text-right">操作</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  <TableRow v-if="loading && myCards.length === 0">
+                    <TableCell :colspan="isAdmin ? 10 : 9" class="py-10 text-center">
+                      <div class="flex items-center justify-center gap-2 text-sm text-muted-foreground">
+                        <Loader2 class="h-4 w-4 animate-spin" />
+                        加载中...
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                  <TableRow v-else v-for="row in myCards" :key="row.id" class="hover:bg-muted/20">
+                    <TableCell class="font-mono text-xs text-muted-foreground">#{{ row.id }}</TableCell>
+                    <TableCell class="font-mono font-medium">{{ row.masked_card_number }}</TableCell>
+                    <TableCell>{{ row.card_holder || '-' }}</TableCell>
+                    <TableCell class="text-muted-foreground text-xs">{{ String(row.expiry_month).padStart(2, '0') }}/{{ row.expiry_year }}</TableCell>
+                    <TableCell>
+                      <div class="flex items-center gap-2">
+                        <Badge :variant="row.card_type === 'visa' ? 'default' : 'secondary'" class="rounded-full uppercase">
+                          {{ row.card_type || 'Unknown' }}
+                        </Badge>
+                        <span class="text-xs text-muted-foreground truncate max-w-[100px]" :title="row.bank_name || ''">{{ row.bank_name || '' }}</span>
+                      </div>
+                    </TableCell>
+                    <TableCell>
+                      <Badge :variant="getCardStatusVariant(row.status)" class="rounded-full">
+                        {{ getCardStatusText(row.status) }}
+                      </Badge>
+                    </TableCell>
+                    <TableCell>{{ row.use_count }}</TableCell>
+                    <TableCell>{{ row.balance ? `¥${row.balance}` : '-' }}</TableCell>
+                    <TableCell v-if="isAdmin" class="text-xs">{{ row.owner_user_name || '-' }}</TableCell>
+                    <TableCell class="text-right">
+                      <Button variant="ghost" size="xs" class="text-destructive hover:text-destructive h-auto p-0" @click="handleDeleteCard(row)">删除</Button>
+                    </TableCell>
+                  </TableRow>
+                  <TableRow v-if="!loading && myCards.length === 0">
+                    <TableCell :colspan="isAdmin ? 10 : 9" class="py-10 text-center text-sm text-muted-foreground">暂无虚拟卡</TableCell>
+                  </TableRow>
+                </TableBody>
+              </Table>
+            </div>
+          </CardContent>
+        </Card>
+      </TabsContent>
+
+      <TabsContent value="public" class="mt-4">
+        <Card class="bg-card text-card-foreground">
+          <CardContent class="p-0">
+            <div class="overflow-x-auto rounded-xl border border-border">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead class="w-20">ID</TableHead>
+                    <TableHead class="min-w-[180px]">卡类型/银行</TableHead>
+                    <TableHead class="w-24">状态</TableHead>
+                    <TableHead class="w-32">已用/最大</TableHead>
+                    <TableHead class="w-24">余额</TableHead>
+                    <TableHead v-if="isAdmin" class="w-32">所有者</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  <TableRow v-if="loading && publicCards.length === 0">
+                    <TableCell :colspan="isAdmin ? 6 : 5" class="py-10 text-center">
+                      <div class="flex items-center justify-center gap-2 text-sm text-muted-foreground">
+                        <Loader2 class="h-4 w-4 animate-spin" />
+                        加载中...
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                  <TableRow v-else v-for="row in publicCards" :key="row.id" class="hover:bg-muted/20">
+                    <TableCell class="font-mono text-xs text-muted-foreground">#{{ row.id }}</TableCell>
+                    <TableCell>
+                      <div class="flex items-center gap-2">
+                        <Badge :variant="row.card_type === 'visa' ? 'default' : 'secondary'" class="rounded-full uppercase">
+                          {{ row.card_type || 'Unknown' }}
+                        </Badge>
+                        <span class="text-xs text-muted-foreground truncate max-w-[100px]" :title="row.bank_name || ''">{{ row.bank_name || '' }}</span>
+                      </div>
+                    </TableCell>
+                    <TableCell>
+                      <Badge :variant="getCardStatusVariant(row.status)" class="rounded-full">
+                        {{ getCardStatusText(row.status) }}
+                      </Badge>
+                    </TableCell>
+                    <TableCell class="text-xs text-muted-foreground">{{ row.use_count }} / {{ row.max_use_count || '∞' }}</TableCell>
+                    <TableCell>{{ row.balance ? `¥${row.balance}` : '-' }}</TableCell>
+                    <TableCell v-if="isAdmin" class="text-xs">{{ row.owner_user_name || '-' }}</TableCell>
+                  </TableRow>
+                  <TableRow v-if="!loading && publicCards.length === 0">
+                    <TableCell :colspan="isAdmin ? 6 : 5" class="py-10 text-center text-sm text-muted-foreground">暂无公共卡</TableCell>
+                  </TableRow>
+                </TableBody>
+              </Table>
+            </div>
+          </CardContent>
+        </Card>
+      </TabsContent>
+    </Tabs>
 
     <!-- 添加虚拟卡对话框 -->
-    <el-dialog v-model="showCreateDialog" title="添加虚拟卡" width="500px">
-      <el-form :model="createForm" label-width="100px">
-        <el-form-item label="卡号">
-          <el-input v-model="createForm.card_number" placeholder="请输入卡号" />
-        </el-form-item>
-        <el-form-item label="有效期">
-          <el-col :span="11">
-            <el-input v-model="createForm.exp_month" placeholder="月 (MM)" />
-          </el-col>
-          <el-col :span="2" class="text-center">/</el-col>
-          <el-col :span="11">
-            <el-input v-model="createForm.exp_year" placeholder="年 (YY)" />
-          </el-col>
-        </el-form-item>
-        <el-form-item label="CVV">
-          <el-input v-model="createForm.cvv" placeholder="请输入CVV" maxlength="4" />
-        </el-form-item>
-        <el-form-item label="卡类型">
-          <el-select v-model="createForm.card_type" placeholder="请选择卡类型">
-            <el-option label="Visa" value="visa" />
-            <el-option label="MasterCard" value="mastercard" />
-            <el-option label="American Express" value="amex" />
-            <el-option label="其他" value="other" />
-          </el-select>
-        </el-form-item>
-        <el-form-item label="银行名称">
-          <el-input v-model="createForm.bank_name" placeholder="选填" />
-        </el-form-item>
-        <el-form-item label="是否公开">
-          <el-switch v-model="createForm.is_public" />
-        </el-form-item>
-        <el-form-item label="可重复使用">
-          <el-switch v-model="createForm.can_reuse" />
-        </el-form-item>
-        <el-form-item v-if="createForm.can_reuse" label="最大使用次数">
-          <el-input-number v-model="createForm.max_uses" :min="1" placeholder="不限制留空" />
-        </el-form-item>
-      </el-form>
-      <template #footer>
-        <el-button @click="showCreateDialog = false">取消</el-button>
-        <el-button type="primary" @click="handleCreateCard" :loading="creating">
-          添加
-        </el-button>
-      </template>
-    </el-dialog>
+    <Dialog v-model:open="showCreateDialog">
+      <DialogContent class="sm:max-w-[500px]">
+        <DialogHeader>
+          <DialogTitle>添加虚拟卡</DialogTitle>
+        </DialogHeader>
+        <div class="grid gap-4 py-2">
+          <div class="grid gap-2">
+            <label class="text-sm font-medium">卡号</label>
+            <Input v-model="createForm.card_number" placeholder="请输入卡号" />
+          </div>
+          <div class="grid gap-2">
+            <label class="text-sm font-medium">有效期</label>
+            <div class="flex items-center gap-2">
+              <Input v-model="createForm.exp_month" placeholder="月 (MM)" class="flex-1" />
+              <span class="text-muted-foreground">/</span>
+              <Input v-model="createForm.exp_year" placeholder="年 (YY)" class="flex-1" />
+            </div>
+          </div>
+          <div class="grid gap-2">
+            <label class="text-sm font-medium">CVV</label>
+            <Input v-model="createForm.cvv" placeholder="请输入CVV" maxlength="4" />
+          </div>
+          <div class="grid gap-2">
+            <label class="text-sm font-medium">卡类型</label>
+            <Select v-model="createForm.card_type">
+              <SelectTrigger>
+                <SelectValue placeholder="请选择卡类型" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="visa">Visa</SelectItem>
+                <SelectItem value="mastercard">MasterCard</SelectItem>
+                <SelectItem value="amex">American Express</SelectItem>
+                <SelectItem value="other">其他</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <div class="grid gap-2">
+            <label class="text-sm font-medium">银行名称</label>
+            <Input v-model="createForm.bank_name" placeholder="选填" />
+          </div>
+          <div class="flex items-center justify-between">
+            <label class="text-sm font-medium">是否公开</label>
+            <Switch :checked="createForm.is_public" @update:checked="createForm.is_public = $event" />
+          </div>
+          <div class="flex items-center justify-between">
+            <label class="text-sm font-medium">可重复使用</label>
+            <Switch :checked="createForm.can_reuse" @update:checked="createForm.can_reuse = $event" />
+          </div>
+          <div v-if="createForm.can_reuse" class="grid gap-2">
+            <label class="text-sm font-medium">最大使用次数</label>
+            <Input v-model="createForm.max_uses" type="number" min="1" placeholder="不限制留空" />
+          </div>
+        </div>
+        <DialogFooter class="gap-2">
+          <Button variant="outline" @click="showCreateDialog = false">取消</Button>
+          <Button :disabled="creating" class="gap-2" @click="handleCreateCard">
+            <Loader2 v-if="creating" class="h-4 w-4 animate-spin" />
+            添加
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
 
     <!-- 批量导入对话框 -->
-    <el-dialog v-model="showImportDialog" title="批量导入虚拟卡" width="700px">
-      <el-alert type="info" :closable="false" style="margin-bottom: 16px">
-        <template #title>
-          <div>格式说明：每行一张卡，格式为 <code>卡号 月份 年份 CVV</code>（空格分隔）</div>
-          <div style="margin-top: 8px">示例：<code>4466164106155628 07 28 694</code></div>
-          <div style="margin-top: 4px; font-size: 12px">💡 4开头自动识别为Visa，5开头自动识别为Master</div>
-        </template>
-      </el-alert>
-      
-      <el-form :model="importForm" label-width="100px">
-        <el-form-item label="卡片数据">
-          <el-input
-            v-model="importForm.cardsText"
-            type="textarea"
-            :rows="10"
-            placeholder="粘贴卡片数据，每行一张卡&#10;4466164106155628 07 28 694&#10;5481087143137903 01 32 749"
-          />
-        </el-form-item>
-        <el-form-item label="卡池类型">
-          <el-radio-group v-model="importForm.pool_type">
-            <el-radio label="public">公共卡池</el-radio>
-            <el-radio label="private">私有卡池</el-radio>
-          </el-radio-group>
-        </el-form-item>
-      </el-form>
-      
-      <div v-if="importResult" class="import-result">
-        <el-alert :type="importResult.type" :closable="false">
-          <template #title>
-            <div>{{ importResult.message }}</div>
-            <div v-if="importResult.errors && importResult.errors.length > 0" style="margin-top: 8px">
-              <div v-for="(error, index) in importResult.errors" :key="index" style="font-size: 12px">
-                {{ error }}
-              </div>
+    <Dialog v-model:open="showImportDialog">
+      <DialogContent class="sm:max-w-[700px]">
+        <DialogHeader>
+          <DialogTitle>批量导入虚拟卡</DialogTitle>
+        </DialogHeader>
+        
+        <Alert class="mb-2">
+          <AlertTitle>格式说明</AlertTitle>
+          <AlertDescription>
+            <div class="space-y-1 text-sm">
+              <div>每行一张卡，格式为 <code class="rounded bg-muted px-1.5 py-0.5 font-mono text-primary">卡号 月份 年份 CVV</code>（空格分隔）</div>
+              <div>示例：<code class="rounded bg-muted px-1.5 py-0.5 font-mono text-primary">4466164106155628 07 28 694</code></div>
+              <div class="text-xs text-muted-foreground">💡 4开头自动识别为Visa，5开头自动识别为Master</div>
             </div>
-          </template>
-        </el-alert>
-      </div>
-      
-      <template #footer>
-        <el-button @click="showImportDialog = false">取消</el-button>
-        <el-button type="primary" @click="handleImportCards" :loading="importing">
-          导入
-        </el-button>
-      </template>
-    </el-dialog>
+          </AlertDescription>
+        </Alert>
+
+        <div class="grid gap-4 py-2">
+          <div class="grid gap-2">
+            <label class="text-sm font-medium">卡片数据</label>
+            <Textarea
+              v-model="importForm.cardsText"
+              rows="10"
+              class="min-h-[200px] font-mono text-sm"
+              placeholder="粘贴卡片数据，每行一张卡&#10;4466164106155628 07 28 694&#10;5481087143137903 01 32 749"
+            />
+          </div>
+          <div class="grid gap-2">
+            <label class="text-sm font-medium">卡池类型</label>
+            <RadioGroup v-model="importForm.pool_type" class="flex gap-4">
+              <div class="flex items-center space-x-2">
+                <RadioGroupItem id="r-public" value="public" />
+                <Label for="r-public">公共卡池</Label>
+              </div>
+              <div class="flex items-center space-x-2">
+                <RadioGroupItem id="r-private" value="private" />
+                <Label for="r-private">私有卡池</Label>
+              </div>
+            </RadioGroup>
+          </div>
+        </div>
+
+        <div v-if="importResult" class="mt-2 rounded-md border p-4" :class="importResult.type === 'error' ? 'border-destructive/50 bg-destructive/10 text-destructive' : 'border-emerald-500/50 bg-emerald-500/10 text-emerald-700'">
+          <div class="font-medium">{{ importResult.message }}</div>
+          <div v-if="importResult.errors && importResult.errors.length > 0" class="mt-2 text-xs opacity-90 max-h-32 overflow-y-auto">
+            <div v-for="(error, index) in importResult.errors" :key="index">
+              {{ error }}
+            </div>
+          </div>
+        </div>
+
+        <DialogFooter class="gap-2">
+          <Button variant="outline" @click="showImportDialog = false">取消</Button>
+          <Button :disabled="importing" class="gap-2" @click="handleImportCards">
+            <Loader2 v-if="importing" class="h-4 w-4 animate-spin" />
+            导入
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, onMounted, reactive, computed } from 'vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
-import { Plus, Upload } from '@element-plus/icons-vue'
+import { ElMessage, ElMessageBox } from '@/lib/element'
+import { Plus, Upload, Loader2 } from 'lucide-vue-next'
 import { cardsApi } from '@/api/cards'
 import { useUserStore } from '@/stores/user'
-import type { Card, CardCreateForm } from '@/types'
+import type { Card as CardModel, CardCreateForm } from '@/types'
+
+import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
+import { Card, CardContent } from '@/components/ui/card'
+import { Input } from '@/components/ui/input'
+import { Textarea } from '@/components/ui/textarea'
+import { Switch } from '@/components/ui/switch'
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
+import { Label } from '@/components/ui/label'
+import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table'
 
 const userStore = useUserStore()
 const isAdmin = computed(() => userStore.user?.is_staff || userStore.user?.is_superuser)
@@ -214,8 +315,8 @@ const importing = ref(false)
 const activeTab = ref('my')
 const showCreateDialog = ref(false)
 const showImportDialog = ref(false)
-const myCards = ref<Card[]>([])
-const publicCards = ref<Card[]>([])
+const myCards = ref<CardModel[]>([])
+const publicCards = ref<CardModel[]>([])
 
 const createForm = reactive({
   card_number: '',
@@ -240,7 +341,6 @@ const fetchMyCards = async () => {
   loading.value = true
   try {
     const response = await cardsApi.getMyCards() as any
-    // 后端返回的是 { cards: [], statistics: {} }
     myCards.value = Array.isArray(response) ? response : (response.cards || [])
   } catch (error) {
     console.error('Failed to fetch my cards:', error)
@@ -252,7 +352,6 @@ const fetchMyCards = async () => {
 const fetchPublicCards = async () => {
   loading.value = true
   try {
-    // 使用 pool_type 过滤公共卡池
     publicCards.value = await cardsApi.getAvailableCards({ pool_type: 'public' })
   } catch (error) {
     console.error('Failed to fetch public cards:', error)
@@ -261,8 +360,9 @@ const fetchPublicCards = async () => {
   }
 }
 
-const handleTabChange = () => {
-  if (activeTab.value === 'my') {
+const handleTabChange = (val: string | number) => {
+  const tab = String(val)
+  if (tab === 'my') {
     fetchMyCards()
   } else {
     fetchPublicCards()
@@ -298,7 +398,7 @@ const handleCreateCard = async () => {
   }
 }
 
-const handleDeleteCard = async (card: Card) => {
+const handleDeleteCard = async (card: CardModel) => {
   try {
     await ElMessageBox.confirm('确定要删除此虚拟卡吗？', '提示', {
       confirmButtonText: '确定',
@@ -338,7 +438,6 @@ const handleImportCards = async () => {
 
       const [cardNumber, expMonth, expYear, cvv] = parts
       
-      // 自动识别卡类型
       let cardType = 'other'
       if (cardNumber.startsWith('4')) {
         cardType = 'visa'
@@ -365,14 +464,11 @@ const handleImportCards = async () => {
       return
     }
 
-    // 批量导入
     const response = await cardsApi.importCards({
       cards_data: cardsData,
       pool_type: importForm.pool_type
     })
 
-    // 统一处理响应格式，后端现在返回 { code, message, data: { success, failed, ... } }
-    // 拦截器会解包 data，如果 data 存在的话
     const result = (response as any).data || response
     
     importResult.value = {
@@ -395,15 +491,18 @@ const handleImportCards = async () => {
   }
 }
 
-const getCardStatusType = (status: string) => {
+const getCardStatusVariant = (status: string) => {
   const map: Record<string, any> = {
-    available: 'success',
-    in_use: 'primary',
-    used: 'info',
-    invalid: 'danger',
-    expired: 'warning'
+    available: 'default', // success equivalent usually default or secondary in some themes, or custom green
+    in_use: 'secondary',
+    used: 'secondary',
+    invalid: 'destructive',
+    expired: 'outline'
   }
-  return map[status] || 'info'
+  // Shadcn badge variants: default, secondary, destructive, outline
+  // If we want green, we might need custom class. 'default' is usually primary color (black/dark).
+  // Let's use available variants.
+  return map[status] || 'outline'
 }
 
 const getCardStatusText = (status: string) => {
@@ -421,32 +520,3 @@ onMounted(() => {
   fetchMyCards()
 })
 </script>
-
-<style scoped lang="scss">
-.card-list {
-  .page-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 24px;
-
-    h1 {
-      margin: 0;
-    }
-  }
-
-  .text-center {
-    text-align: center;
-  }
-
-  .font-mono {
-    font-family: 'Courier New', Courier, monospace;
-    font-weight: 500;
-  }
-
-  .import-result {
-    margin-top: 16px;
-  }
-}
-</style>
-

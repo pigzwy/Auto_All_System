@@ -1,104 +1,157 @@
 <template>
-  <div class="zone-list">
-    <h1>专区管理</h1>
+  <div class="space-y-6">
+    <div class="flex items-end justify-between gap-4">
+      <div>
+        <h1 class="text-2xl font-semibold text-foreground">专区管理</h1>
+        <p class="mt-1 text-sm text-muted-foreground">选择一个业务专区进入，或浏览其他环境。</p>
+      </div>
+    </div>
 
-    <el-card shadow="hover">
-      <!-- Google业务专区 (固定卡片) -->
-        <div class="featured-section">
-          <h2>🔥 业务专区</h2>
-          <el-row :gutter="20" style="margin-top: 16px;">
-            <el-col :xs="24" :sm="12" :md="8" :lg="6">
-              <el-card class="zone-card featured-card" shadow="hover" @click="openGoogleZone">
-              <el-tag type="success" class="hot-tag">HOT</el-tag>
-              <div class="zone-icon">
-                🚀
-              </div>
-              <h3>Google 业务</h3>
-              <p class="zone-desc">学生优惠订阅自动化处理</p>
-              <div class="zone-stats">
-                <div class="stat-item">
-                  <div class="stat-value">{{ googleStats.accounts }}</div>
-                  <div class="stat-label">账号数</div>
-                </div>
-                <div class="stat-item">
-                  <div class="stat-value">{{ googleStats.subscribed }}</div>
-                  <div class="stat-label">已订阅</div>
-                </div>
-              </div>
-              <div class="zone-footer">
-                <el-tag size="small" type="primary">自动化</el-tag>
-                <span class="price">进入</span>
-              </div>
-              </el-card>
-            </el-col>
-
-            <el-col :xs="24" :sm="12" :md="8" :lg="6">
-              <el-card class="zone-card featured-card gpt-featured-card" shadow="hover" @click="openGptZone">
-                <el-tag type="warning" class="hot-tag">NEW</el-tag>
-                <div class="zone-icon">
-                  🤖
-                </div>
-                <h3>GPT 业务</h3>
-                <p class="zone-desc">OpenAI Team 批量开通/授权自动化</p>
-                <div class="zone-stats">
-                  <div class="stat-item">
-                    <div class="stat-value">{{ gptStats.teams }}</div>
-                    <div class="stat-label">团队数</div>
-                  </div>
-                  <div class="stat-item">
-                    <div class="stat-value">{{ gptStats.accounts }}</div>
-                    <div class="stat-label">账号数</div>
-                  </div>
-                </div>
-                <div class="zone-footer">
-                  <el-tag size="small" type="success">自动化</el-tag>
-                  <span class="price">进入</span>
-                </div>
-              </el-card>
-            </el-col>
-          </el-row>
+    <div class="rounded-xl border border-border bg-card text-card-foreground shadow-sm p-6 space-y-10">
+      <!-- 业务专区 -->
+      <section class="space-y-4">
+        <div class="flex items-center justify-between">
+          <h2 class="text-base font-semibold">🔥 业务专区</h2>
+          <span class="text-xs text-muted-foreground">固定入口</span>
         </div>
 
+        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5">
+          <button
+            type="button"
+            class="group relative w-full text-left rounded-2xl border border-border bg-background/60 p-5 shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md"
+            @click="openGoogleZone"
+          >
+            <Badge variant="outline" class="absolute right-4 top-4 rounded-full bg-emerald-500/10 text-emerald-700">HOT</Badge>
+
+            <div class="flex items-start gap-4">
+              <div class="h-12 w-12 rounded-xl bg-primary/10 text-primary flex items-center justify-center text-2xl">
+                🚀
+              </div>
+              <div class="min-w-0">
+                <h3 class="text-base font-semibold text-foreground">Google 业务</h3>
+                <p class="mt-1 text-sm text-muted-foreground min-h-[40px]">
+                  学生优惠订阅自动化处理
+                </p>
+              </div>
+            </div>
+
+            <div class="mt-4 grid grid-cols-2 gap-3 rounded-xl border border-border/60 bg-muted/30 p-3">
+              <div>
+                <div class="text-2xl font-semibold leading-none text-foreground">{{ googleStats.accounts }}</div>
+                <div class="mt-1 text-xs text-muted-foreground">账号数</div>
+              </div>
+              <div>
+                <div class="text-2xl font-semibold leading-none text-foreground">{{ googleStats.subscribed }}</div>
+                <div class="mt-1 text-xs text-muted-foreground">已订阅</div>
+              </div>
+            </div>
+
+            <div class="mt-4 flex items-center justify-between">
+              <Badge variant="outline" class="rounded-full bg-primary/10 text-primary">自动化</Badge>
+              <span class="text-sm font-medium text-primary group-hover:underline underline-offset-4">进入</span>
+            </div>
+          </button>
+
+          <button
+            type="button"
+            class="group relative w-full text-left rounded-2xl border border-border bg-background/60 p-5 shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md"
+            @click="openGptZone"
+          >
+            <Badge variant="outline" class="absolute right-4 top-4 rounded-full bg-amber-500/10 text-amber-800">NEW</Badge>
+
+            <div class="flex items-start gap-4">
+              <div class="h-12 w-12 rounded-xl bg-emerald-500/12 text-emerald-700 flex items-center justify-center text-2xl">
+                🤖
+              </div>
+              <div class="min-w-0">
+                <h3 class="text-base font-semibold text-foreground">GPT 业务</h3>
+                <p class="mt-1 text-sm text-muted-foreground min-h-[40px]">
+                  OpenAI Team 批量开通/授权自动化
+                </p>
+              </div>
+            </div>
+
+            <div class="mt-4 grid grid-cols-2 gap-3 rounded-xl border border-border/60 bg-muted/30 p-3">
+              <div>
+                <div class="text-2xl font-semibold leading-none text-foreground">{{ gptStats.teams }}</div>
+                <div class="mt-1 text-xs text-muted-foreground">团队数</div>
+              </div>
+              <div>
+                <div class="text-2xl font-semibold leading-none text-foreground">{{ gptStats.accounts }}</div>
+                <div class="mt-1 text-xs text-muted-foreground">账号数</div>
+              </div>
+            </div>
+
+            <div class="mt-4 flex items-center justify-between">
+              <Badge variant="outline" class="rounded-full bg-emerald-500/10 text-emerald-700">自动化</Badge>
+              <span class="text-sm font-medium text-primary group-hover:underline underline-offset-4">进入</span>
+            </div>
+          </button>
+        </div>
+      </section>
+
       <!-- 其他专区 -->
-      <div v-if="zones.length > 0" style="margin-top: 32px;">
-        <h2>📁 其他专区</h2>
-        <el-row :gutter="20" style="margin-top: 16px;">
-          <el-col
+      <section class="space-y-4">
+        <div class="flex items-center justify-between">
+          <h2 class="text-base font-semibold">📁 其他专区</h2>
+          <span class="text-xs text-muted-foreground">{{ zones.length }} 个</span>
+        </div>
+
+        <div v-if="zones.length > 0" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5">
+          <button
             v-for="zone in zones"
             :key="zone.id"
-            :xs="24"
-            :sm="12"
-            :md="8"
-            :lg="6"
+            type="button"
+            class="group w-full text-left rounded-2xl border border-border bg-background/60 p-5 shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md"
+            @click="handleZoneClick(zone)"
           >
-            <el-card
-              class="zone-card"
-              shadow="hover"
-              @click="handleZoneClick(zone)"
-            >
-              <div class="zone-icon">
-                <img v-if="zone.icon" :src="zone.icon" :alt="zone.name" />
-                <el-icon v-else><Grid /></el-icon>
+            <div class="flex items-start gap-4">
+              <div class="h-12 w-12 shrink-0 overflow-hidden rounded-xl bg-primary/10 text-primary flex items-center justify-center">
+                <img
+                  v-if="zone.icon"
+                  :src="zone.icon"
+                  :alt="zone.name"
+                  class="h-full w-full object-cover"
+                />
+                <Icon v-else :size="20"><Grid /></Icon>
               </div>
-              <h3>{{ zone.name }}</h3>
-              <p class="zone-desc">{{ zone.description }}</p>
-              <div class="zone-footer">
-                <el-tag size="small">{{ zone.category }}</el-tag>
-                <span class="price">¥{{ zone.base_price }}/次</span>
+              <div class="min-w-0 flex-1">
+                <h3 class="text-base font-semibold text-foreground truncate">{{ zone.name }}</h3>
+                <p class="mt-1 text-sm text-muted-foreground min-h-[40px]">
+                  {{ zone.description }}
+                </p>
               </div>
-            </el-card>
-          </el-col>
-        </el-row>
-      </div>
+            </div>
 
-      <el-empty v-if="!loading && zones.length === 0" description="暂无其他专区" style="margin-top: 32px;" />
-    </el-card>
+            <div class="mt-4 flex items-center justify-between">
+              <Badge variant="secondary" class="rounded-full">{{ zone.category }}</Badge>
+              <span class="text-sm font-semibold text-emerald-600">¥{{ zone.base_price }}/次</span>
+            </div>
+          </button>
+        </div>
+
+        <div v-else-if="loading" class="rounded-xl border border-border bg-muted/20 p-6">
+          <div class="flex items-center justify-center text-sm text-muted-foreground">
+            <span class="inline-flex items-center gap-2">
+              <span class="h-4 w-4 animate-spin rounded-full border-2 border-border border-t-transparent" />
+              加载中...
+            </span>
+          </div>
+        </div>
+
+        <div v-else class="rounded-xl border border-border bg-muted/10 p-10 text-center">
+          <div class="text-sm font-medium text-foreground">暂无其他专区</div>
+          <div class="mt-1 text-xs text-muted-foreground">请稍后再试或联系管理员添加。</div>
+        </div>
+      </section>
+    </div>
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, reactive, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
+import { Badge } from '@/components/ui/badge'
 import { zonesApi } from '@/api/zones'
 import { googleAccountsApi } from '@/api/google'
 import { gptBusinessApi } from '@/api/gpt_business'
@@ -176,124 +229,3 @@ onMounted(() => {
   fetchGptStats()
 })
 </script>
-
-<style scoped lang="scss">
-.zone-list {
-  h1 {
-    margin-bottom: 24px;
-  }
-  
-  h2 {
-    font-size: 20px;
-    margin: 0 0 16px 0;
-    color: #303133;
-  }
-  
-  .featured-section {
-    padding-bottom: 24px;
-    border-bottom: 2px solid #ebeef5;
-    
-    .featured-card {
-      position: relative;
-      background: linear-gradient(135deg, #667eea15 0%, #764ba215 100%);
-      border: 2px solid #667eea;
-      
-      &:hover {
-        border-color: #764ba2;
-        background: linear-gradient(135deg, #667eea25 0%, #764ba225 100%);
-      }
-      
-      .hot-tag {
-        position: absolute;
-        top: 12px;
-        right: 12px;
-      }
-    }
-
-    .featured-card.gpt-featured-card {
-      background: linear-gradient(135deg, #10b98115 0%, #06b6d415 100%);
-      border: 2px solid #10b981;
-
-      &:hover {
-        border-color: #06b6d4;
-        background: linear-gradient(135deg, #10b98125 0%, #06b6d425 100%);
-      }
-    }
-  }
-
-  .zone-card {
-    cursor: pointer;
-    margin-bottom: 20px;
-    text-align: center;
-    transition: all 0.3s;
-
-    &:hover {
-      transform: translateY(-4px);
-      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-    }
-
-    .zone-icon {
-      font-size: 48px;
-      color: #409EFF;
-      margin-bottom: 12px;
-
-      img {
-        width: 48px;
-        height: 48px;
-      }
-    }
-
-    h3 {
-      margin: 0 0 8px 0;
-      font-size: 18px;
-      color: #303133;
-    }
-
-    .zone-desc {
-      font-size: 14px;
-      color: #909399;
-      margin: 0 0 16px 0;
-      min-height: 40px;
-    }
-    
-    .zone-stats {
-      display: flex;
-      gap: 12px;
-      justify-content: center;
-      margin-bottom: 16px;
-      padding: 12px;
-      background: rgba(255, 255, 255, 0.7);
-      border-radius: 6px;
-      
-      .stat-item {
-        text-align: center;
-        
-        .stat-value {
-          font-size: 24px;
-          font-weight: bold;
-          color: #409eff;
-          line-height: 1;
-          margin-bottom: 4px;
-        }
-        
-        .stat-label {
-          font-size: 12px;
-          color: #909399;
-        }
-      }
-    }
-
-    .zone-footer {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-
-      .price {
-        font-size: 16px;
-        font-weight: bold;
-        color: #f56c6c;
-      }
-    }
-  }
-}
-</style>

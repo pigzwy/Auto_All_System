@@ -1,85 +1,89 @@
 <template>
-  <div class="order-management">
-    <h1>订单管理</h1>
+  <div class="space-y-6 p-5">
+    <h1 class="text-2xl font-semibold text-foreground">订单管理</h1>
 
-    <el-card shadow="hover">
-      <el-table :data="orders" v-loading="loading" stripe>
-        <el-table-column prop="order_no" label="订单号" width="200">
+    <Card class="shadow-sm">
+      <CardContent class="p-6">
+        <DataTable :data="orders" v-loading="loading" stripe class="w-full">
+        <DataColumn prop="order_no" label="订单号" width="200">
           <template #default="{ row }">
-            <span style="font-family: monospace; font-weight: bold;">{{ row.order_no }}</span>
+            <span class="font-mono font-semibold text-foreground">{{ row.order_no }}</span>
           </template>
-        </el-table-column>
-        <el-table-column label="用户" width="150">
+        </DataColumn>
+        <DataColumn label="用户" width="150">
           <template #default="{ row }">
-            <el-tag>{{ row.user_info?.username || row.user }}</el-tag>
+            <Tag>{{ row.user_info?.username || row.user }}</Tag>
           </template>
-        </el-table-column>
-        <el-table-column label="类型" width="100">
+        </DataColumn>
+        <DataColumn label="类型" width="100">
           <template #default="{ row }">
-            <el-tag :type="getOrderTypeColor(row.order_type)">{{ getOrderTypeName(row.order_type) }}</el-tag>
+            <Tag :type="getOrderTypeColor(row.order_type)">{{ getOrderTypeName(row.order_type) }}</Tag>
           </template>
-        </el-table-column>
-        <el-table-column label="金额" width="120">
+        </DataColumn>
+        <DataColumn label="金额" width="120">
           <template #default="{ row }">
-            <span style="color: #f56c6c; font-weight: bold; font-size: 16px;">¥{{ row.amount }}</span>
+            <span class="text-base font-semibold text-rose-600">¥{{ row.amount }}</span>
           </template>
-        </el-table-column>
-        <el-table-column label="状态" width="120">
+        </DataColumn>
+        <DataColumn label="状态" width="120">
           <template #default="{ row }">
-            <el-tag :type="getStatusColor(row.status)">{{ getStatusName(row.status) }}</el-tag>
+            <Tag :type="getStatusColor(row.status)">{{ getStatusName(row.status) }}</Tag>
           </template>
-        </el-table-column>
-        <el-table-column label="支付方式" width="120">
+        </DataColumn>
+        <DataColumn label="支付方式" width="120">
           <template #default="{ row }">
             {{ row.payment_method || '-' }}
           </template>
-        </el-table-column>
-        <el-table-column label="创建时间" width="180">
+        </DataColumn>
+        <DataColumn label="创建时间" width="180">
           <template #default="{ row }">
             {{ formatDate(row.created_at) }}
           </template>
-        </el-table-column>
-        <el-table-column label="操作" width="200" fixed="right">
+        </DataColumn>
+        <DataColumn label="操作" width="200" fixed="right">
           <template #default="{ row }">
-            <el-button text type="primary" @click="viewDetail(row)">详情</el-button>
-            <el-button 
+            <Button text  variant="default" type="button" @click="viewDetail(row)">详情</Button>
+            <Button 
               v-if="row.status === 'pending' || row.status === 'processing'" 
               text 
-              type="danger" 
+               variant="destructive" type="button" 
               @click="cancelOrder(row)"
             >
               取消
-            </el-button>
-            <el-button 
+            </Button>
+            <Button 
               v-if="row.status === 'paid'" 
               text 
-              type="warning" 
+               variant="secondary" type="button" 
               @click="refundOrder(row)"
             >
               退款
-            </el-button>
+            </Button>
           </template>
-        </el-table-column>
-      </el-table>
+        </DataColumn>
+        </DataTable>
 
-      <el-pagination
-        v-model:current-page="currentPage"
-        v-model:page-size="pageSize"
-        :total="total"
-        :page-sizes="[10, 20, 50, 100]"
-        layout="total, sizes, prev, pager, next, jumper"
-        @size-change="fetchOrders"
-        @current-change="fetchOrders"
-      />
-    </el-card>
+        <Paginator
+          v-model:current-page="currentPage"
+          v-model:page-size="pageSize"
+          :total="total"
+          :page-sizes="[10, 20, 50, 100]"
+          layout="total, sizes, prev, pager, next, jumper"
+          class="mt-5 justify-center"
+          @size-change="fetchOrders"
+          @current-change="fetchOrders"
+        />
+      </CardContent>
+    </Card>
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessage, ElMessageBox } from '@/lib/element'
 import { paymentsApi, type Order } from '@/api/payments'
 import dayjs from 'dayjs'
+import { Card, CardContent } from '@/components/ui/card'
 
 const loading = ref(false)
 const orders = ref<Order[]>([])
@@ -234,16 +238,3 @@ onMounted(() => {
   fetchOrders()
 })
 </script>
-
-<style scoped lang="scss">
-.order-management {
-  h1 {
-    margin-bottom: 24px;
-  }
-
-  .el-pagination {
-    margin-top: 20px;
-    justify-content: center;
-  }
-}
-</style>

@@ -1,97 +1,141 @@
 <template>
-  <div class="workstation-module">
-    <div class="module-header">
-      <h2>工作台</h2>
-      <el-button @click="refreshData">
-        <el-icon><Refresh /></el-icon>
+  <div class="space-y-6">
+    <div class="flex items-end justify-between gap-4">
+      <div>
+        <h2 class="text-2xl font-semibold text-foreground">工作台</h2>
+        <p class="mt-1 text-sm text-muted-foreground">概览与最近任务</p>
+      </div>
+      <Button variant="outline" size="sm" class="gap-2" @click="refreshData">
+        <RefreshCcw class="h-4 w-4" />
         刷新数据
-      </el-button>
+      </Button>
     </div>
 
-    <!-- 统计卡片 -->
-    <el-row :gutter="20" class="stats-row">
-      <el-col :xs="24" :sm="12" :md="6">
-        <el-card shadow="hover" class="stat-card">
-          <div class="stat-content">
-            <el-icon class="stat-icon" color="#409EFF" :size="40"><User /></el-icon>
-            <div class="stat-info">
-              <div class="stat-value">{{ stats.totalAccounts }}</div>
-              <div class="stat-label">总账号数</div>
+    <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <Card class="bg-card text-card-foreground">
+        <CardContent class="p-5">
+          <div class="flex items-center gap-4">
+            <div class="h-12 w-12 rounded-xl bg-primary/10 text-primary flex items-center justify-center">
+              <Users class="h-6 w-6" />
+            </div>
+            <div class="min-w-0">
+              <div class="text-2xl font-semibold leading-none">{{ stats.totalAccounts }}</div>
+              <div class="mt-1 text-xs text-muted-foreground">总账号数</div>
             </div>
           </div>
-        </el-card>
-      </el-col>
-      <el-col :xs="24" :sm="12" :md="6">
-        <el-card shadow="hover" class="stat-card">
-          <div class="stat-content">
-            <el-icon class="stat-icon" color="#67C23A" :size="40"><Check /></el-icon>
-            <div class="stat-info">
-              <div class="stat-value">{{ stats.subscribedAccounts }}</div>
-              <div class="stat-label">已订阅</div>
-            </div>
-          </div>
-        </el-card>
-      </el-col>
-      <el-col :xs="24" :sm="12" :md="6">
-        <el-card shadow="hover" class="stat-card">
-          <div class="stat-content">
-            <el-icon class="stat-icon" color="#E6A23C" :size="40"><CreditCard /></el-icon>
-            <div class="stat-info">
-              <div class="stat-value">{{ stats.availableCards }}</div>
-              <div class="stat-label">可用卡片</div>
-            </div>
-          </div>
-        </el-card>
-      </el-col>
-      <el-col :xs="24" :sm="12" :md="6">
-        <el-card shadow="hover" class="stat-card">
-          <div class="stat-content">
-            <el-icon class="stat-icon" color="#F56C6C" :size="40"><Clock /></el-icon>
-            <div class="stat-info">
-              <div class="stat-value">{{ stats.runningTasks }}</div>
-              <div class="stat-label">运行中任务</div>
-            </div>
-          </div>
-        </el-card>
-      </el-col>
-    </el-row>
+        </CardContent>
+      </Card>
 
-    <!-- 任务列表 -->
-    <el-card shadow="hover" class="mt-4">
-      <template #header>
-        <div class="card-header">
-          <span>最近任务</span>
+      <Card class="bg-card text-card-foreground">
+        <CardContent class="p-5">
+          <div class="flex items-center gap-4">
+            <div class="h-12 w-12 rounded-xl bg-emerald-500/10 text-emerald-700 flex items-center justify-center">
+              <BadgeCheck class="h-6 w-6" />
+            </div>
+            <div class="min-w-0">
+              <div class="text-2xl font-semibold leading-none">{{ stats.subscribedAccounts }}</div>
+              <div class="mt-1 text-xs text-muted-foreground">已订阅</div>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card class="bg-card text-card-foreground">
+        <CardContent class="p-5">
+          <div class="flex items-center gap-4">
+            <div class="h-12 w-12 rounded-xl bg-amber-500/10 text-amber-700 flex items-center justify-center">
+              <CreditCard class="h-6 w-6" />
+            </div>
+            <div class="min-w-0">
+              <div class="text-2xl font-semibold leading-none">{{ stats.availableCards }}</div>
+              <div class="mt-1 text-xs text-muted-foreground">可用卡片</div>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card class="bg-card text-card-foreground">
+        <CardContent class="p-5">
+          <div class="flex items-center gap-4">
+            <div class="h-12 w-12 rounded-xl bg-rose-500/10 text-rose-700 flex items-center justify-center">
+              <Timer class="h-6 w-6" />
+            </div>
+            <div class="min-w-0">
+              <div class="text-2xl font-semibold leading-none">{{ stats.runningTasks }}</div>
+              <div class="mt-1 text-xs text-muted-foreground">运行中任务</div>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+    </div>
+
+    <Card class="bg-card text-card-foreground">
+      <CardHeader class="pb-2">
+        <CardTitle class="text-base">最近任务</CardTitle>
+        <CardDescription>最近 3 条记录（示例数据）</CardDescription>
+      </CardHeader>
+      <CardContent class="pt-2">
+        <div class="overflow-x-auto rounded-xl border border-border">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>任务ID</TableHead>
+                <TableHead>任务类型</TableHead>
+                <TableHead>关联账号</TableHead>
+                <TableHead>状态</TableHead>
+                <TableHead>进度</TableHead>
+                <TableHead>创建时间</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              <TableRow v-for="row in recentTasks" :key="row.id">
+                <TableCell class="font-mono text-xs text-muted-foreground">#{{ row.id }}</TableCell>
+                <TableCell>{{ row.type }}</TableCell>
+                <TableCell>{{ row.account }}</TableCell>
+                <TableCell>
+                  <Badge :variant="getStatusVariant(row.status)" class="rounded-full">
+                    {{ row.status }}
+                  </Badge>
+                </TableCell>
+                <TableCell>
+                  <div class="flex items-center gap-3">
+                    <div class="h-2 w-28 rounded-full bg-muted overflow-hidden">
+                      <div class="h-full rounded-full bg-primary" :class="progressWidthClass(row.progress)" />
+                    </div>
+                    <span class="text-xs text-muted-foreground tabular-nums">{{ row.progress }}%</span>
+                  </div>
+                </TableCell>
+                <TableCell class="text-muted-foreground">{{ formatDate(row.created_at) }}</TableCell>
+              </TableRow>
+
+              <TableRow v-if="!loading && recentTasks.length === 0">
+                <TableCell class="py-8 text-center text-muted-foreground" colspan="6">暂无任务</TableCell>
+              </TableRow>
+            </TableBody>
+          </Table>
         </div>
-      </template>
-      <el-table :data="recentTasks" v-loading="loading" stripe>
-        <el-table-column prop="id" label="任务ID" width="80" />
-        <el-table-column prop="type" label="任务类型" width="150" />
-        <el-table-column prop="account" label="关联账号" width="200" />
-        <el-table-column prop="status" label="状态" width="120">
-          <template #default="{ row }">
-            <el-tag :type="getStatusType(row.status)">{{ row.status }}</el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column prop="progress" label="进度" width="150">
-          <template #default="{ row }">
-            <el-progress :percentage="row.progress" :status="getProgressStatus(row.progress)" />
-          </template>
-        </el-table-column>
-        <el-table-column prop="created_at" label="创建时间" width="180">
-          <template #default="{ row }">
-            {{ formatDate(row.created_at) }}
-          </template>
-        </el-table-column>
-      </el-table>
-    </el-card>
+      </CardContent>
+    </Card>
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, reactive, onMounted } from 'vue'
-import { ElMessage } from 'element-plus'
-import { Refresh, User, Check, CreditCard, Clock } from '@element-plus/icons-vue'
+import { ElMessage } from '@/lib/element'
+import { BadgeCheck, CreditCard, RefreshCcw, Timer, Users } from 'lucide-vue-next'
 import { googleAccountsApi } from '@/api/google'
+
+import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table'
 
 const loading = ref(false)
 
@@ -144,20 +188,29 @@ const refreshData = () => {
   ElMessage.success('数据已刷新')
 }
 
-const getStatusType = (status: string) => {
-  const types: Record<string, any> = {
-    '运行中': 'warning',
-    '已完成': 'success',
-    '失败': 'danger',
-    '等待中': 'info'
+const getStatusVariant = (status: string) => {
+  const map: Record<string, any> = {
+    '运行中': 'secondary',
+    '已完成': 'default',
+    '失败': 'destructive',
+    '等待中': 'outline'
   }
-  return types[status] || 'info'
+  return map[status] || 'secondary'
 }
 
-const getProgressStatus = (progress: number) => {
-  if (progress === 100) return 'success'
-  if (progress < 50) return 'exception'
-  return undefined
+const progressWidthClass = (progress: number) => {
+  const p = Math.max(0, Math.min(100, Number(progress) || 0))
+  if (p <= 0) return 'w-0'
+  if (p <= 10) return 'w-1/6'
+  if (p <= 20) return 'w-1/5'
+  if (p <= 30) return 'w-1/4'
+  if (p <= 40) return 'w-1/3'
+  if (p <= 50) return 'w-1/2'
+  if (p <= 60) return 'w-3/5'
+  if (p <= 70) return 'w-2/3'
+  if (p <= 80) return 'w-3/4'
+  if (p <= 90) return 'w-5/6'
+  return 'w-full'
 }
 
 const formatDate = (dateStr: string) => {
@@ -168,68 +221,3 @@ onMounted(() => {
   fetchStats()
 })
 </script>
-
-<style scoped lang="scss">
-.workstation-module {
-  .module-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 20px;
-
-    h2 {
-      margin: 0;
-      font-size: 24px;
-      font-weight: 600;
-      color: #303133;
-    }
-  }
-
-  .stats-row {
-    margin-bottom: 24px;
-
-    .stat-card {
-      cursor: pointer;
-      transition: all 0.3s;
-
-      &:hover {
-        transform: translateY(-4px);
-        box-shadow: 0 8px 16px rgba(0, 0, 0, 0.1);
-      }
-
-      .stat-content {
-        display: flex;
-        align-items: center;
-        gap: 16px;
-        padding: 8px;
-
-        .stat-info {
-          .stat-value {
-            font-size: 28px;
-            font-weight: bold;
-            line-height: 1;
-            margin-bottom: 8px;
-            color: #303133;
-          }
-
-          .stat-label {
-            font-size: 14px;
-            color: #909399;
-          }
-        }
-      }
-    }
-  }
-
-  .mt-4 {
-    margin-top: 24px;
-  }
-
-  .card-header {
-    font-size: 18px;
-    font-weight: 600;
-    color: #303133;
-  }
-}
-</style>
-

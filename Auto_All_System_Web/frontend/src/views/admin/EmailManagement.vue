@@ -1,170 +1,174 @@
 <template>
-  <div class="email-management">
-    <div class="page-header">
-      <h1>📧 域名邮箱管理</h1>
-      <el-button type="primary" @click="openAddDialog">
-        <el-icon><Plus /></el-icon>
+  <div class="space-y-6 p-5">
+    <div class="flex items-end justify-between gap-4">
+      <div>
+        <h1 class="text-2xl font-semibold text-foreground">域名邮箱管理</h1>
+        <p class="mt-1 text-sm text-muted-foreground">管理云邮配置、域名池、默认配置与连通性测试。</p>
+      </div>
+      <Button  variant="default" type="button" @click="openAddDialog">
+        <Icon><Plus /></Icon>
         添加配置
-      </el-button>
+      </Button>
     </div>
 
-    <el-card shadow="hover">
-      <el-table :data="configs" v-loading="loading" stripe>
-        <el-table-column prop="id" label="ID" width="60" />
-        <el-table-column prop="name" label="配置名称" width="150">
+    <Card class="shadow-sm">
+      <CardContent class="p-6">
+        <DataTable :data="configs" v-loading="loading" stripe class="w-full">
+        <DataColumn prop="id" label="ID" width="60" />
+        <DataColumn prop="name" label="配置名称" width="150">
           <template #default="{ row }">
             <span>{{ row.name }}</span>
-            <el-tag v-if="row.is_default" type="success" size="small" class="ml-2">默认</el-tag>
+            <Tag v-if="row.is_default" type="success" size="small" class="ml-2">默认</Tag>
           </template>
-        </el-table-column>
-        <el-table-column prop="api_base" label="API 地址" min-width="250">
+        </DataColumn>
+        <DataColumn prop="api_base" label="API 地址" min-width="250">
           <template #default="{ row }">
-            <code>{{ row.api_base }}</code>
+            <code class="rounded bg-primary/10 px-1.5 py-0.5 font-mono text-xs text-primary">{{ row.api_base }}</code>
           </template>
-        </el-table-column>
-        <el-table-column label="API Token" width="160">
+        </DataColumn>
+        <DataColumn label="API Token" width="160">
           <template #default="{ row }">
-            <code>{{ row.masked_token }}</code>
+            <code class="rounded bg-primary/10 px-1.5 py-0.5 font-mono text-xs text-primary">{{ row.masked_token }}</code>
           </template>
-        </el-table-column>
-        <el-table-column label="可用域名" width="200">
+        </DataColumn>
+        <DataColumn label="可用域名" width="200">
           <template #default="{ row }">
-            <div class="domains-cell">
-              <el-tag 
+            <div class="flex flex-wrap items-center gap-1">
+              <Tag 
                 v-for="(domain, idx) in row.domains?.slice(0, 2)" 
                 :key="idx" 
                 size="small" 
-                class="mr-1"
               >
                 {{ domain }}
-              </el-tag>
-              <el-tag v-if="row.domains?.length > 2" type="info" size="small">
+              </Tag>
+              <Tag v-if="row.domains?.length > 2" type="info" size="small">
                 +{{ row.domains.length - 2 }}
-              </el-tag>
+              </Tag>
             </div>
           </template>
-        </el-table-column>
-        <el-table-column label="状态" width="80">
+        </DataColumn>
+        <DataColumn label="状态" width="80">
           <template #default="{ row }">
-            <el-switch v-model="row.is_active" @change="toggleActive(row)" />
+            <Toggle v-model="row.is_active" @change="toggleActive(row)" />
           </template>
-        </el-table-column>
-        <el-table-column label="操作" width="280" fixed="right">
+        </DataColumn>
+        <DataColumn label="操作" width="280" fixed="right">
           <template #default="{ row }">
-            <el-button text type="primary" @click="editConfig(row)">编辑</el-button>
-            <el-button text type="success" @click="testConnection(row)" :loading="row.testing">测试连接</el-button>
-            <el-button text type="warning" @click="testCreateEmail(row)">测试创建邮箱</el-button>
-            <el-button v-if="!row.is_default" text type="info" @click="setDefault(row)">设为默认</el-button>
-            <el-button text type="danger" @click="deleteConfig(row)">删除</el-button>
+            <Button text  variant="default" type="button" @click="editConfig(row)">编辑</Button>
+            <Button text  variant="default" type="button" @click="testConnection(row)" :loading="row.testing">测试连接</Button>
+            <Button text  variant="secondary" type="button" @click="testCreateEmail(row)">测试创建邮箱</Button>
+            <Button v-if="!row.is_default" text  variant="secondary" type="button" @click="setDefault(row)">设为默认</Button>
+            <Button text  variant="destructive" type="button" @click="deleteConfig(row)">删除</Button>
           </template>
-        </el-table-column>
-      </el-table>
-    </el-card>
+        </DataColumn>
+      </DataTable>
+      </CardContent>
+    </Card>
 
     <!-- 添加/编辑对话框 -->
-    <el-dialog 
+    <Modal 
       v-model="showDialog" 
       :title="editingConfig ? '编辑配置' : '添加配置'"
       width="600px"
     >
-      <el-form :model="formData" :rules="formRules" ref="formRef" label-width="100px">
-        <el-form-item label="配置名称" prop="name">
-          <el-input v-model="formData.name" placeholder="给配置起个名字" />
-        </el-form-item>
-        <el-form-item label="API 地址" prop="api_base">
-          <el-input v-model="formData.api_base" placeholder="https://mail.example.com/api/public" />
-        </el-form-item>
-        <el-form-item label="API Token" prop="api_token">
-          <el-input 
+      <SimpleForm :model="formData" :rules="formRules" ref="formRef" label-width="100px">
+        <SimpleFormItem label="配置名称" prop="name">
+          <TextInput v-model="formData.name" placeholder="给配置起个名字" />
+        </SimpleFormItem>
+        <SimpleFormItem label="API 地址" prop="api_base">
+          <TextInput v-model="formData.api_base" placeholder="https://mail.example.com/api/public" />
+        </SimpleFormItem>
+        <SimpleFormItem label="API Token" prop="api_token">
+          <TextInput 
             v-model="formData.api_token" 
             placeholder="API Token (通过 genToken 接口获取)" 
             show-password
           />
-        </el-form-item>
-        <el-form-item label="可用域名" prop="domains">
-          <div class="domains-input">
-            <el-tag
+        </SimpleFormItem>
+        <SimpleFormItem label="可用域名" prop="domains">
+          <div class="flex flex-wrap items-center gap-2">
+            <Tag
               v-for="domain in formData.domains"
               :key="domain"
               closable
               @close="removeDomain(domain)"
-              class="mr-1 mb-1"
             >
               {{ domain }}
-            </el-tag>
-            <el-input
+            </Tag>
+            <TextInput
               v-if="domainInputVisible"
               ref="domainInputRef"
               v-model="domainInputValue"
               size="small"
-              style="width: 200px"
+              class="w-[200px]"
               placeholder="输入域名或粘贴JSON数组"
               @keyup.enter="addDomain"
               @blur="addDomain"
               @paste="handlePasteDomains"
             />
-            <el-button v-else size="small" @click="showDomainInput">
+            <Button v-else size="small" @click="showDomainInput">
               + 添加域名
-            </el-button>
-            <el-button size="small" type="info" @click="clearDomains" v-if="formData.domains.length">
+            </Button>
+            <Button size="small"  variant="secondary" type="button" @click="clearDomains" v-if="formData.domains.length">
               清空
-            </el-button>
+            </Button>
           </div>
-          <div class="domains-tip">支持粘贴 JSON 数组格式，如 ["a.com", "b.com"]</div>
-        </el-form-item>
-        <el-form-item label="默认角色">
-          <el-input v-model="formData.default_role" placeholder="user" />
-        </el-form-item>
-        <el-form-item label="设为默认">
-          <el-switch v-model="formData.is_default" />
-        </el-form-item>
-        <el-form-item label="启用">
-          <el-switch v-model="formData.is_active" />
-        </el-form-item>
-      </el-form>
+          <div class="mt-2 text-xs text-muted-foreground">支持粘贴 JSON 数组格式，如 ["a.com", "b.com"]</div>
+        </SimpleFormItem>
+        <SimpleFormItem label="默认角色">
+          <TextInput v-model="formData.default_role" placeholder="user" />
+        </SimpleFormItem>
+        <SimpleFormItem label="设为默认">
+          <Toggle v-model="formData.is_default" />
+        </SimpleFormItem>
+        <SimpleFormItem label="启用">
+          <Toggle v-model="formData.is_active" />
+        </SimpleFormItem>
+      </SimpleForm>
       <template #footer>
-        <el-button @click="showDialog = false">取消</el-button>
-        <el-button type="primary" @click="handleSave" :loading="saving">保存</el-button>
+        <Button @click="showDialog = false">取消</Button>
+        <Button  variant="default" type="button" @click="handleSave" :loading="saving">保存</Button>
       </template>
-    </el-dialog>
+    </Modal>
 
     <!-- 测试创建邮箱对话框 -->
-    <el-dialog v-model="showTestDialog" title="测试创建邮箱" width="500px">
-      <div v-if="testResult" class="test-result">
-        <el-result 
+    <Modal v-model="showTestDialog" title="测试创建邮箱" width="500px">
+      <div v-if="testResult">
+        <Result 
           :icon="testResult.success ? 'success' : 'error'" 
           :title="testResult.success ? '创建成功' : '创建失败'"
           :sub-title="testResult.message"
         >
           <template #extra v-if="testResult.data">
-            <div class="result-info">
-              <div class="info-item">
-                <span class="label">邮箱地址:</span>
-                <code>{{ testResult.data.email }}</code>
-                <el-button text type="primary" size="small" @click="copyText(testResult.data.email)">复制</el-button>
+            <div class="mt-4 rounded-lg border border-border bg-muted/20 p-4 text-left">
+              <div class="flex flex-wrap items-center gap-2">
+                <span class="w-20 text-xs font-medium text-muted-foreground">邮箱地址:</span>
+                <code class="rounded bg-background px-2 py-1 font-mono text-xs text-foreground">{{ testResult.data.email }}</code>
+                <Button text  variant="default" type="button" size="small" @click="copyText(testResult.data.email)">复制</Button>
               </div>
-              <div class="info-item">
-                <span class="label">密码:</span>
-                <code>{{ testResult.data.password }}</code>
-                <el-button text type="primary" size="small" @click="copyText(testResult.data.password)">复制</el-button>
+              <div class="mt-2 flex flex-wrap items-center gap-2">
+                <span class="w-20 text-xs font-medium text-muted-foreground">密码:</span>
+                <code class="rounded bg-background px-2 py-1 font-mono text-xs text-foreground">{{ testResult.data.password }}</code>
+                <Button text  variant="default" type="button" size="small" @click="copyText(testResult.data.password)">复制</Button>
               </div>
             </div>
           </template>
-        </el-result>
+        </Result>
       </div>
-      <div v-else class="test-loading">
-        <el-icon class="is-loading" :size="48"><Loading /></el-icon>
-        <p>正在创建测试邮箱...</p>
+      <div v-else class="py-10 text-center">
+        <Icon class="is-loading" :size="48"><Loading /></Icon>
+        <p class="mt-4 text-sm text-muted-foreground">正在创建测试邮箱...</p>
       </div>
-    </el-dialog>
+    </Modal>
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, reactive, onMounted, nextTick } from 'vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
-import { Plus, Loading } from '@element-plus/icons-vue'
-import type { FormInstance, FormRules } from 'element-plus'
+import { ElMessage, ElMessageBox } from '@/lib/element'
+import { Plus, Loading } from '@/icons'
+import type { ElFormRules } from '@/components/app/symbols'
+import { Card, CardContent } from '@/components/ui/card'
 import {
   getCloudMailConfigs,
   getCloudMailConfig,
@@ -183,7 +187,12 @@ const configs = ref<(CloudMailConfig & { testing?: boolean })[]>([])
 const showDialog = ref(false)
 const showTestDialog = ref(false)
 const editingConfig = ref<CloudMailConfig | null>(null)
-const formRef = ref<FormInstance>()
+type ElFormExpose = {
+  validate: (cb?: (valid: boolean) => void | Promise<void>) => Promise<boolean>
+  resetFields?: () => void
+}
+
+const formRef = ref<ElFormExpose | null>(null)
 
 // 域名输入相关
 const domainInputVisible = ref(false)
@@ -203,7 +212,7 @@ const formData = reactive({
   is_active: true
 })
 
-const formRules: FormRules = {
+const formRules: ElFormRules = {
   name: [{ required: true, message: '请输入配置名称', trigger: 'blur' }],
   api_base: [
     { required: true, message: '请输入 API 地址', trigger: 'blur' },
@@ -458,99 +467,3 @@ onMounted(() => {
   fetchConfigs()
 })
 </script>
-
-<style scoped lang="scss">
-.email-management {
-  .page-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 24px;
-
-    h1 {
-      margin: 0;
-    }
-  }
-
-  code {
-    background: #f5f7fa;
-    padding: 2px 8px;
-    border-radius: 4px;
-    font-family: 'Courier New', monospace;
-    color: #409eff;
-  }
-
-  .domains-cell {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 4px;
-  }
-
-  .domains-input {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 4px;
-  }
-
-  .domains-tip {
-    font-size: 12px;
-    color: #909399;
-    margin-top: 4px;
-  }
-
-  .ml-2 {
-    margin-left: 8px;
-  }
-
-  .mr-1 {
-    margin-right: 4px;
-  }
-
-  .mb-1 {
-    margin-bottom: 4px;
-  }
-}
-
-.test-result {
-  .result-info {
-    text-align: left;
-    background: #f5f7fa;
-    padding: 16px;
-    border-radius: 8px;
-    
-    .info-item {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      margin-bottom: 8px;
-      
-      &:last-child {
-        margin-bottom: 0;
-      }
-      
-      .label {
-        font-weight: 500;
-        min-width: 70px;
-      }
-      
-      code {
-        background: white;
-        padding: 4px 8px;
-        border-radius: 4px;
-        font-family: 'Courier New', monospace;
-      }
-    }
-  }
-}
-
-.test-loading {
-  text-align: center;
-  padding: 40px;
-  
-  p {
-    margin-top: 16px;
-    color: #909399;
-  }
-}
-</style>

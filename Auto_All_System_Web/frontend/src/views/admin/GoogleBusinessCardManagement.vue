@@ -1,160 +1,165 @@
 <template>
-  <div class="google-business-card-management">
-    <el-page-header @back="$router.push('/admin/google-business')" content="卡信息管理" />
+  <div class="space-y-6 p-5">
+    <Card class="shadow-sm">
+      <CardContent class="px-4 py-3">
+        <PageHeader @back="$router.push('/admin/google-business')" content="卡信息管理" />
+      </CardContent>
+    </Card>
 
     <!--搜索和操作 -->
-    <el-card class="search-card">
-      <el-form :inline="true" :model="searchForm">
-        <el-form-item label="搜索">
-          <el-input
+    <Card class="shadow-sm">
+      <CardContent class="space-y-4 p-6">
+        <SimpleForm :inline="true" :model="searchForm">
+        <SimpleFormItem label="搜索">
+          <TextInput
             v-model="searchForm.search"
             placeholder="搜索卡号"
             clearable
             @keyup.enter="handleSearch"
           />
-        </el-form-item>
+        </SimpleFormItem>
 
-        <el-form-item label="状态">
-          <el-select v-model="searchForm.is_active" placeholder="全部" clearable @change="handleSearch">
-            <el-option label="全部" :value="undefined" />
-            <el-option label="可用" :value="true" />
-            <el-option label="禁用" :value="false" />
-          </el-select>
-        </el-form-item>
+        <SimpleFormItem label="状态">
+          <SelectNative v-model="searchForm.is_active" placeholder="全部" clearable @change="handleSearch">
+            <SelectOption label="全部" :value="undefined" />
+            <SelectOption label="可用" :value="true" />
+            <SelectOption label="禁用" :value="false" />
+          </SelectNative>
+        </SimpleFormItem>
 
-        <el-form-item>
-          <el-button type="primary" @click="handleSearch">
-            <el-icon><Search /></el-icon>
+        <SimpleFormItem>
+          <Button  variant="default" type="button" @click="handleSearch">
+            <Icon><Search /></Icon>
             搜索
-          </el-button>
-          <el-button @click="handleReset">
-            <el-icon><RefreshLeft /></el-icon>
+          </Button>
+          <Button @click="handleReset">
+            <Icon><RefreshLeft /></Icon>
             重置
-          </el-button>
-        </el-form-item>
-      </el-form>
+          </Button>
+        </SimpleFormItem>
+        </SimpleForm>
 
-      <el-divider />
+      <Divider />
 
-      <div class="action-buttons">
-        <el-button type="primary" @click="showAddDialog">
-          <el-icon><Plus /></el-icon>
+      <div class="flex flex-wrap gap-2">
+        <Button  variant="default" type="button" @click="showAddDialog">
+          <Icon><Plus /></Icon>
           添加卡片
-        </el-button>
-        <el-button type="success" @click="showBatchImportDialog">
-          <el-icon><Upload /></el-icon>
+        </Button>
+        <Button  variant="default" type="button" @click="showBatchImportDialog">
+          <Icon><Upload /></Icon>
           批量导入
-        </el-button>
-        <el-button
-          type="danger"
+        </Button>
+        <Button
+           variant="destructive" type="button"
           :disabled="selectedIds.length === 0"
           @click="handleBatchDelete"
         >
-          <el-icon><Delete /></el-icon>
+          <Icon><Delete /></Icon>
           批量删除 ({{ selectedIds.length }})
-        </el-button>
+        </Button>
       </div>
-    </el-card>
+      </CardContent>
+    </Card>
 
     <!-- 统计卡片 -->
-    <el-row :gutter="20" class="stats-row">
-      <el-col :span="6">
-        <el-card shadow="hover" class="stat-card">
-          <div class="stat-content">
-            <div class="stat-value">{{ cardStats.total || 0 }}</div>
-            <div class="stat-label">总卡片数</div>
-          </div>
-        </el-card>
-      </el-col>
-      <el-col :span="6">
-        <el-card shadow="hover" class="stat-card">
-          <div class="stat-content">
-            <div class="stat-value" style="color: #67C23A;">{{ cardStats.active || 0 }}</div>
-            <div class="stat-label">可用卡片</div>
-          </div>
-        </el-card>
-      </el-col>
-      <el-col :span="6">
-        <el-card shadow="hover" class="stat-card">
-          <div class="stat-content">
-            <div class="stat-value" style="color: #F56C6C;">{{ cardStats.inactive || 0 }}</div>
-            <div class="stat-label">禁用卡片</div>
-          </div>
-        </el-card>
-      </el-col>
-      <el-col :span="6">
-        <el-card shadow="hover" class="stat-card">
-          <div class="stat-content">
-            <div class="stat-value" style="color: #E6A23C;">{{ cardStats.times_used || 0 }}</div>
-            <div class="stat-label">总使用次数</div>
-          </div>
-        </el-card>
-      </el-col>
-    </el-row>
+    <div class="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-4">
+      <Card class="shadow-sm transition-shadow hover:shadow-md">
+        <CardContent class="p-6 text-center">
+          <div class="text-3xl font-bold leading-none text-foreground">{{ cardStats.total || 0 }}</div>
+          <div class="mt-2 text-sm text-muted-foreground">总卡片数</div>
+        </CardContent>
+      </Card>
+      <Card class="shadow-sm transition-shadow hover:shadow-md">
+        <CardContent class="p-6 text-center">
+          <div class="text-3xl font-bold leading-none text-emerald-600">{{ cardStats.active || 0 }}</div>
+          <div class="mt-2 text-sm text-muted-foreground">可用卡片</div>
+        </CardContent>
+      </Card>
+      <Card class="shadow-sm transition-shadow hover:shadow-md">
+        <CardContent class="p-6 text-center">
+          <div class="text-3xl font-bold leading-none text-rose-600">{{ cardStats.inactive || 0 }}</div>
+          <div class="mt-2 text-sm text-muted-foreground">禁用卡片</div>
+        </CardContent>
+      </Card>
+      <Card class="shadow-sm transition-shadow hover:shadow-md">
+        <CardContent class="p-6 text-center">
+          <div class="text-3xl font-bold leading-none text-amber-600">{{ cardStats.times_used || 0 }}</div>
+          <div class="mt-2 text-sm text-muted-foreground">总使用次数</div>
+        </CardContent>
+      </Card>
+    </div>
 
     <!-- 卡片列表 -->
-    <el-card class="table-card">
-      <el-table
+    <Card class="shadow-sm">
+      <CardHeader class="pb-3">
+        <CardTitle class="text-base">卡片列表</CardTitle>
+      </CardHeader>
+      <CardContent>
+      <DataTable
         v-loading="loading"
         :data="cards"
-        style="width: 100%"
+        class="w-full"
         @selection-change="handleSelectionChange"
         @sort-change="handleSortChange"
       >
-        <el-table-column type="selection" width="55" />
+        <DataColumn type="selection" width="55" />
         
-        <el-table-column prop="id" label="ID" width="80" sortable="custom" />
+        <DataColumn prop="id" label="ID" width="80" sortable="custom" />
         
-        <el-table-column prop="card_number_masked" label="卡号" width="200" />
+        <DataColumn prop="card_number_masked" label="卡号" width="200" />
         
-        <el-table-column prop="exp_month" label="过期月" width="100" />
+        <DataColumn prop="exp_month" label="过期月" width="100" />
         
-        <el-table-column prop="exp_year" label="过期年" width="100" />
+        <DataColumn prop="exp_year" label="过期年" width="100" />
         
-        <el-table-column prop="card_holder" label="持卡人" width="150" />
+        <DataColumn prop="card_holder" label="持卡人" width="150" />
         
-        <el-table-column prop="times_used" label="已使用" width="100">
+        <DataColumn prop="times_used" label="已使用" width="100">
           <template #default="{ row }">
-            <span :style="{ color: row.times_used >= row.max_uses ? '#F56C6C' : '#67C23A' }">
+            <span
+              class="font-semibold"
+              :class="row.times_used >= row.max_uses ? 'text-rose-600' : 'text-emerald-600'"
+            >
               {{ row.times_used }} / {{ row.max_uses }}
             </span>
           </template>
-        </el-table-column>
+        </DataColumn>
 
-        <el-table-column prop="is_active" label="状态" width="100">
+        <DataColumn prop="is_active" label="状态" width="100">
           <template #default="{ row }">
-            <el-tag :type="row.is_active ? 'success' : 'danger'" size="small">
+            <Tag :type="row.is_active ? 'success' : 'danger'" size="small">
               {{ row.is_active ? '可用' : '禁用' }}
-            </el-tag>
+            </Tag>
           </template>
-        </el-table-column>
+        </DataColumn>
 
-        <el-table-column prop="created_at" label="创建时间" width="180" sortable="custom" />
+        <DataColumn prop="created_at" label="创建时间" width="180" sortable="custom" />
 
-        <el-table-column label="操作" width="200" fixed="right">
+        <DataColumn label="操作" width="200" fixed="right">
           <template #default="{ row }">
-            <el-button size="small" @click="showEditDialog(row)">
-              <el-icon><Edit /></el-icon>
+            <Button size="small" @click="showEditDialog(row)">
+              <Icon><Edit /></Icon>
               编辑
-            </el-button>
-            <el-button
+            </Button>
+            <Button
               size="small"
               :type="row.is_active ? 'warning' : 'success'"
               @click="toggleActive(row)"
             >
               {{ row.is_active ? '禁用' : '启用' }}
-            </el-button>
-            <el-button size="small" type="danger" @click="deleteCard(row.id)">
-              <el-icon><Delete /></el-icon>
+            </Button>
+            <Button size="small"  variant="destructive" type="button" @click="deleteCard(row.id)">
+              <Icon><Delete /></Icon>
               删除
-            </el-button>
+            </Button>
           </template>
-        </el-table-column>
-      </el-table>
+        </DataColumn>
+      </DataTable>
 
       <!-- 分页 -->
-      <div class="pagination">
-        <el-pagination
+      <div class="mt-5 flex justify-end">
+        <Paginator
           v-model:current-page="pagination.page"
           v-model:page-size="pagination.page_size"
           :page-sizes="[10, 20, 50, 100]"
@@ -164,77 +169,78 @@
           @current-change="handlePageChange"
         />
       </div>
-    </el-card>
+      </CardContent>
+    </Card>
 
     <!-- 添加/编辑卡片对话框 -->
-    <el-dialog
+    <Modal
       v-model="dialogVisible"
       :title="dialogMode === 'add' ? '添加卡片' : '编辑卡片'"
       width="500px"
     >
-      <el-form :model="form" :rules="formRules" ref="formRef" label-width="100px">
-        <el-form-item label="卡号" prop="card_number">
-          <el-input v-model="form.card_number" placeholder="请输入卡号" maxlength="16" />
-        </el-form-item>
+      <SimpleForm :model="form" :rules="formRules" ref="formRef" label-width="100px">
+        <SimpleFormItem label="卡号" prop="card_number">
+          <TextInput v-model="form.card_number" placeholder="请输入卡号" maxlength="16" />
+        </SimpleFormItem>
 
-        <el-form-item label="过期月" prop="exp_month">
-          <el-select v-model="form.exp_month" placeholder="请选择月份">
-            <el-option v-for="month in 12" :key="month" :label="String(month).padStart(2, '0')" :value="String(month).padStart(2, '0')" />
-          </el-select>
-        </el-form-item>
+        <SimpleFormItem label="过期月" prop="exp_month">
+          <SelectNative v-model="form.exp_month" placeholder="请选择月份">
+            <SelectOption v-for="month in 12" :key="month" :label="String(month).padStart(2, '0')" :value="String(month).padStart(2, '0')" />
+          </SelectNative>
+        </SimpleFormItem>
 
-        <el-form-item label="过期年" prop="exp_year">
-          <el-select v-model="form.exp_year" placeholder="请选择年份">
-            <el-option v-for="year in 10" :key="year" :label="String(new Date().getFullYear() - 2000 + year)" :value="String(new Date().getFullYear() - 2000 + year)" />
-          </el-select>
-        </el-form-item>
+        <SimpleFormItem label="过期年" prop="exp_year">
+          <SelectNative v-model="form.exp_year" placeholder="请选择年份">
+            <SelectOption v-for="year in 10" :key="year" :label="String(new Date().getFullYear() - 2000 + year)" :value="String(new Date().getFullYear() - 2000 + year)" />
+          </SelectNative>
+        </SimpleFormItem>
 
-        <el-form-item label="CVV" prop="cvv">
-          <el-input v-model="form.cvv" placeholder="请输入CVV" maxlength="4" />
-        </el-form-item>
+        <SimpleFormItem label="CVV" prop="cvv">
+          <TextInput v-model="form.cvv" placeholder="请输入CVV" maxlength="4" />
+        </SimpleFormItem>
 
-        <el-form-item label="持卡人">
-          <el-input v-model="form.card_holder" placeholder="请输入持卡人姓名（可选）" />
-        </el-form-item>
+        <SimpleFormItem label="持卡人">
+          <TextInput v-model="form.card_holder" placeholder="请输入持卡人姓名（可选）" />
+        </SimpleFormItem>
 
-        <el-form-item label="账单地址">
-          <el-input v-model="form.billing_address" type="textarea" :rows="3" placeholder="请输入账单地址（可选）" />
-        </el-form-item>
+        <SimpleFormItem label="账单地址">
+          <TextInput v-model="form.billing_address" type="textarea" :rows="3" placeholder="请输入账单地址（可选）" />
+        </SimpleFormItem>
 
-        <el-form-item label="最大使用次数">
-          <el-input-number v-model="form.max_uses" :min="1" :max="100" />
-        </el-form-item>
+        <SimpleFormItem label="最大使用次数">
+          <NumberInput v-model="form.max_uses" :min="1" :max="100" />
+        </SimpleFormItem>
 
-        <el-form-item label="状态">
-          <el-switch v-model="form.is_active" active-text="可用" inactive-text="禁用" />
-        </el-form-item>
-      </el-form>
+        <SimpleFormItem label="状态">
+          <Toggle v-model="form.is_active" active-text="可用" inactive-text="禁用" />
+        </SimpleFormItem>
+      </SimpleForm>
 
       <template #footer>
-        <el-button @click="dialogVisible = false">取消</el-button>
-        <el-button type="primary" @click="handleSubmit" :loading="submitting">
+        <Button @click="dialogVisible = false">取消</Button>
+        <Button  variant="default" type="button" @click="handleSubmit" :loading="submitting">
           确定
-        </el-button>
+        </Button>
       </template>
-    </el-dialog>
+    </Modal>
 
     <!-- 批量导入对话框 -->
-    <el-dialog
+    <Modal
       v-model="batchImportVisible"
       title="批量导入卡片"
       width="600px"
     >
-      <el-alert
+      <InfoAlert
         title="导入格式说明"
         type="info"
         :closable="false"
-        style="margin-bottom: 20px;"
+        class="mb-5"
       >
         <div>每行一张卡片，格式：卡号 过期月 过期年 CVV [持卡人]</div>
         <div>示例：4111111111111111 12 25 123 John Doe</div>
-      </el-alert>
+      </InfoAlert>
 
-      <el-input
+      <TextInput
         v-model="batchImportText"
         type="textarea"
         :rows="10"
@@ -242,19 +248,19 @@
       />
 
       <template #footer>
-        <el-button @click="batchImportVisible = false">取消</el-button>
-        <el-button type="primary" @click="handleBatchImport" :loading="importing">
+        <Button @click="batchImportVisible = false">取消</Button>
+        <Button  variant="default" type="button" @click="handleBatchImport" :loading="importing">
           导入
-        </el-button>
+        </Button>
       </template>
-    </el-dialog>
+    </Modal>
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
-import type { FormInstance, FormRules } from 'element-plus'
+import { ElMessage, ElMessageBox } from '@/lib/element'
+import type { ElFormRules } from '@/components/app/symbols'
 import { 
   Search, 
   RefreshLeft, 
@@ -262,7 +268,8 @@ import {
   Upload,
   Delete,
   Edit
-} from '@element-plus/icons-vue'
+} from '@/icons'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import {
   getCards,
   createCard,
@@ -308,12 +315,17 @@ const form = ref({
   max_uses: 1,
   is_active: true
 })
-const formRef = ref<FormInstance>()
+type ElFormExpose = {
+  validate: (cb?: (valid: boolean) => void | Promise<void>) => Promise<boolean>
+  resetFields?: () => void
+}
+
+const formRef = ref<ElFormExpose | null>(null)
 const submitting = ref(false)
 const editingId = ref<number | null>(null)
 
 // 表单验证规则
-const formRules: FormRules = {
+const formRules: ElFormRules = {
   card_number: [
     { required: true, message: '请输入卡号', trigger: 'blur' },
     { pattern: /^\d{13,19}$/, message: '卡号格式不正确', trigger: 'blur' }
@@ -596,53 +608,3 @@ onMounted(async () => {
   await Promise.all([loadCards(), loadStats()])
 })
 </script>
-
-<style scoped lang="scss">
-.google-business-card-management {
-  padding: 20px;
-
-  .el-page-header {
-    margin-bottom: 20px;
-  }
-
-  .search-card {
-    margin-bottom: 20px;
-
-    .action-buttons {
-      display: flex;
-      gap: 10px;
-    }
-  }
-
-  .stats-row {
-    margin-bottom: 20px;
-
-    .stat-card {
-      .stat-content {
-        text-align: center;
-        padding: 20px;
-
-        .stat-value {
-          font-size: 32px;
-          font-weight: bold;
-          margin-bottom: 10px;
-        }
-
-        .stat-label {
-          font-size: 14px;
-          color: #909399;
-        }
-      }
-    }
-  }
-
-  .table-card {
-    .pagination {
-      margin-top: 20px;
-      display: flex;
-      justify-content: flex-end;
-    }
-  }
-}
-</style>
-

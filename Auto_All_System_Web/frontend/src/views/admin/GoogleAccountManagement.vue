@@ -1,58 +1,64 @@
 <template>
-  <div class="google-account">
-    <div class="page-header">
-      <h1>Google账号管理</h1>
-      <el-button type="primary" @click="showDialog = true">
-        <el-icon><Plus /></el-icon>
+  <div class="space-y-6 p-5">
+    <div class="flex items-end justify-between gap-4">
+      <div>
+        <h1 class="text-2xl font-semibold text-foreground">Google账号管理</h1>
+        <p class="mt-1 text-sm text-muted-foreground">管理账号状态、Gemini 订阅、2FA 等信息。</p>
+      </div>
+      <Button  variant="default" type="button" @click="showDialog = true">
+        <Icon><Plus /></Icon>
         添加账号
-      </el-button>
+      </Button>
     </div>
 
-    <el-card shadow="hover">
-      <el-table :data="accounts" v-loading="loading" stripe>
-        <el-table-column prop="id" label="ID" width="60" />
-        <el-table-column prop="email" label="邮箱" width="250">
+    <Card class="shadow-sm">
+      <CardContent class="p-6">
+      <DataTable :data="accounts" v-loading="loading" stripe class="w-full">
+        <DataColumn prop="id" label="ID" width="60" />
+        <DataColumn prop="email" label="邮箱" width="250">
           <template #default="{ row }">
-            <span style="font-weight: bold;">📧 {{ row.email }}</span>
+            <span class="font-semibold text-foreground">📧 {{ row.email }}</span>
           </template>
-        </el-table-column>
-        <el-table-column label="状态" width="100">
+        </DataColumn>
+        <DataColumn label="状态" width="100">
           <template #default="{ row }">
-            <el-tag :type="getStatusColor(row.status)">{{ getStatusName(row.status) }}</el-tag>
+            <Tag :type="getStatusColor(row.status)">{{ getStatusName(row.status) }}</Tag>
           </template>
-        </el-table-column>
-        <el-table-column label="Gemini" width="100">
+        </DataColumn>
+        <DataColumn label="Gemini" width="100">
           <template #default="{ row }">
-            <el-tag :type="getGeminiColor(row.gemini_status)">{{ getGeminiName(row.gemini_status) }}</el-tag>
+            <Tag :type="getGeminiColor(row.gemini_status)">{{ getGeminiName(row.gemini_status) }}</Tag>
           </template>
-        </el-table-column>
-        <el-table-column label="2FA" width="80">
+        </DataColumn>
+        <DataColumn label="2FA" width="80">
           <template #default="{ row }">
             {{ row.two_fa_secret ? '🔒' : '🔓' }}
           </template>
-        </el-table-column>
-        <el-table-column label="订阅到期" width="120">
+        </DataColumn>
+        <DataColumn label="订阅到期" width="120">
           <template #default="{ row }">
             {{ row.subscription_end_date || '-' }}
           </template>
-        </el-table-column>
-        <el-table-column prop="created_at" label="创建时间" width="180" />
-        <el-table-column label="操作" width="200" fixed="right">
+        </DataColumn>
+        <DataColumn prop="created_at" label="创建时间" width="180" />
+        <DataColumn label="操作" width="200" fixed="right">
           <template #default="{ row }">
-            <el-button text type="primary" @click="editAccount(row)">编辑</el-button>
-            <el-button text type="success" @click="testLogin(row)">测试登录</el-button>
-            <el-button text type="danger" @click="deleteAccount(row)">删除</el-button>
+            <Button text  variant="default" type="button" @click="editAccount(row)">编辑</Button>
+            <Button text  variant="default" type="button" @click="testLogin(row)">测试登录</Button>
+            <Button text  variant="destructive" type="button" @click="deleteAccount(row)">删除</Button>
           </template>
-        </el-table-column>
-      </el-table>
-    </el-card>
+        </DataColumn>
+      </DataTable>
+      </CardContent>
+    </Card>
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
-import { ElMessage } from 'element-plus'
-import { Plus } from '@element-plus/icons-vue'
+import { ElMessage } from '@/lib/element'
+import { Plus } from '@/icons'
+import { Card, CardContent } from '@/components/ui/card'
 
 const loading = ref(false)
 const accounts = ref([])
@@ -124,18 +130,3 @@ onMounted(() => {
   fetchAccounts()
 })
 </script>
-
-<style scoped lang="scss">
-.google-account {
-  .page-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 24px;
-
-    h1 {
-      margin: 0;
-    }
-  }
-}
-</style>

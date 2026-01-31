@@ -1,357 +1,266 @@
 <template>
-  <div class="google-business-task-list">
-    <el-page-header @back="$router.push('/admin/google-business')" content="任务管理" />
-
-    <!-- 搜索和筛选 -->
-    <el-card class="search-card">
-      <el-form :inline="true" :model="searchForm">
-        <el-form-item label="任务类型">
-          <el-select v-model="searchForm.task_type" placeholder="全部" clearable @change="handleSearch">
-            <el-option label="全部" value="" />
-            <el-option label="登录" value="login" />
-            <el-option label="获取链接" value="get_link" />
-            <el-option label="SheerID验证" value="verify" />
-            <el-option label="绑卡订阅" value="bind_card" />
-            <el-option label="一键到底" value="one_click" />
-          </el-select>
-        </el-form-item>
-
-        <el-form-item label="状态">
-          <el-select v-model="searchForm.status" placeholder="全部" clearable @change="handleSearch">
-            <el-option label="全部" value="" />
-            <el-option label="待处理" value="pending" />
-            <el-option label="运行中" value="running" />
-            <el-option label="已完成" value="completed" />
-            <el-option label="失败" value="failed" />
-            <el-option label="已取消" value="cancelled" />
-          </el-select>
-        </el-form-item>
-
-        <el-form-item>
-          <el-button type="primary" @click="handleSearch">
-            <el-icon><Search /></el-icon>
-            搜索
-          </el-button>
-          <el-button @click="handleReset">
-            <el-icon><RefreshLeft /></el-icon>
-            重置
-          </el-button>
-          <el-button type="success" @click="$router.push('/admin/google-business/tasks/create')">
-            <el-icon><Plus /></el-icon>
-            创建任务
-          </el-button>
-        </el-form-item>
-      </el-form>
-    </el-card>
-
-    <!-- 任务列表 -->
-    <el-card class="table-card">
-      <el-table
-        v-loading="loading"
-        :data="tasks"
-        style="width: 100%"
-        @sort-change="handleSortChange"
-      >
-        <el-table-column prop="id" label="ID" width="80" sortable="custom" />
-        
-        <el-table-column prop="task_type" label="任务类型" width="120">
-          <template #default="{ row }">
-            <el-tag :type="getTaskTypeColor(row.task_type)" size="small">
-              {{ getTaskTypeName(row.task_type) }}
-            </el-tag>
-          </template>
-        </el-table-column>
-
-        <el-table-column label="进度" width="200">
-          <template #default="{ row }">
-            <div class="progress-info">
-              <el-progress
-                :percentage="getProgress(row)"
-                :status="row.status === 'completed' ? 'success' : row.status === 'failed' ? 'exception' : undefined"
-              />
-              <div class="progress-text">
-                成功: {{ row.success_count }} / 失败: {{ row.failed_count }} / 总数: {{ row.total_count }}
-              </div>
-            </div>
-          </template>
-        </el-table-column>
-
-        <el-table-column prop="status" label="状态" width="100">
-          <template #default="{ row }">
-            <el-tag :type="getStatusColor(row.status)" size="small">
-              {{ getStatusName(row.status) }}
-            </el-tag>
-          </template>
-        </el-table-column>
-
-        <el-table-column prop="total_cost" label="费用（积分）" width="120">
-          <template #default="{ row }">
-            <span style="color: #E6A23C; font-weight: bold;">{{ row.total_cost }}</span>
-          </template>
-        </el-table-column>
-
-        <el-table-column prop="created_at" label="创建时间" width="180" sortable="custom" />
-        
-        <el-table-column prop="started_at" label="开始时间" width="180" />
-        
-        <el-table-column prop="completed_at" label="完成时间" width="180" />
-
-        <el-table-column label="操作" width="250" fixed="right">
-          <template #default="{ row }">
-            <el-button size="small" @click="viewTask(row.id)">
-              <el-icon><View /></el-icon>
-              查看
-            </el-button>
-            <el-button
-              v-if="row.status === 'running'"
-              size="small"
-              type="warning"
-              @click="cancelTask(row.id)"
-            >
-              <el-icon><CircleClose /></el-icon>
-              取消
-            </el-button>
-            <el-button
-              v-if="row.failed_count > 0"
-              size="small"
-              type="success"
-              @click="retryTask(row.id)"
-            >
-              <el-icon><RefreshRight /></el-icon>
-              重试
-            </el-button>
-            <el-button
-              size="small"
-              type="danger"
-              @click="deleteTask(row.id)"
-            >
-              <el-icon><Delete /></el-icon>
-              删除
-            </el-button>
-          </template>
-        </el-table-column>
-      </el-table>
-
-      <!-- 分页 -->
-      <div class="pagination">
-        <el-pagination
-          v-model:current-page="pagination.page"
-          v-model:page-size="pagination.page_size"
-          :page-sizes="[10, 20, 50, 100]"
-          :total="pagination.total"
-          layout="total, sizes, prev, pager, next, jumper"
-          @size-change="handleSizeChange"
-          @current-change="handlePageChange"
-        />
+  <div class="space-y-6 p-5">
+    <div class="flex items-center justify-between">
+      <div class="flex items-center gap-4">
+        <Button variant="ghost" size="sm" class="gap-2" @click="router.back()">
+          <ArrowLeft class="h-4 w-4" />
+          返回
+        </Button>
+        <h1 class="text-2xl font-semibold text-foreground">Google 业务任务管理</h1>
       </div>
-    </el-card>
+      <Button size="sm" class="gap-2" @click="router.push('/admin/google-business/tasks/create')">
+        <Plus class="h-4 w-4" />
+        创建任务
+      </Button>
+    </div>
+
+    <Card class="bg-card text-card-foreground">
+      <CardHeader>
+        <div class="flex flex-wrap items-center gap-4">
+          <div class="flex items-center gap-2">
+            <span class="text-sm font-medium">任务类型</span>
+            <Select v-model="searchForm.task_type" @update:modelValue="handleSearch">
+              <SelectTrigger class="w-[160px]">
+                <SelectValue placeholder="全部类型" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">全部类型</SelectItem>
+                <SelectItem value="one_click">一键全自动</SelectItem>
+                <SelectItem value="register">注册账号</SelectItem>
+                <SelectItem value="login">登录检测</SelectItem>
+                <SelectItem value="verify">验证/绑卡</SelectItem>
+                <SelectItem value="subscribe">订阅操作</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div class="flex items-center gap-2">
+            <span class="text-sm font-medium">状态</span>
+            <Select v-model="searchForm.status" @update:modelValue="handleSearch">
+              <SelectTrigger class="w-[140px]">
+                <SelectValue placeholder="全部状态" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">全部状态</SelectItem>
+                <SelectItem value="pending">等待中</SelectItem>
+                <SelectItem value="processing">进行中</SelectItem>
+                <SelectItem value="completed">已完成</SelectItem>
+                <SelectItem value="failed">失败</SelectItem>
+                <SelectItem value="cancelled">已取消</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div class="flex items-center gap-2">
+            <span class="text-sm font-medium">搜索</span>
+            <Input
+              v-model="searchForm.email"
+              placeholder="搜索账号邮箱"
+              class="w-[200px]"
+              @keydown.enter="handleSearch"
+            />
+          </div>
+
+          <div class="flex items-center gap-2 ml-auto">
+            <Button variant="outline" size="sm" @click="handleReset">重置</Button>
+            <Button size="sm" class="gap-2" @click="handleSearch">
+              <Search class="h-4 w-4" />
+              搜索
+            </Button>
+          </div>
+        </div>
+      </CardHeader>
+      <CardContent class="p-0">
+        <div class="overflow-x-auto rounded-xl border border-border">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead class="w-20">ID</TableHead>
+                <TableHead class="min-w-[140px]">任务类型</TableHead>
+                <TableHead class="min-w-[220px]">关联账号</TableHead>
+                <TableHead class="w-32">状态</TableHead>
+                <TableHead class="min-w-[160px]">进度</TableHead>
+                <TableHead class="min-w-[200px]">结果/错误</TableHead>
+                <TableHead class="w-40">创建时间</TableHead>
+                <TableHead class="w-24 text-right">操作</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              <TableRow v-if="loading && tasks.length === 0">
+                <TableCell colspan="8" class="py-10 text-center">
+                  <div class="flex items-center justify-center gap-2 text-sm text-muted-foreground">
+                    <Loader2 class="h-4 w-4 animate-spin" />
+                    加载中...
+                  </div>
+                </TableCell>
+              </TableRow>
+              <TableRow v-else v-for="row in tasks" :key="row.id" class="hover:bg-muted/20">
+                <TableCell class="font-mono text-xs text-muted-foreground">#{{ row.id }}</TableCell>
+                <TableCell>
+                  <div class="flex items-center gap-2">
+                    <span class="font-medium">{{ getTaskTypeName(row.task_type) }}</span>
+                    <Badge v-if="row.task_type === 'one_click'" variant="secondary" class="text-[10px] h-5 px-1">全自动</Badge>
+                  </div>
+                </TableCell>
+                <TableCell class="font-mono text-xs">{{ row.account_email }}</TableCell>
+                <TableCell>
+                  <Badge :variant="getStatusVariant(row.status)" class="rounded-full">
+                    {{ getStatusText(row.status) }}
+                  </Badge>
+                </TableCell>
+                <TableCell>
+                  <div class="flex items-center gap-3">
+                    <div class="h-2 w-24 rounded-full bg-muted overflow-hidden">
+                      <div class="h-full rounded-full bg-primary" :class="progressWidthClass(row.progress_percentage)" />
+                    </div>
+                    <span class="text-xs text-muted-foreground tabular-nums">{{ row.progress_percentage || 0 }}%</span>
+                  </div>
+                  <div v-if="row.current_step" class="text-[10px] text-muted-foreground mt-1 truncate max-w-[140px]" :title="row.current_step">
+                    {{ row.current_step }}
+                  </div>
+                </TableCell>
+                <TableCell>
+                  <span v-if="row.error_message" class="text-xs text-destructive line-clamp-2" :title="row.error_message">
+                    {{ row.error_message }}
+                  </span>
+                  <span v-else-if="row.result_data" class="text-xs text-muted-foreground line-clamp-2">
+                    {{ JSON.stringify(row.result_data) }}
+                  </span>
+                  <span v-else class="text-xs text-muted-foreground">-</span>
+                </TableCell>
+                <TableCell class="text-xs text-muted-foreground">{{ formatDate(row.created_at) }}</TableCell>
+                <TableCell class="text-right">
+                  <Button variant="outline" size="xs" @click="viewDetail(row)">详情</Button>
+                </TableCell>
+              </TableRow>
+              <TableRow v-if="!loading && tasks.length === 0">
+                <TableCell colspan="8" class="py-10 text-center text-sm text-muted-foreground">暂无任务数据</TableCell>
+              </TableRow>
+            </TableBody>
+          </Table>
+        </div>
+
+        <div class="p-4 flex items-center justify-end gap-2" v-if="total > pageSize">
+          <Button variant="outline" size="sm" :disabled="currentPage <= 1" @click="currentPage--; fetchTasks()">上一页</Button>
+          <div class="text-sm text-muted-foreground">
+            第 <span class="font-medium text-foreground">{{ currentPage }}</span> 页
+          </div>
+          <Button variant="outline" size="sm" :disabled="tasks.length < pageSize" @click="currentPage++; fetchTasks()">下一页</Button>
+        </div>
+      </CardContent>
+    </Card>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted } from 'vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
-import { 
-  Search, 
-  RefreshLeft, 
-  Plus,
-  View,
-  Delete
-} from '@element-plus/icons-vue'
+import { ref, reactive, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
+import { ElMessage } from '@/lib/element'
+import { ArrowLeft, Plus, Search, Loader2 } from 'lucide-vue-next'
+import googleBusinessApi from '@/api/google_business'
+import dayjs from 'dayjs'
+
+import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
+import { Card, CardContent, CardHeader } from '@/components/ui/card'
+import { Input } from '@/components/ui/input'
 import {
-  getTasks,
-  cancelTask as cancelTaskApi,
-  deleteTask as deleteTaskApi,
-  retryTaskAccounts
-} from '@/api/google_business'
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table'
 
 const router = useRouter()
-
-// 搜索表单
-const searchForm = ref({
-  task_type: '',
-  status: ''
-})
-
-// 分页配置
-const pagination = ref({
-  page: 1,
-  page_size: 20,
-  total: 0
-})
-
-// 排序配置
-const ordering = ref('-created_at')
-
-// 数据
-const tasks = ref<any[]>([])
 const loading = ref(false)
+const tasks = ref<any[]>([])
+const total = ref(0)
+const currentPage = ref(1)
+const pageSize = ref(20)
 
-// 加载任务列表
-const loadTasks = async () => {
+const searchForm = reactive({
+  task_type: 'all',
+  status: 'all',
+  email: ''
+})
+
+const fetchTasks = async () => {
   loading.value = true
   try {
-    const res = await getTasks({
-      page: pagination.value.page,
-      page_size: pagination.value.page_size,
-      task_type: searchForm.value.task_type || undefined,
-      status: searchForm.value.status || undefined,
-      ordering: ordering.value
-    })
+    const params: any = {
+      page: currentPage.value,
+      page_size: pageSize.value,
+      ordering: '-created_at'
+    }
+    
+    if (searchForm.task_type !== 'all') params.task_type = searchForm.task_type
+    if (searchForm.status !== 'all') params.status = searchForm.status
+    if (searchForm.email) params.account_email__icontains = searchForm.email
 
-    tasks.value = res.data?.results || []
-    pagination.value.total = res.data?.count || 0
-  } catch (error: any) {
-    console.error('加载任务列表失败:', error)
-    ElMessage.error(error.response?.data?.error || '加载任务列表失败')
+    const res: any = await googleBusinessApi.getTasks(params)
+    if (res && res.results) {
+      tasks.value = res.results
+      total.value = res.count
+    }
+  } catch (error) {
+    console.error('获取任务列表失败:', error)
+    ElMessage.error('获取任务列表失败')
   } finally {
     loading.value = false
   }
 }
 
-// 搜索
 const handleSearch = () => {
-  pagination.value.page = 1
-  loadTasks()
+  currentPage.value = 1
+  fetchTasks()
 }
 
-// 重置
 const handleReset = () => {
-  searchForm.value = {
-    task_type: '',
-    status: ''
-  }
-  pagination.value.page = 1
-  ordering.value = '-created_at'
-  loadTasks()
+  searchForm.task_type = 'all'
+  searchForm.status = 'all'
+  searchForm.email = ''
+  handleSearch()
 }
 
-// 排序
-const handleSortChange = ({ prop, order }: any) => {
-  if (order === 'ascending') {
-    ordering.value = prop
-  } else if (order === 'descending') {
-    ordering.value = `-${prop}`
-  } else {
-    ordering.value = '-created_at'
-  }
-  loadTasks()
+const viewDetail = (row: any) => {
+  router.push(`/admin/google-business/tasks/${row.id}`)
 }
 
-// 分页
-const handleSizeChange = () => {
-  pagination.value.page = 1
-  loadTasks()
-}
-
-const handlePageChange = () => {
-  loadTasks()
-}
-
-// 计算进度
-const getProgress = (task: any) => {
-  if (task.total_count === 0) return 0
-  return Math.round(((task.success_count + task.failed_count) / task.total_count) * 100)
-}
-
-// 查看任务
-const viewTask = (taskId: number) => {
-  router.push(`/admin/google-business/tasks/${taskId}`)
-}
-
-// 取消任务
-const cancelTask = async (taskId: number) => {
-  try {
-    await ElMessageBox.confirm('确定要取消此任务吗？', '提示', {
-      confirmButtonText: '确定',
-      cancelButtonText: '取消',
-      type: 'warning'
-    })
-
-    await cancelTaskApi(taskId)
-    ElMessage.success('任务已取消')
-    loadTasks()
-  } catch (error: any) {
-    if (error !== 'cancel') {
-      ElMessage.error(error.response?.data?.error || '取消任务失败')
-    }
-  }
-}
-
-// 重试任务
-const retryTask = async (taskId: number) => {
-  try {
-    await ElMessageBox.confirm('确定要重试失败的账号吗？', '提示', {
-      confirmButtonText: '确定',
-      cancelButtonText: '取消',
-      type: 'info'
-    })
-
-    // 获取失败的账号ID列表
-    const task = tasks.value.find(t => t.id === taskId)
-    if (task && task.failed_account_ids && task.failed_account_ids.length > 0) {
-      await retryTaskAccounts(taskId, { account_ids: task.failed_account_ids })
-      ElMessage.success('重试任务已创建')
-      loadTasks()
-    } else {
-      ElMessage.warning('没有失败的账号需要重试')
-    }
-  } catch (error: any) {
-    if (error !== 'cancel') {
-      ElMessage.error(error.response?.data?.error || '重试任务失败')
-    }
-  }
-}
-
-// 删除任务
-const deleteTask = async (taskId: number) => {
-  try {
-    await ElMessageBox.confirm('确定要删除此任务吗？删除后无法恢复！', '警告', {
-      confirmButtonText: '确定',
-      cancelButtonText: '取消',
-      type: 'error'
-    })
-
-    await deleteTaskApi(taskId)
-    ElMessage.success('任务已删除')
-    loadTasks()
-  } catch (error: any) {
-    if (error !== 'cancel') {
-      ElMessage.error(error.response?.data?.error || '删除任务失败')
-    }
-  }
-}
-
-// 获取任务类型名称
 const getTaskTypeName = (type: string) => {
   const map: Record<string, string> = {
-    login: '登录',
-    get_link: '获取链接',
-    verify: 'SheerID验证',
-    bind_card: '绑卡订阅',
-    one_click: '一键到底'
+    one_click: '一键全自动',
+    register: '注册账号',
+    login: '登录检测',
+    verify: '验证/绑卡',
+    subscribe: '订阅操作'
   }
   return map[type] || type
 }
 
-// 获取任务类型颜色
-const getTaskTypeColor = (type: string) => {
-  const map: Record<string, string> = {
-    login: '',
-    get_link: 'info',
-    verify: 'warning',
-    bind_card: 'success',
-    one_click: 'danger'
+const getStatusVariant = (status: string) => {
+  const map: Record<string, any> = {
+    pending: 'outline',
+    processing: 'secondary', // Use secondary or warning-like if customized
+    completed: 'default', // Usually green/primary
+    failed: 'destructive',
+    cancelled: 'outline'
   }
-  return map[type] || ''
+  return map[status] || 'outline'
 }
 
-// 获取状态名称
-const getStatusName = (status: string) => {
+const getStatusText = (status: string) => {
   const map: Record<string, string> = {
-    pending: '待处理',
-    running: '运行中',
+    pending: '等待中',
+    processing: '进行中',
     completed: '已完成',
     failed: '失败',
     cancelled: '已取消'
@@ -359,61 +268,28 @@ const getStatusName = (status: string) => {
   return map[status] || status
 }
 
-// 获取状态颜色
-const getStatusColor = (status: string) => {
-  const map: Record<string, string> = {
-    pending: 'info',
-    running: 'warning',
-    completed: 'success',
-    failed: 'danger',
-    cancelled: ''
-  }
-  return map[status] || ''
+const progressWidthClass = (progress: number) => {
+  const p = Math.max(0, Math.min(100, Number(progress) || 0))
+  if (p <= 0) return 'w-0'
+  // Simplified percentages for Tailwind classes
+  if (p <= 10) return 'w-[10%]'
+  if (p <= 20) return 'w-[20%]'
+  if (p <= 30) return 'w-[30%]'
+  if (p <= 40) return 'w-[40%]'
+  if (p <= 50) return 'w-[50%]'
+  if (p <= 60) return 'w-[60%]'
+  if (p <= 70) return 'w-[70%]'
+  if (p <= 80) return 'w-[80%]'
+  if (p <= 90) return 'w-[90%]'
+  return 'w-full'
 }
 
-// 组件挂载
+const formatDate = (date: string) => {
+  if (!date) return '-'
+  return dayjs(date).format('YYYY-MM-DD HH:mm:ss')
+}
+
 onMounted(() => {
-  loadTasks()
-
-  // 每30秒刷新一次列表
-  const interval = setInterval(() => {
-    loadTasks()
-  }, 30000)
-
-  // 组件卸载时清除定时器
-  onUnmounted(() => {
-    clearInterval(interval)
-  })
+  fetchTasks()
 })
 </script>
-
-<style scoped lang="scss">
-.google-business-task-list {
-  padding: 20px;
-
-  .el-page-header {
-    margin-bottom: 20px;
-  }
-
-  .search-card {
-    margin-bottom: 20px;
-  }
-
-  .table-card {
-    .progress-info {
-      .progress-text {
-        font-size: 12px;
-        color: #909399;
-        margin-top: 5px;
-      }
-    }
-
-    .pagination {
-      margin-top: 20px;
-      display: flex;
-      justify-content: flex-end;
-    }
-  }
-}
-</style>
-

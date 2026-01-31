@@ -1,148 +1,202 @@
 <template>
-  <div class="proxy-management-module">
-    <el-card shadow="hover">
-      <template #header>
-        <div class="card-header">
-          <h3>代理管理</h3>
-          <div>
-            <el-button type="primary" @click="showAddDialog = true">
-              <el-icon><Plus /></el-icon>
-              新增代理
-            </el-button>
-            <el-button type="success" @click="showImportDialog = true">
-              <el-icon><Upload /></el-icon>
-              批量导入
-            </el-button>
-          </div>
-        </div>
-      </template>
+  <div class="space-y-6">
+    <div class="flex items-end justify-between gap-4">
+      <div>
+        <h2 class="text-2xl font-semibold text-foreground">代理管理</h2>
+        <p class="mt-1 text-sm text-muted-foreground">维护可用代理池，用于批量自动化任务。</p>
+      </div>
 
-      <el-table :data="proxies" v-loading="loading" style="width: 100%">
-        <el-table-column prop="proxy_type" label="类型" width="100" />
-        <el-table-column label="地址" width="250">
-          <template #default="{ row }">
-            {{ row.host }}:{{ row.port }}
-          </template>
-        </el-table-column>
-        <el-table-column prop="username" label="用户名" width="150" />
-        <el-table-column prop="country" label="国家" width="120" />
-        <el-table-column label="状态" width="100">
-          <template #default="{ row }">
-            <el-tag v-if="row.status === 'active'" type="success" size="small">
-              可用
-            </el-tag>
-            <el-tag v-else type="danger" size="small">
-              不可用
-            </el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column label="操作" width="200" fixed="right">
-          <template #default="{ row }">
-            <el-button size="small" @click="testProxy(row)">测试</el-button>
-            <el-button size="small" @click="editProxy(row)">编辑</el-button>
-            <el-button
-              size="small"
-              type="danger"
-              @click="deleteProxy(row)"
-            >
-              删除
-            </el-button>
-          </template>
-        </el-table-column>
-      </el-table>
-    </el-card>
+      <div class="flex items-center gap-2">
+        <Button variant="default" size="sm" class="gap-2" @click="showAddDialog = true">
+          <Plus class="h-4 w-4" />
+          新增代理
+        </Button>
+        <Button variant="secondary" size="sm" class="gap-2" @click="showImportDialog = true">
+          <Upload class="h-4 w-4" />
+          批量导入
+        </Button>
+      </div>
+    </div>
+
+    <Card class="bg-card text-card-foreground">
+      <CardContent class="p-0">
+        <div class="overflow-x-auto rounded-xl border border-border">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>类型</TableHead>
+                <TableHead>地址</TableHead>
+                <TableHead>用户名</TableHead>
+                <TableHead>国家</TableHead>
+                <TableHead>状态</TableHead>
+                <TableHead class="text-right">操作</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              <TableRow v-for="row in proxies" :key="row.id">
+                <TableCell>
+                  <span class="font-mono text-xs rounded bg-muted px-2 py-1">{{ row.proxy_type }}</span>
+                </TableCell>
+                <TableCell class="font-mono">{{ row.host }}:{{ row.port }}</TableCell>
+                <TableCell class="text-muted-foreground">{{ row.username || '-' }}</TableCell>
+                <TableCell class="text-muted-foreground">{{ row.country || '-' }}</TableCell>
+                <TableCell>
+                  <Badge :variant="row.status === 'active' ? 'default' : 'destructive'" class="rounded-full">
+                    {{ row.status === 'active' ? '可用' : '不可用' }}
+                  </Badge>
+                </TableCell>
+                <TableCell class="text-right">
+                  <div class="flex items-center justify-end gap-2">
+                    <Button variant="outline" size="sm" @click="testProxy(row)">测试</Button>
+                    <Button variant="outline" size="sm" @click="editProxy(row)">编辑</Button>
+                    <Button variant="destructive" size="sm" @click="deleteProxy(row)">删除</Button>
+                  </div>
+                </TableCell>
+              </TableRow>
+
+              <TableRow v-if="!loading && proxies.length === 0">
+                <TableCell class="py-10 text-center text-muted-foreground" colspan="6">暂无代理</TableCell>
+              </TableRow>
+            </TableBody>
+          </Table>
+        </div>
+
+        <div v-if="loading" class="p-4 text-sm text-muted-foreground">加载中...</div>
+      </CardContent>
+    </Card>
 
     <!-- 批量导入对话框 -->
-    <el-dialog
-      v-model="showImportDialog"
-      title="批量导入代理"
-      width="600px"
-    >
-      <el-alert
-        title="格式提示"
-        type="info"
-        :closable="false"
-        class="mb-3"
-      >
-        <template #default>
-          每行一个代理，格式：socks5://username:password@host:port
-          <br />
-          示例：socks5://user1:pass1@1.2.3.4:1080
-        </template>
-      </el-alert>
+    <Dialog v-model:open="showImportDialog">
+      <DialogContent class="sm:max-w-[600px]">
+        <DialogHeader>
+          <DialogTitle>批量导入代理</DialogTitle>
+        </DialogHeader>
 
-      <el-input
-        v-model="importText"
-        type="textarea"
-        :rows="10"
-        placeholder="粘贴代理数据"
-      />
+        <Alert class="mb-3">
+          <AlertTitle>格式提示</AlertTitle>
+          <AlertDescription>
+            <div class="space-y-1 text-sm">
+              <div>每行一个代理，格式：socks5://username:password@host:port</div>
+              <div>示例：socks5://user1:pass1@1.2.3.4:1080</div>
+            </div>
+          </AlertDescription>
+        </Alert>
 
-      <template #footer>
-        <el-button @click="showImportDialog = false">取消</el-button>
-        <el-button type="primary" @click="handleImport" :loading="importing">
-          导入
-        </el-button>
-      </template>
-    </el-dialog>
+        <textarea
+          v-model="importText"
+          rows="10"
+          class="min-h-[200px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+          placeholder="粘贴代理数据"
+        />
+
+        <DialogFooter class="gap-2">
+          <Button variant="outline" @click="showImportDialog = false">取消</Button>
+          <Button :disabled="importing" class="gap-2" @click="handleImport">
+            <Loader2 v-if="importing" class="h-4 w-4 animate-spin" />
+            导入
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
 
     <!-- 新增/编辑代理对话框 -->
-    <el-dialog
-      v-model="showAddDialog"
-      :title="editingProxy ? '编辑代理' : '新增代理'"
-      width="500px"
-    >
-      <el-form :model="proxyForm" label-width="100px">
-        <el-form-item label="代理类型">
-          <el-select v-model="proxyForm.proxy_type" style="width: 100%">
-            <el-option label="SOCKS5" value="socks5" />
-            <el-option label="HTTP" value="http" />
-            <el-option label="HTTPS" value="https" />
-          </el-select>
-        </el-form-item>
+    <Dialog v-model:open="showAddDialog">
+      <DialogContent class="sm:max-w-[500px]">
+        <DialogHeader>
+          <DialogTitle>{{ editingProxy ? '编辑代理' : '新增代理' }}</DialogTitle>
+        </DialogHeader>
 
-        <el-form-item label="主机地址">
-          <el-input v-model="proxyForm.host" placeholder="1.2.3.4" />
-        </el-form-item>
+        <div class="grid gap-4 py-2">
+          <div class="grid gap-2">
+            <label class="text-sm font-medium">代理类型</label>
+            <Select v-model="proxyForm.proxy_type">
+              <SelectTrigger>
+                <SelectValue placeholder="选择类型" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="socks5">SOCKS5</SelectItem>
+                <SelectItem value="http">HTTP</SelectItem>
+                <SelectItem value="https">HTTPS</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
 
-        <el-form-item label="端口">
-          <el-input-number
-            v-model="proxyForm.port"
-            :min="1"
-            :max="65535"
-            style="width: 100%"
-          />
-        </el-form-item>
+          <div class="grid gap-2">
+            <label class="text-sm font-medium">主机地址</label>
+            <Input v-model="proxyForm.host" placeholder="1.2.3.4" />
+          </div>
 
-        <el-form-item label="用户名">
-          <el-input v-model="proxyForm.username" placeholder="可选" />
-        </el-form-item>
+          <div class="grid gap-2">
+            <label class="text-sm font-medium">端口</label>
+            <Input
+              v-model.number="proxyForm.port"
+              type="number"
+              min="1"
+              max="65535"
+              placeholder="1080"
+            />
+          </div>
 
-        <el-form-item label="密码">
-          <el-input
-            v-model="proxyForm.password"
-            type="password"
-            placeholder="可选"
-            show-password
-          />
-        </el-form-item>
-      </el-form>
+          <div class="grid gap-2">
+            <label class="text-sm font-medium">用户名</label>
+            <Input v-model="proxyForm.username" placeholder="可选" />
+          </div>
 
-      <template #footer>
-        <el-button @click="showAddDialog = false">取消</el-button>
-        <el-button type="primary" @click="handleSave" :loading="saving">
-          保存
-        </el-button>
-      </template>
-    </el-dialog>
+          <div class="grid gap-2">
+            <label class="text-sm font-medium">密码</label>
+            <Input
+              v-model="proxyForm.password"
+              type="password"
+              placeholder="可选"
+            />
+          </div>
+        </div>
+
+        <DialogFooter class="gap-2">
+          <Button variant="outline" @click="showAddDialog = false">取消</Button>
+          <Button :disabled="saving" class="gap-2" @click="handleSave">
+            <Loader2 v-if="saving" class="h-4 w-4 animate-spin" />
+            保存
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, reactive, onMounted } from 'vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
-import { Plus, Upload } from '@element-plus/icons-vue'
+import { ElMessage, ElMessageBox } from '@/lib/element'
+import { Loader2, Plus, Upload } from 'lucide-vue-next'
 import { proxiesApi, type Proxy } from '@/api/proxies'
+
+import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
+import { Card, CardContent } from '@/components/ui/card'
+import { Input } from '@/components/ui/input'
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table'
 
 // 响应式数据
 const loading = ref(false)
@@ -281,26 +335,3 @@ onMounted(() => {
   loadProxies()
 })
 </script>
-
-<style scoped lang="scss">
-.proxy-management-module {
-  padding: 20px;
-
-  .card-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-
-    h3 {
-      margin: 0;
-      font-size: 18px;
-      font-weight: 600;
-    }
-  }
-
-  .mb-3 {
-    margin-bottom: 12px;
-  }
-}
-</style>
-

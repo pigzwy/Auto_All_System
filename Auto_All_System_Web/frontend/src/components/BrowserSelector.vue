@@ -1,38 +1,65 @@
 <template>
-  <div class="browser-selector">
-    <el-form-item label="浏览器">
-      <el-select v-model="selected" placeholder="选择浏览器" @change="handleChange">
-        <el-option
-          v-for="browser in browsers"
-          :key="browser.type"
-          :label="browser.label"
-          :value="browser.type"
-          :disabled="!browser.online"
+  <div class="w-full">
+    <div class="grid gap-2">
+      <label class="text-sm text-muted-foreground">浏览器</label>
+      <div class="flex items-center gap-2">
+        <Select v-model="selected" @update:modelValue="handleChange">
+          <SelectTrigger class="w-full">
+            <SelectValue placeholder="选择浏览器" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem
+              v-for="browser in browsers"
+              :key="browser.type"
+              :value="browser.type"
+              :disabled="!browser.online"
+            >
+              <div class="flex items-center gap-2">
+                <span>{{ browser.label }}</span>
+                <Badge
+                  v-if="browser.online"
+                  variant="outline"
+                  class="rounded-full border-emerald-500/20 bg-emerald-500/10 text-emerald-700"
+                >
+                  在线
+                </Badge>
+                <Badge
+                  v-else
+                  variant="outline"
+                  class="rounded-full border-rose-500/20 bg-rose-500/10 text-rose-700"
+                >
+                  离线
+                </Badge>
+                <Badge
+                  v-if="browser.isDefault"
+                  variant="outline"
+                  class="rounded-full border-primary/20 bg-primary/10 text-primary"
+                >
+                  默认
+                </Badge>
+              </div>
+            </SelectItem>
+          </SelectContent>
+        </Select>
+
+        <Button
+          v-if="selected !== defaultBrowser"
+          type="button"
+          variant="link"
+          size="sm"
+          class="h-9 px-2"
+          @click="setAsDefault"
         >
-          <div class="browser-option">
-            <span>{{ browser.label }}</span>
-            <el-tag v-if="browser.online" type="success" size="small">在线</el-tag>
-            <el-tag v-else type="danger" size="small">离线</el-tag>
-            <el-tag v-if="browser.isDefault" type="primary" size="small">默认</el-tag>
-          </div>
-        </el-option>
-      </el-select>
-      <el-button 
-        v-if="selected !== defaultBrowser" 
-        type="text" 
-        size="small" 
-        @click="setAsDefault"
-        class="set-default-btn"
-      >
-        设为默认
-      </el-button>
-    </el-form-item>
+          设为默认
+        </Button>
+      </div>
+    </div>
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, onMounted, watch } from 'vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage } from '@/lib/element'
 import { googleBrowserApi } from '@/api/google'
 
 interface Browser {
@@ -111,17 +138,3 @@ async function setAsDefault() {
   }
 }
 </script>
-
-<style scoped lang="scss">
-.browser-selector {
-  .browser-option {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-  }
-  
-  .set-default-btn {
-    margin-left: 8px;
-  }
-}
-</style>

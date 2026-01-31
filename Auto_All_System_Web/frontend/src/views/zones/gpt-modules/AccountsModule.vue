@@ -1,269 +1,445 @@
 <template>
-  <div class="accounts">
-    <div class="header">
+  <div class="space-y-6">
+    <div class="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
       <div>
-        <div class="title">账号列表</div>
-        <div class="sub">母号可展开查看子账号；邮箱由域名邮箱系统随机创建（来源：admin/email）</div>
+        <h2 class="text-2xl font-semibold text-foreground">账号列表</h2>
+        <p class="mt-1 text-sm text-muted-foreground">母号可展开查看子账号；邮箱由域名邮箱系统随机创建（来源：admin/email）</p>
       </div>
 
-      <div class="actions">
-        <el-button @click="refresh" :loading="loading">刷新</el-button>
-        <el-button type="primary" @click="openCreateMother">生成母号</el-button>
+      <div class="flex flex-wrap items-center gap-2">
+        <Button variant="outline" size="sm" class="gap-2" :disabled="loading" @click="refresh">
+          <RefreshCcw class="h-4 w-4" :class="{ 'animate-spin': loading }" />
+          刷新
+        </Button>
+        <Button size="sm" class="gap-2" @click="openCreateMother">
+          <Plus class="h-4 w-4" />
+          生成母号
+        </Button>
 
-        <span class="selected" :title="selectedMother?.email || ''">
-          已选：<span class="mono">{{ selectedMother?.email || '-' }}</span>
-        </span>
+        <div v-if="selectedMother" class="flex items-center gap-2 rounded-md border border-border bg-muted/50 px-3 py-1.5 text-sm">
+          <span class="text-muted-foreground">已选:</span>
+          <span class="font-mono font-medium">{{ selectedMother.email }}</span>
+        </div>
 
-        <el-button type="success" :disabled="!selectedMother" @click="runSelfRegister">自动开通</el-button>
-        <el-button type="warning" :disabled="!selectedMother" @click="runAutoInvite">自动邀请</el-button>
-        <el-button type="info" :disabled="!selectedMother" @click="runSub2apiSink">自动入池</el-button>
+        <div class="flex items-center gap-2">
+          <Button variant="secondary" size="sm" class="gap-2" :disabled="!selectedMother" @click="runSelfRegister">
+            <UserPlus class="h-4 w-4" /> 自动开通
+          </Button>
+          <Button variant="secondary" size="sm" class="gap-2" :disabled="!selectedMother" @click="runAutoInvite">
+            <ArrowRightToLine class="h-4 w-4" /> 自动邀请
+          </Button>
+          <Button variant="secondary" size="sm" class="gap-2" :disabled="!selectedMother" @click="runSub2apiSink">
+            <LayoutList class="h-4 w-4" /> 自动入池
+          </Button>
+        </div>
       </div>
     </div>
 
-    <el-card shadow="never">
-      <el-table
-        :data="mothers"
-        row-key="id"
-        v-loading="loading"
-        highlight-current-row
-        @current-change="onCurrentChange"
-        style="width: 100%;"
-      >
-        <el-table-column type="expand">
-          <template #default="props">
-            <div class="expand">
-              <div class="expand-title">子账号（{{ props.row.children?.length || 0 }}）</div>
-              <el-table :data="props.row.children || []" row-key="id" size="small" style="width: 100%;">
-                <el-table-column prop="email" label="邮箱" min-width="220" />
-                <el-table-column label="账号密码" min-width="220">
-                  <template #default="scope">
-                    <div class="cell-actions">
-                      <span class="mono">{{ scope.row.account_password || '-' }}</span>
-                      <el-button v-if="scope.row.account_password" text type="primary" @click="copyAccountPassword(scope.row)">
-                        复制
-                      </el-button>
+    <Card class="bg-card text-card-foreground">
+      <CardContent class="p-0">
+        <div class="overflow-x-auto rounded-xl border border-border">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead class="w-10"></TableHead>
+                <TableHead class="min-w-[220px]">母号邮箱</TableHead>
+                <TableHead class="min-w-[180px]">账号密码</TableHead>
+                <TableHead class="min-w-[180px]">邮箱密码</TableHead>
+                <TableHead class="w-24">座位</TableHead>
+                <TableHead class="min-w-[120px]">备注</TableHead>
+                <TableHead class="w-40">创建时间</TableHead>
+                <TableHead class="w-[300px] text-right">操作</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              <TableRow v-if="loading && mothers.length === 0">
+                <TableCell colspan="8" class="py-10 text-center">
+                  <div class="flex items-center justify-center gap-2 text-sm text-muted-foreground">
+                    <Loader2 class="h-4 w-4 animate-spin" />
+                    加载中...
+                  </div>
+                </TableCell>
+              </TableRow>
+              <template v-else v-for="mother in mothers" :key="mother.id">
+                <TableRow
+                  class="cursor-pointer hover:bg-muted/50"
+                  :class="{ 'bg-muted/50': selectedMotherId === mother.id }"
+                  @click="onCurrentChange(mother)"
+                >
+                  <TableCell>
+                    <Button variant="ghost" size="xs" class="h-6 w-6 p-0" @click.stop="toggleExpand(mother.id)">
+                      <LayoutList class="h-4 w-4 transition-transform" :class="{ 'rotate-90': expandedRows.has(mother.id) }" />
+                    </Button>
+                  </TableCell>
+                  <TableCell class="font-medium">{{ mother.email }}</TableCell>
+                  <TableCell>
+                    <div class="flex items-center gap-2">
+                      <code class="rounded bg-muted px-1.5 py-0.5 font-mono text-xs">{{ mother.account_password || '-' }}</code>
+                      <Button v-if="mother.account_password" variant="ghost" size="xs" class="h-6 w-6" @click.stop="copyAccountPassword(mother)">
+                        <Copy class="h-3 w-3" />
+                      </Button>
                     </div>
-                  </template>
-                </el-table-column>
-                <el-table-column label="邮箱密码" min-width="220">
-                  <template #default="scope">
-                    <div class="cell-actions">
-                      <span class="mono">{{ scope.row.email_password }}</span>
-                      <el-button text type="primary" @click="copyEmailPassword(scope.row)">复制</el-button>
+                  </TableCell>
+                  <TableCell>
+                    <div class="flex items-center gap-2">
+                      <code class="rounded bg-muted px-1.5 py-0.5 font-mono text-xs">{{ mother.email_password || '-' }}</code>
+                      <Button v-if="mother.email_password" variant="ghost" size="xs" class="h-6 w-6" @click.stop="copyEmailPassword(mother)">
+                        <Copy class="h-3 w-3" />
+                      </Button>
                     </div>
-                  </template>
-                </el-table-column>
-                <el-table-column prop="note" label="备注" min-width="160" />
-                <el-table-column label="创建时间" min-width="170">
-                  <template #default="scope">
-                    <span class="muted">{{ scope.row.created_at || '-' }}</span>
-                  </template>
-                </el-table-column>
-                <el-table-column label="操作" width="200" fixed="right">
-                  <template #default="scope">
-                    <el-button text @click="launchGeekez(scope.row.id)">打开Geekez</el-button>
-                    <el-button text type="primary" @click="copyFull(scope.row)">复制账号</el-button>
-                    <el-button text type="danger" @click="removeAccount(scope.row.id)">删除</el-button>
-                  </template>
-                </el-table-column>
-              </el-table>
-            </div>
-          </template>
-        </el-table-column>
+                  </TableCell>
+                  <TableCell>
+                    <Badge variant="outline" class="font-mono">
+                      {{ mother.seat_used || 0 }}/{{ mother.seat_total || 0 }}
+                    </Badge>
+                  </TableCell>
+                  <TableCell class="text-muted-foreground text-xs truncate max-w-[120px]">{{ mother.note }}</TableCell>
+                  <TableCell class="text-muted-foreground text-xs">{{ formatDate(mother.created_at) }}</TableCell>
+                  <TableCell class="text-right">
+                    <div class="flex items-center justify-end gap-1">
+                      <Button variant="ghost" size="xs" @click.stop="openCreateChild(mother)">生成子号</Button>
+                      <Button variant="ghost" size="xs" @click.stop="editSeat(mother)">改座位</Button>
+                      <Button variant="ghost" size="xs" @click.stop="viewTasks(mother)">日志</Button>
+                      <Button variant="ghost" size="xs" @click.stop="launchGeekez(mother.id)">Geekez</Button>
+                      <Button variant="ghost" size="xs" class="text-destructive hover:text-destructive" @click.stop="removeAccount(mother.id)">删除</Button>
+                    </div>
+                  </TableCell>
+                </TableRow>
 
-        <el-table-column prop="email" label="母号邮箱" min-width="220" />
-
-        <el-table-column label="账号密码" min-width="220">
-          <template #default="scope">
-            <div class="cell-actions">
-              <span class="mono">{{ scope.row.account_password || '-' }}</span>
-              <el-button v-if="scope.row.account_password" text type="primary" @click="copyAccountPassword(scope.row)">
-                复制
-              </el-button>
-            </div>
-          </template>
-        </el-table-column>
-
-        <el-table-column label="邮箱密码" min-width="220">
-          <template #default="scope">
-            <div class="cell-actions">
-              <span class="mono">{{ scope.row.email_password || '-' }}</span>
-              <el-button v-if="scope.row.email_password" text type="primary" @click="copyEmailPassword(scope.row)">
-                复制
-              </el-button>
-            </div>
-          </template>
-        </el-table-column>
-
-        <el-table-column label="座位" width="140">
-          <template #default="scope">
-            <span class="mono">{{ scope.row.seat_used || 0 }}/{{ scope.row.seat_total || 0 }}</span>
-          </template>
-        </el-table-column>
-
-        <el-table-column prop="note" label="备注" min-width="160" />
-
-        <el-table-column label="创建时间" min-width="170">
-          <template #default="scope">
-            <span class="muted">{{ scope.row.created_at || '-' }}</span>
-          </template>
-        </el-table-column>
-
-        <el-table-column label="操作" width="360" fixed="right">
-          <template #default="scope">
-            <el-button text type="primary" @click="openCreateChild(scope.row)">生成子号</el-button>
-            <el-button text @click="editSeat(scope.row)">改座位</el-button>
-            <el-button text @click="viewTasks(scope.row)">任务日志</el-button>
-            <el-button text @click="launchGeekez(scope.row.id)">打开Geekez</el-button>
-            <el-button text type="danger" @click="removeAccount(scope.row.id)">删除</el-button>
-          </template>
-        </el-table-column>
-      </el-table>
-    </el-card>
-
-    <el-dialog v-model="motherDialogVisible" title="生成母号" width="520px">
-      <el-form :model="motherForm" label-width="90px">
-        <el-form-item label="邮箱配置">
-          <el-select
-            v-model="motherForm.cloudmail_config_id"
-            filterable
-            placeholder="请选择 admin/email 配置"
-            style="width: 100%;"
-          >
-            <el-option
-              v-for="cfg in cloudMailConfigs"
-              :key="cfg.id"
-              :label="`${cfg.name}${cfg.is_default ? ' (默认)' : ''}  (${cfg.domains_count || cfg.domains?.length || 0} domains)`"
-              :value="cfg.id"
-            />
-          </el-select>
-        </el-form-item>
-
-        <el-form-item label="域名">
-          <el-select v-model="motherForm.domain" filterable clearable placeholder="留空=随机" style="width: 100%;">
-            <el-option v-for="d in motherDomains" :key="d" :label="d" :value="d" />
-          </el-select>
-        </el-form-item>
-        <el-form-item label="座位数">
-          <el-input-number v-model="motherForm.seat_total" :min="0" :max="500" />
-        </el-form-item>
-
-        <el-form-item label="生成数量">
-          <el-input-number v-model="motherForm.count" :min="1" :max="200" />
-        </el-form-item>
-
-        <el-form-item label="备注">
-          <el-input v-model="motherForm.note" type="textarea" :rows="2" placeholder="可选" />
-        </el-form-item>
-      </el-form>
-
-      <template #footer>
-        <el-button @click="motherDialogVisible = false">取消</el-button>
-        <el-button type="primary" :loading="creating" @click="createMother">创建</el-button>
-      </template>
-    </el-dialog>
-
-    <el-dialog v-model="childDialogVisible" title="生成子账号" width="520px">
-      <el-form :model="childForm" label-width="90px">
-        <el-form-item label="母号">
-          <el-input :model-value="activeMother?.email || ''" disabled />
-        </el-form-item>
-        <el-form-item label="域名">
-          <el-select v-model="childForm.domain" filterable clearable placeholder="留空=随机" style="width: 100%;">
-            <el-option v-for="d in childDomains" :key="d" :label="d" :value="d" />
-          </el-select>
-        </el-form-item>
-
-        <el-form-item label="生成数量">
-          <el-input-number v-model="childForm.count" :min="1" :max="500" />
-        </el-form-item>
-
-        <el-form-item label="备注">
-          <el-input v-model="childForm.note" type="textarea" :rows="2" placeholder="可选" />
-        </el-form-item>
-      </el-form>
-
-      <template #footer>
-        <el-button @click="childDialogVisible = false">取消</el-button>
-        <el-button type="primary" :loading="creating" @click="createChild">创建</el-button>
-      </template>
-    </el-dialog>
-
-    <el-drawer v-model="tasksDrawerVisible" title="任务日志" size="600px">
-      <div v-if="tasksDrawerAccount">
-        <div class="drawer-account-info">
-          <span class="mono">{{ tasksDrawerAccount.email }}</span>
+                <!-- Expanded Child Rows -->
+                <TableRow v-if="expandedRows.has(mother.id)">
+                  <TableCell colspan="8" class="p-0 bg-muted/10">
+                    <div class="p-4 pl-12 border-b border-border">
+                      <div class="mb-2 text-xs font-semibold text-muted-foreground">子账号列表 ({{ mother.children?.length || 0 }})</div>
+                      <div class="rounded-lg border border-border overflow-hidden bg-background">
+                        <Table>
+                          <TableHeader class="bg-muted/30">
+                            <TableRow>
+                              <TableHead>邮箱</TableHead>
+                              <TableHead>账号密码</TableHead>
+                              <TableHead>邮箱密码</TableHead>
+                              <TableHead>备注</TableHead>
+                              <TableHead>创建时间</TableHead>
+                              <TableHead class="text-right">操作</TableHead>
+                            </TableRow>
+                          </TableHeader>
+                          <TableBody>
+                            <TableRow v-for="child in mother.children || []" :key="child.id">
+                              <TableCell>{{ child.email }}</TableCell>
+                              <TableCell>
+                                <div class="flex items-center gap-2">
+                                  <code class="rounded bg-muted px-1.5 py-0.5 font-mono text-xs">{{ child.account_password || '-' }}</code>
+                                  <Button v-if="child.account_password" variant="ghost" size="xs" class="h-6 w-6" @click.stop="copyAccountPassword(child)">
+                                    <Copy class="h-3 w-3" />
+                                  </Button>
+                                </div>
+                              </TableCell>
+                              <TableCell>
+                                <div class="flex items-center gap-2">
+                                  <code class="rounded bg-muted px-1.5 py-0.5 font-mono text-xs">{{ child.email_password || '-' }}</code>
+                                  <Button v-if="child.email_password" variant="ghost" size="xs" class="h-6 w-6" @click.stop="copyEmailPassword(child)">
+                                    <Copy class="h-3 w-3" />
+                                  </Button>
+                                </div>
+                              </TableCell>
+                              <TableCell class="text-muted-foreground text-xs">{{ child.note }}</TableCell>
+                              <TableCell class="text-muted-foreground text-xs">{{ formatDate(child.created_at) }}</TableCell>
+                              <TableCell class="text-right">
+                                <div class="flex items-center justify-end gap-1">
+                                  <Button variant="ghost" size="xs" @click.stop="launchGeekez(child.id)">Geekez</Button>
+                                  <Button variant="ghost" size="xs" @click.stop="copyFull(child)">复制</Button>
+                                  <Button variant="ghost" size="xs" class="text-destructive hover:text-destructive" @click.stop="removeAccount(child.id)">删除</Button>
+                                </div>
+                              </TableCell>
+                            </TableRow>
+                            <TableRow v-if="!mother.children?.length">
+                              <TableCell colspan="6" class="text-center text-xs text-muted-foreground py-4">无子账号</TableCell>
+                            </TableRow>
+                          </TableBody>
+                        </Table>
+                      </div>
+                    </div>
+                  </TableCell>
+                </TableRow>
+              </template>
+            </TableBody>
+          </Table>
         </div>
-        <el-table :data="accountTasks" v-loading="tasksLoading" size="small" style="width: 100%;">
-          <el-table-column prop="type" label="类型" width="120">
-            <template #default="scope">
-              <el-tag size="small" :type="getTaskTypeTag(scope.row.type)">{{ getTaskTypeName(scope.row.type) }}</el-tag>
-            </template>
-          </el-table-column>
-          <el-table-column prop="status" label="状态" width="100">
-            <template #default="scope">
-              <el-tag size="small" :type="getStatusTag(scope.row.status)">{{ scope.row.status }}</el-tag>
-            </template>
-          </el-table-column>
-          <el-table-column label="创建时间" min-width="160">
-            <template #default="scope">
-              <span class="muted">{{ scope.row.created_at || '-' }}</span>
-            </template>
-          </el-table-column>
-          <el-table-column label="错误" min-width="200">
-            <template #default="scope">
-              <span class="muted" style="color: #ef4444;">{{ scope.row.error || '-' }}</span>
-            </template>
-          </el-table-column>
-          <el-table-column label="产物" width="80">
-            <template #default="scope">
-              <el-button link type="primary" size="small" @click="viewTaskArtifacts(scope.row)">查看</el-button>
-            </template>
-          </el-table-column>
+      </CardContent>
+    </Card>
 
-          <el-table-column label="日志" width="80">
-            <template #default="scope">
-              <el-button link type="primary" size="small" @click="viewTaskLog(scope.row)">查看</el-button>
-            </template>
-          </el-table-column>
-        </el-table>
-        <el-empty v-if="!tasksLoading && accountTasks.length === 0" description="暂无任务记录" />
-      </div>
-    </el-drawer>
-
-    <el-dialog v-model="artifactsDialogVisible" title="任务产物" width="520px">
-      <el-table :data="currentTaskArtifacts" v-loading="artifactsLoading" size="small" style="width: 100%;">
-        <el-table-column prop="name" label="文件" min-width="200" />
-        <el-table-column label="下载" width="100">
-          <template #default="scope">
-            <el-link :href="scope.row.download_url" target="_blank" type="primary">下载</el-link>
-          </template>
-        </el-table-column>
-      </el-table>
-      <el-empty v-if="!artifactsLoading && currentTaskArtifacts.length === 0" description="暂无产物" />
-    </el-dialog>
-
-    <el-dialog v-model="taskLogDialogVisible" title="任务日志" width="900px">
-      <div v-loading="taskLogLoading">
-        <div v-if="currentLogTask" class="drawer-account-info">
-          <div class="cell-actions">
-            <span class="mono">{{ currentLogTask.id }}</span>
-            <span class="muted">{{ currentLogFilename }}</span>
-            <el-link v-if="currentLogDownloadUrl" :href="currentLogDownloadUrl" target="_blank" type="primary">下载</el-link>
-            <el-button text type="primary" @click="reloadTaskLog">刷新</el-button>
+    <!-- Dialogs follow (will be replaced in next step) -->
+    <Dialog v-model:open="motherDialogVisible">
+      <DialogContent class="sm:max-w-[500px]">
+        <DialogHeader>
+          <DialogTitle>生成母号</DialogTitle>
+          <DialogDescription>配置邮箱与座位数生成新的母账号</DialogDescription>
+        </DialogHeader>
+        <div class="grid gap-4 py-4">
+          <div class="grid gap-2">
+            <label class="text-sm font-medium">邮箱配置</label>
+            <Select :model-value="String(motherForm.cloudmail_config_id || '')" @update:modelValue="(v) => motherForm.cloudmail_config_id = Number(v)">
+              <SelectTrigger>
+                <SelectValue placeholder="请选择 admin/email 配置" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem v-for="cfg in cloudMailConfigs" :key="cfg.id" :value="String(cfg.id)">
+                  {{ cfg.name }}{{ cfg.is_default ? ' (默认)' : '' }} ({{ cfg.domains_count || cfg.domains?.length || 0 }} domains)
+                </SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <div class="grid gap-2">
+            <label class="text-sm font-medium">域名</label>
+            <Select v-model="motherForm.domain">
+              <SelectTrigger>
+                <SelectValue placeholder="留空=随机" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="">随机</SelectItem>
+                <SelectItem v-for="d in motherDomains" :key="d" :value="d">{{ d }}</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <div class="grid grid-cols-2 gap-4">
+            <div class="grid gap-2">
+              <label class="text-sm font-medium">座位数</label>
+              <Input :model-value="motherForm.seat_total" @update:modelValue="(v) => motherForm.seat_total = Number(v)" type="number" :min="0" :max="500" />
+            </div>
+            <div class="grid gap-2">
+              <label class="text-sm font-medium">生成数量</label>
+              <Input :model-value="motherForm.count" @update:modelValue="(v) => motherForm.count = Number(v)" type="number" :min="1" :max="200" />
+            </div>
+          </div>
+          <div class="grid gap-2">
+            <label class="text-sm font-medium">备注</label>
+            <textarea
+              v-model="motherForm.note"
+              rows="2"
+              class="min-h-[60px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+              placeholder="可选"
+            />
           </div>
         </div>
+        <DialogFooter>
+          <Button variant="outline" @click="motherDialogVisible = false">取消</Button>
+          <Button :disabled="creating" @click="createMother">
+            <Loader2 v-if="creating" class="mr-2 h-4 w-4 animate-spin" />
+            创建
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
 
-        <el-input v-model="taskLogText" type="textarea" :rows="18" readonly />
-        <el-empty v-if="!taskLogLoading && !taskLogText" description="暂无日志" />
-      </div>
-    </el-dialog>
+    <Dialog v-model:open="childDialogVisible">
+      <DialogContent class="sm:max-w-[500px]">
+        <DialogHeader>
+          <DialogTitle>生成子账号</DialogTitle>
+          <DialogDescription>为 {{ selectedMother?.email }} 生成子号</DialogDescription>
+        </DialogHeader>
+        <div class="grid gap-4 py-4">
+          <div class="grid gap-2">
+            <label class="text-sm font-medium">域名</label>
+            <Select v-model="childForm.domain">
+              <SelectTrigger>
+                <SelectValue placeholder="留空=随机" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="">随机</SelectItem>
+                <SelectItem v-for="d in childDomains" :key="d" :value="d">{{ d }}</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <div class="grid gap-2">
+            <label class="text-sm font-medium">生成数量</label>
+            <Input :model-value="childForm.count" @update:modelValue="(v) => childForm.count = Number(v)" type="number" :min="1" :max="500" />
+          </div>
+          <div class="grid gap-2">
+            <label class="text-sm font-medium">备注</label>
+            <textarea
+              v-model="childForm.note"
+              rows="2"
+              class="min-h-[60px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+              placeholder="可选"
+            />
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" @click="childDialogVisible = false">取消</Button>
+          <Button :disabled="creating" @click="createChild">
+            <Loader2 v-if="creating" class="mr-2 h-4 w-4 animate-spin" />
+            创建
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+
+    <!-- Tasks Sheet -->
+    <Sheet v-model:open="tasksDrawerVisible">
+      <SheetContent side="right" class="w-full sm:max-w-[800px]">
+        <SheetHeader>
+          <SheetTitle>任务日志</SheetTitle>
+          <SheetDescription>账号：{{ tasksDrawerAccount?.email }}</SheetDescription>
+        </SheetHeader>
+        <div class="mt-4 h-[calc(100vh-140px)] overflow-y-auto">
+          <div v-if="tasksLoading" class="py-10 text-center text-muted-foreground">
+            <Loader2 class="mx-auto h-6 w-6 animate-spin" />
+            <span class="mt-2 block text-sm">加载中...</span>
+          </div>
+          <div v-else>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>类型</TableHead>
+                  <TableHead>状态</TableHead>
+                  <TableHead>时间</TableHead>
+                  <TableHead>错误</TableHead>
+                  <TableHead class="text-right">操作</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                <TableRow v-for="task in accountTasks" :key="task.id">
+                  <TableCell>
+                    <Badge variant="outline">{{ getTaskTypeName(task.type || '') }}</Badge>
+                  </TableCell>
+                  <TableCell>
+                    <Badge :variant="getStatusTag(task.status || '') === 'success' ? 'default' : 'destructive'">
+                      {{ task.status }}
+                    </Badge>
+                  </TableCell>
+                  <TableCell class="text-xs text-muted-foreground">{{ formatDate(task.created_at) }}</TableCell>
+                  <TableCell class="text-xs text-destructive max-w-[150px] truncate" :title="task.error">{{ task.error || '-' }}</TableCell>
+                  <TableCell class="text-right">
+                    <div class="flex justify-end gap-2">
+                      <Button variant="ghost" size="xs" @click="viewTaskArtifacts(task)">产物</Button>
+                      <Button variant="ghost" size="xs" @click="viewTaskLog(task)">日志</Button>
+                    </div>
+                  </TableCell>
+                </TableRow>
+                <TableRow v-if="accountTasks.length === 0">
+                  <TableCell colspan="5" class="py-8 text-center text-sm text-muted-foreground">暂无记录</TableCell>
+                </TableRow>
+              </TableBody>
+            </Table>
+          </div>
+        </div>
+      </SheetContent>
+    </Sheet>
+
+    <!-- Artifacts Dialog -->
+    <Dialog v-model:open="artifactsDialogVisible">
+      <DialogContent class="sm:max-w-[600px]">
+        <DialogHeader>
+          <DialogTitle>任务产物</DialogTitle>
+        </DialogHeader>
+        <div class="py-2">
+          <div v-if="artifactsLoading" class="py-4 text-center">
+            <Loader2 class="mx-auto h-5 w-5 animate-spin text-muted-foreground" />
+          </div>
+          <Table v-else>
+            <TableHeader>
+              <TableRow>
+                <TableHead>文件</TableHead>
+                <TableHead class="text-right">操作</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              <TableRow v-for="art in currentTaskArtifacts" :key="art.name">
+                <TableCell class="font-mono text-xs">{{ art.name }}</TableCell>
+                <TableCell class="text-right">
+                  <a :href="art.download_url" target="_blank" class="inline-flex items-center justify-center rounded-md text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 text-primary underline-offset-4 hover:underline h-9 px-3">
+                    <FileDown class="mr-2 h-4 w-4" /> 下载
+                  </a>
+                </TableCell>
+              </TableRow>
+              <TableRow v-if="currentTaskArtifacts.length === 0">
+                <TableCell colspan="2" class="py-4 text-center text-sm text-muted-foreground">无产物</TableCell>
+              </TableRow>
+            </TableBody>
+          </Table>
+        </div>
+      </DialogContent>
+    </Dialog>
+
+    <!-- Log Dialog -->
+    <Dialog v-model:open="taskLogDialogVisible">
+      <DialogContent class="sm:max-w-[900px]">
+        <DialogHeader>
+          <DialogTitle>任务日志</DialogTitle>
+          <DialogDescription v-if="currentLogTask">Task ID: {{ currentLogTask.id }}</DialogDescription>
+        </DialogHeader>
+        <div class="py-2">
+          <div class="mb-2 flex items-center justify-between">
+            <span class="text-xs text-muted-foreground">{{ currentLogFilename }}</span>
+            <div class="flex gap-2">
+              <a v-if="currentLogDownloadUrl" :href="currentLogDownloadUrl" target="_blank" class="text-xs text-primary hover:underline">下载日志</a>
+              <button class="text-xs text-primary hover:underline" @click="reloadTaskLog">刷新</button>
+            </div>
+          </div>
+          <textarea
+            v-if="!taskLogLoading"
+            class="h-[400px] w-full rounded-md border border-input bg-muted/50 p-4 font-mono text-xs text-foreground focus-visible:outline-none"
+            readonly
+            :value="taskLogText || '暂无日志内容'"
+          ></textarea>
+          <div v-else class="flex h-[400px] items-center justify-center">
+            <Loader2 class="h-8 w-8 animate-spin text-muted-foreground" />
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
   </div>
 </template>
 
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessage, ElMessageBox } from '@/lib/element'
+import {
+  Copy,
+  Loader2,
+  Plus,
+  RefreshCcw,
+  UserPlus,
+  ArrowRightToLine,
+  LayoutList,
+  FileDown
+} from 'lucide-vue-next'
+
+import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
+import { Card, CardContent } from '@/components/ui/card'
+import { Input } from '@/components/ui/input'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+} from '@/components/ui/sheet'
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table'
+
 import { getCloudMailConfigs, type CloudMailConfig } from '@/api/email'
 import type { GptBusinessAccount, GptBusinessAccountsResponse } from '@/api/gpt_business'
 import { gptBusinessApi } from '@/api/gpt_business'
@@ -272,15 +448,31 @@ type MotherRow = GptBusinessAccountsResponse['mothers'][number]
 
 const loading = ref(false)
 const creating = ref(false)
-
-const mothers = ref<MotherRow[]>([])
 const cloudMailConfigs = ref<CloudMailConfig[]>([])
 
-const selectedMotherId = ref('')
-
-const selectedMother = computed(() => {
-  return mothers.value.find(m => m.id === selectedMotherId.value) || null
+const mothers = ref<any[]>([])
+const selectedMother = ref<any>(null)
+const selectedMotherId = computed({
+  get: () => selectedMother.value?.id,
+  set: (val) => {
+    if (!val) selectedMother.value = null
+    // Can't really set ID to object without finding it, but usually we set object
+  }
 })
+
+const formatDate = (date: string | undefined) => {
+  if (!date) return '-'
+  return new Date(date).toLocaleString()
+}
+
+const expandedRows = ref(new Set<number>())
+const toggleExpand = (id: number) => {
+  if (expandedRows.value.has(id)) {
+    expandedRows.value.delete(id)
+  } else {
+    expandedRows.value.add(id)
+  }
+}
 
 const motherDialogVisible = ref(false)
 const childDialogVisible = ref(false)
@@ -330,19 +522,25 @@ const refresh = async () => {
     mothers.value = accounts.mothers || []
 
     // 重新对齐当前选中
-    if (selectedMotherId.value) {
-      const exists = mothers.value.some(m => m.id === selectedMotherId.value)
-      if (!exists) selectedMotherId.value = ''
+    const currentId = selectedMother.value?.id
+    if (currentId) {
+      const exists = mothers.value.find((m: any) => m.id === currentId)
+      if (!exists) {
+        selectedMother.value = null
+      } else {
+        selectedMother.value = exists
+      }
     }
-  } catch (e: any) {
-    ElMessage.error(e?.response?.data?.detail || e?.message || '加载失败')
+  } catch (e) {
+    console.error(e)
   } finally {
     loading.value = false
   }
 }
 
-const onCurrentChange = (row: MotherRow | undefined) => {
-  selectedMotherId.value = row?.id || ''
+const onCurrentChange = (row: any) => {
+  selectedMother.value = row || null
+  activeMother.value = row || null
 }
 
 const openCreateMother = () => {
@@ -619,15 +817,6 @@ const getTaskTypeName = (type: string) => {
   return map[type] || type
 }
 
-const getTaskTypeTag = (type: string) => {
-  const map: Record<string, string> = {
-    self_register: 'success',
-    auto_invite: 'warning',
-    sub2api_sink: 'info'
-  }
-  return map[type] || ''
-}
-
 const getStatusTag = (status: string) => {
   const map: Record<string, string> = {
     success: 'success',
@@ -642,74 +831,3 @@ onMounted(() => {
   refresh()
 })
 </script>
-
-<style scoped lang="scss">
-.accounts {
-  .header {
-    display: flex;
-    justify-content: space-between;
-    gap: 12px;
-    align-items: flex-start;
-    margin-bottom: 12px;
-
-    .title {
-      font-size: 16px;
-      font-weight: 700;
-      color: #111827;
-    }
-
-    .sub {
-      margin-top: 4px;
-      font-size: 12px;
-      color: #6b7280;
-    }
-
-    .actions {
-      display: flex;
-      gap: 8px;
-      align-items: center;
-      flex-wrap: wrap;
-    }
-  }
-
-  .expand {
-    padding: 8px 0;
-
-    .expand-title {
-      font-size: 13px;
-      font-weight: 600;
-      color: #374151;
-      margin-bottom: 8px;
-    }
-  }
-
-  .mono {
-    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
-  }
-
-  .muted {
-    color: #6b7280;
-  }
-
-  .cell-actions {
-    display: inline-flex;
-    gap: 8px;
-    align-items: center;
-  }
-
-  .selected {
-    font-size: 12px;
-    color: #374151;
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-  }
-
-  .drawer-account-info {
-    margin-bottom: 16px;
-    padding: 12px;
-    background: #f3f4f6;
-    border-radius: 6px;
-  }
-}
-</style>

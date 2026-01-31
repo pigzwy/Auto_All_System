@@ -1,165 +1,230 @@
 <template>
-  <div class="recharge-card-management">
-    <div class="page-header">
-      <h1>🎫 充值卡密管理</h1>
-      <div>
-        <el-button type="success" @click="handleExport" :loading="exporting">
-          <el-icon><Download /></el-icon>
+  <div class="space-y-6 p-5">
+    <div class="flex items-center justify-between">
+      <h1 class="text-2xl font-semibold text-foreground">🎫 充值卡密管理</h1>
+      <div class="flex items-center gap-2">
+        <Button variant="secondary" size="sm" class="gap-2" @click="handleExport" :disabled="exporting">
+          <Download class="h-4 w-4" :class="{ 'animate-spin': exporting }" />
           批量导出
-        </el-button>
-        <el-button type="primary" @click="showGenerateDialog = true">
-          <el-icon><Plus /></el-icon>
+        </Button>
+        <Button size="sm" class="gap-2" @click="showGenerateDialog = true">
+          <Plus class="h-4 w-4" />
           批量生成卡密
-        </el-button>
+        </Button>
       </div>
     </div>
 
-    <el-card shadow="hover">
-      <el-form :inline="true">
-        <el-form-item label="状态">
-          <el-select v-model="filters.status" placeholder="全部" clearable @change="fetchCards" style="width: 140px;">
-            <el-option label="未使用" value="unused" />
-            <el-option label="已使用" value="used" />
-            <el-option label="已过期" value="expired" />
-            <el-option label="已禁用" value="disabled" />
-          </el-select>
-        </el-form-item>
-        <el-form-item label="面值">
-          <el-select v-model="filters.amount" placeholder="全部" clearable @change="fetchCards" style="width: 140px;">
-            <el-option label="¥10" :value="10" />
-            <el-option label="¥50" :value="50" />
-            <el-option label="¥100" :value="100" />
-            <el-option label="¥500" :value="500" />
-          </el-select>
-        </el-form-item>
-        <el-form-item>
-          <el-button @click="fetchCards">刷新</el-button>
-        </el-form-item>
-      </el-form>
-
-      <el-table :data="cards" v-loading="loading" stripe>
-        <el-table-column prop="id" label="ID" width="60" />
-        <el-table-column prop="card_code" label="卡密" width="220">
-          <template #default="{ row }">
-            <code style="font-weight: bold; color: #409eff;">{{ row.card_code }}</code>
-            <el-button 
-              text 
-              size="small" 
-              @click="copyCardCode(row.card_code)"
-              style="margin-left: 8px;"
+    <Card class="bg-card text-card-foreground">
+      <CardHeader>
+        <div class="flex flex-wrap items-center gap-4">
+          <div class="flex items-center gap-2">
+            <span class="text-sm font-medium">状态</span>
+            <Select v-model="filters.status" @update:modelValue="fetchCards">
+              <SelectTrigger class="w-[140px]">
+                <SelectValue placeholder="全部" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">全部</SelectItem>
+                <SelectItem value="unused">未使用</SelectItem>
+                <SelectItem value="used">已使用</SelectItem>
+                <SelectItem value="expired">已过期</SelectItem>
+                <SelectItem value="disabled">已禁用</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <div class="flex items-center gap-2">
+            <span class="text-sm font-medium">面值</span>
+            <Select
+              :model-value="filters.amount ? String(filters.amount) : 'all'"
+              @update:modelValue="filters.amount = $event === 'all' ? null : Number($event); fetchCards()"
             >
-              复制
-            </el-button>
-          </template>
-        </el-table-column>
-        <el-table-column prop="amount" label="面值" width="100">
-          <template #default="{ row }">
-            <span style="color: #f56c6c; font-weight: bold;">¥{{ row.amount }}</span>
-          </template>
-        </el-table-column>
-        <el-table-column prop="status" label="状态" width="100">
-          <template #default="{ row }">
-            <el-tag :type="getStatusType(row.status)">{{ getStatusText(row.status) }}</el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column prop="batch_no" label="批次号" width="120" show-overflow-tooltip />
-        <el-table-column prop="used_by_username" label="使用者" width="120">
-          <template #default="{ row }">
-            <span v-if="row.used_by_username">{{ row.used_by_username }}</span>
-            <span v-else style="color: #909399;">-</span>
-          </template>
-        </el-table-column>
-        <el-table-column prop="expires_at" label="过期时间" width="180">
-          <template #default="{ row }">
-            <span v-if="row.expires_at">{{ formatDateTime(row.expires_at) }}</span>
-            <span v-else style="color: #67c23a;">永久有效</span>
-          </template>
-        </el-table-column>
-        <el-table-column prop="created_at" label="创建时间" width="180">
-          <template #default="{ row }">
-            {{ formatDateTime(row.created_at) }}
-          </template>
-        </el-table-column>
-        <el-table-column label="操作" width="160" fixed="right">
-          <template #default="{ row }">
-            <div style="display: flex; gap: 8px;">
-              <el-button size="small" @click="viewDetail(row)">详情</el-button>
-              <el-button 
-                v-if="row.status === 'unused'" 
-                size="small" 
-                type="danger" 
-                @click="disableCard(row)"
-              >
-                禁用
-              </el-button>
-              <el-button 
-                v-else-if="row.status === 'disabled'" 
-                size="small" 
-                type="success" 
-                @click="enableCard(row)"
-              >
-                启用
-              </el-button>
-            </div>
-          </template>
-        </el-table-column>
-      </el-table>
+              <SelectTrigger class="w-[140px]">
+                <SelectValue placeholder="全部" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">全部</SelectItem>
+                <SelectItem value="10">¥10</SelectItem>
+                <SelectItem value="50">¥50</SelectItem>
+                <SelectItem value="100">¥100</SelectItem>
+                <SelectItem value="500">¥500</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <Button variant="outline" size="sm" class="gap-2" @click="fetchCards">
+            <RefreshCw class="h-4 w-4" :class="{ 'animate-spin': loading }" />
+            刷新
+          </Button>
+        </div>
+      </CardHeader>
+      <CardContent class="p-0">
+        <div class="overflow-x-auto rounded-xl border border-border">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead class="w-20">ID</TableHead>
+                <TableHead class="min-w-[240px]">卡密</TableHead>
+                <TableHead class="w-24">面值</TableHead>
+                <TableHead class="w-24">状态</TableHead>
+                <TableHead class="min-w-[140px]">批次号</TableHead>
+                <TableHead class="min-w-[120px]">使用者</TableHead>
+                <TableHead class="min-w-[160px]">过期时间</TableHead>
+                <TableHead class="min-w-[160px]">创建时间</TableHead>
+                <TableHead class="w-[200px] text-right">操作</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              <TableRow v-if="loading && cards.length === 0">
+                <TableCell colspan="9" class="py-10 text-center">
+                  <div class="flex items-center justify-center gap-2 text-sm text-muted-foreground">
+                    <Loader2 class="h-4 w-4 animate-spin" />
+                    加载中...
+                  </div>
+                </TableCell>
+              </TableRow>
+              <TableRow v-else v-for="row in cards" :key="row.id" class="hover:bg-muted/20">
+                <TableCell class="font-mono text-xs text-muted-foreground">#{{ row.id }}</TableCell>
+                <TableCell>
+                  <div class="flex items-center gap-2">
+                    <code class="rounded bg-muted px-1.5 py-0.5 font-mono text-xs font-bold text-primary">{{ row.card_code }}</code>
+                    <Button variant="ghost" size="xs" class="h-6 w-6" @click="copyCardCode(row.card_code)">
+                      <Copy class="h-3 w-3" />
+                    </Button>
+                  </div>
+                </TableCell>
+                <TableCell class="font-bold text-destructive">¥{{ row.amount }}</TableCell>
+                <TableCell>
+                  <Badge :variant="getStatusVariant(row.status)" class="rounded-full">
+                    {{ getStatusText(row.status) }}
+                  </Badge>
+                </TableCell>
+                <TableCell class="text-xs text-muted-foreground truncate" :title="row.batch_no">{{ row.batch_no }}</TableCell>
+                <TableCell class="text-xs">{{ row.used_by_username || '-' }}</TableCell>
+                <TableCell class="text-xs text-muted-foreground">
+                  <span v-if="row.expires_at">{{ formatDateTime(row.expires_at) }}</span>
+                  <span v-else class="text-emerald-600">永久有效</span>
+                </TableCell>
+                <TableCell class="text-xs text-muted-foreground">{{ formatDateTime(row.created_at) }}</TableCell>
+                <TableCell class="text-right">
+                  <div class="flex items-center justify-end gap-2">
+                    <Button variant="outline" size="xs" @click="viewDetail(row)">详情</Button>
+                    <Button
+                      v-if="row.status === 'unused'"
+                      variant="destructive"
+                      size="xs"
+                      @click="disableCard(row)"
+                    >
+                      禁用
+                    </Button>
+                    <Button
+                      v-else-if="row.status === 'disabled'"
+                      variant="default"
+                      size="xs"
+                      class="bg-emerald-600 hover:bg-emerald-700"
+                      @click="enableCard(row)"
+                    >
+                      启用
+                    </Button>
+                  </div>
+                </TableCell>
+              </TableRow>
+              <TableRow v-if="!loading && cards.length === 0">
+                <TableCell colspan="9" class="py-10 text-center text-sm text-muted-foreground">暂无数据</TableCell>
+              </TableRow>
+            </TableBody>
+          </Table>
+        </div>
 
-      <el-pagination
-        v-model:current-page="currentPage"
-        :total="total"
-        :page-size="pageSize"
-        layout="total, prev, pager, next"
-        @current-change="fetchCards"
-        style="margin-top: 20px; justify-content: center;"
-      />
-    </el-card>
+        <div class="p-4 flex items-center justify-end gap-2" v-if="total > pageSize">
+          <Button variant="outline" size="sm" :disabled="currentPage <= 1" @click="currentPage--; fetchCards()">上一页</Button>
+          <div class="text-sm text-muted-foreground">
+            第 <span class="font-medium text-foreground">{{ currentPage }}</span> 页
+          </div>
+          <Button variant="outline" size="sm" :disabled="cards.length < pageSize" @click="currentPage++; fetchCards()">下一页</Button>
+        </div>
+      </CardContent>
+    </Card>
 
     <!-- 批量生成对话框 -->
-    <el-dialog v-model="showGenerateDialog" title="批量生成充值卡密" width="520px">
-      <el-form :model="generateForm" label-width="100px">
-        <el-form-item label="生成数量">
-          <el-input-number v-model="generateForm.count" :min="1" :max="1000" />
-          <span style="margin-left: 8px; color: #909399; font-size: 12px;">最多1000张</span>
-        </el-form-item>
-        <el-form-item label="面值">
-          <el-input-number v-model="generateForm.amount" :min="1" :max="10000" :precision="2" />
-          <span style="margin-left: 8px;">元</span>
-        </el-form-item>
-        <el-form-item label="卡密前缀">
-          <el-input 
-            v-model="generateForm.prefix" 
-            maxlength="10" 
-            placeholder="可选，如：VIP、SVIP等"
-            clearable
-          />
-          <div style="color: #909399; font-size: 12px; margin-top: 4px;">
-            示例：填写"VIP"，生成VIP-XXXX-XXXX-XXXX格式
+    <Dialog v-model:open="showGenerateDialog">
+      <DialogContent class="sm:max-w-[520px]">
+        <DialogHeader>
+          <DialogTitle>批量生成充值卡密</DialogTitle>
+        </DialogHeader>
+        <div class="grid gap-4 py-2">
+          <div class="grid gap-2">
+            <label class="text-sm font-medium">生成数量</label>
+            <div class="flex items-center gap-2">
+              <Input v-model.number="generateForm.count" type="number" :min="1" :max="1000" class="flex-1" />
+              <span class="text-xs text-muted-foreground">最多1000张</span>
+            </div>
           </div>
-        </el-form-item>
-        <el-form-item label="有效天数">
-          <el-input-number v-model="generateForm.expires_days" :min="1" placeholder="留空=永久有效" />
-          <span style="margin-left: 8px;">天（留空永久有效）</span>
-        </el-form-item>
-        <el-form-item label="备注">
-          <el-input v-model="generateForm.notes" type="textarea" :rows="2" placeholder="可选，如：2026年1月活动卡密" />
-        </el-form-item>
-      </el-form>
-      <template #footer>
-        <el-button @click="showGenerateDialog = false">取消</el-button>
-        <el-button type="primary" @click="handleGenerate" :loading="generating">
-          生成
-        </el-button>
-      </template>
-    </el-dialog>
+          <div class="grid gap-2">
+            <label class="text-sm font-medium">面值 (元)</label>
+            <Input v-model.number="generateForm.amount" type="number" :min="1" :max="10000" />
+          </div>
+          <div class="grid gap-2">
+            <label class="text-sm font-medium">卡密前缀</label>
+            <Input v-model="generateForm.prefix" maxlength="10" placeholder="可选，如：VIP" />
+            <p class="text-xs text-muted-foreground">示例：填写"VIP"，生成VIP-XXXX-XXXX-XXXX格式</p>
+          </div>
+          <div class="grid gap-2">
+            <label class="text-sm font-medium">有效天数</label>
+            <Input v-model.number="generateForm.expires_days" type="number" :min="1" placeholder="留空=永久有效" />
+          </div>
+          <div class="grid gap-2">
+            <label class="text-sm font-medium">备注</label>
+            <textarea
+              v-model="generateForm.notes"
+              rows="2"
+              class="min-h-[60px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+              placeholder="可选，如：2026年1月活动卡密"
+            />
+          </div>
+        </div>
+        <DialogFooter class="gap-2">
+          <Button variant="outline" @click="showGenerateDialog = false">取消</Button>
+          <Button :disabled="generating" class="gap-2" @click="handleGenerate">
+            <Loader2 v-if="generating" class="h-4 w-4 animate-spin" />
+            生成
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, reactive, onMounted } from 'vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
-import { Plus, Download } from '@element-plus/icons-vue'
+import { ElMessage, ElMessageBox } from '@/lib/element'
+import { Plus, Download, RefreshCw, Loader2, Copy } from 'lucide-vue-next'
 import { paymentsApi } from '@/api/payments'
+
+import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
+import { Card, CardContent, CardHeader } from '@/components/ui/card'
+import { Input } from '@/components/ui/input'
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table'
 
 const loading = ref(false)
 const generating = ref(false)
@@ -171,7 +236,7 @@ const pageSize = ref(20)
 const showGenerateDialog = ref(false)
 
 const filters = reactive({
-  status: '',
+  status: 'all',
   amount: null as number | null
 })
 
@@ -179,17 +244,19 @@ const generateForm = reactive({
   count: 10,
   amount: 100,
   prefix: '',
-  expires_days: null as number | null,
+  expires_days: undefined as number | undefined,
   notes: ''
 })
 
 const fetchCards = async () => {
   loading.value = true
   try {
+    const statusParam = filters.status === 'all' ? undefined : filters.status
+    
     const response: any = await paymentsApi.getRechargeCards({
       page: currentPage.value,
       page_size: pageSize.value,
-      status: filters.status || undefined,
+      status: statusParam,
       amount: filters.amount || undefined
     })
     
@@ -232,7 +299,7 @@ const handleGenerate = async () => {
       count: generateForm.count,
       amount: generateForm.amount,
       prefix: generateForm.prefix || undefined,
-      expires_days: generateForm.expires_days || undefined,
+      expires_days: generateForm.expires_days ?? undefined,
       notes: generateForm.notes || undefined
     })
     
@@ -245,7 +312,7 @@ const handleGenerate = async () => {
     generateForm.count = 10
     generateForm.amount = 100
     generateForm.prefix = ''
-    generateForm.expires_days = null
+    generateForm.expires_days = undefined
     generateForm.notes = ''
     
     // 刷新列表
@@ -305,14 +372,14 @@ const enableCard = async (row: any) => {
   }
 }
 
-const getStatusType = (status: string) => {
+const getStatusVariant = (status: string) => {
   const map: Record<string, any> = {
-    unused: 'success',
-    used: 'info',
-    expired: 'warning',
-    disabled: 'danger'
+    unused: 'default', // success equivalent usually default or secondary in some themes, or custom green
+    used: 'secondary',
+    expired: 'outline',
+    disabled: 'destructive'
   }
-  return map[status] || 'info'
+  return map[status] || 'secondary'
 }
 
 const getStatusText = (status: string) => {
@@ -350,8 +417,9 @@ const handleExport = async () => {
     )
     
     exporting.value = true
+    const statusParam = filters.status === 'all' ? undefined : filters.status
     const response: any = await paymentsApi.exportFilteredCards({
-      status: filters.status || undefined,
+      status: statusParam,
       amount: filters.amount || undefined
     })
     
@@ -402,31 +470,3 @@ onMounted(() => {
   fetchCards()
 })
 </script>
-
-<style scoped lang="scss">
-.recharge-card-management {
-  .page-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 24px;
-
-    h1 {
-      margin: 0;
-    }
-
-    > div {
-      display: flex;
-      gap: 12px;
-    }
-  }
-
-  code {
-    background: #ecf5ff;
-    padding: 4px 8px;
-    border-radius: 4px;
-    font-family: 'Courier New', monospace;
-  }
-}
-</style>
-

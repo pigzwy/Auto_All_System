@@ -1,97 +1,93 @@
 <template>
-  <div class="task-management">
-    <div class="page-header">
-      <h1>任务管理</h1>
+  <div class="space-y-6 p-5">
+    <div>
+      <h1 class="text-2xl font-semibold text-foreground">任务管理</h1>
     </div>
 
-    <el-card shadow="hover">
+    <Card class="shadow-sm">
+      <CardContent class="space-y-6 p-6">
       <!-- 统计卡片 -->
-      <el-row :gutter="16" class="stats-row">
-        <el-col :span="6">
-          <div class="stat-mini-card">
-            <div class="stat-icon pending">📋</div>
-            <div class="stat-content">
-              <div class="stat-value">{{ taskStats.pending }}</div>
-              <div class="stat-label">待处理</div>
-            </div>
+      <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <div class="flex items-center gap-4 rounded-xl border border-border bg-background/60 p-5 shadow-sm">
+          <div class="flex h-14 w-14 items-center justify-center rounded-xl bg-sky-500/10 text-2xl">📋</div>
+          <div>
+            <div class="text-2xl font-bold leading-none text-foreground">{{ taskStats.pending }}</div>
+            <div class="mt-1 text-sm text-muted-foreground">待处理</div>
           </div>
-        </el-col>
-        <el-col :span="6">
-          <div class="stat-mini-card">
-            <div class="stat-icon running">🏃</div>
-            <div class="stat-content">
-              <div class="stat-value">{{ taskStats.running }}</div>
-              <div class="stat-label">执行中</div>
-            </div>
+        </div>
+        <div class="flex items-center gap-4 rounded-xl border border-border bg-background/60 p-5 shadow-sm">
+          <div class="flex h-14 w-14 items-center justify-center rounded-xl bg-amber-500/10 text-2xl">🏃</div>
+          <div>
+            <div class="text-2xl font-bold leading-none text-foreground">{{ taskStats.running }}</div>
+            <div class="mt-1 text-sm text-muted-foreground">执行中</div>
           </div>
-        </el-col>
-        <el-col :span="6">
-          <div class="stat-mini-card">
-            <div class="stat-icon success">✅</div>
-            <div class="stat-content">
-              <div class="stat-value">{{ taskStats.success }}</div>
-              <div class="stat-label">已完成</div>
-            </div>
+        </div>
+        <div class="flex items-center gap-4 rounded-xl border border-border bg-background/60 p-5 shadow-sm">
+          <div class="flex h-14 w-14 items-center justify-center rounded-xl bg-emerald-500/10 text-2xl">✅</div>
+          <div>
+            <div class="text-2xl font-bold leading-none text-foreground">{{ taskStats.success }}</div>
+            <div class="mt-1 text-sm text-muted-foreground">已完成</div>
           </div>
-        </el-col>
-        <el-col :span="6">
-          <div class="stat-mini-card">
-            <div class="stat-icon failed">❌</div>
-            <div class="stat-content">
-              <div class="stat-value">{{ taskStats.failed }}</div>
-              <div class="stat-label">失败</div>
-            </div>
+        </div>
+        <div class="flex items-center gap-4 rounded-xl border border-border bg-background/60 p-5 shadow-sm">
+          <div class="flex h-14 w-14 items-center justify-center rounded-xl bg-rose-500/10 text-2xl">❌</div>
+          <div>
+            <div class="text-2xl font-bold leading-none text-foreground">{{ taskStats.failed }}</div>
+            <div class="mt-1 text-sm text-muted-foreground">失败</div>
           </div>
-        </el-col>
-      </el-row>
+        </div>
+      </div>
 
       <!-- 任务列表 -->
-      <el-table :data="tasks" v-loading="loading" stripe style="margin-top: 20px">
-        <el-table-column prop="id" label="ID" width="80" />
-        <el-table-column prop="user" label="用户" width="120">
+      <DataTable :data="tasks" v-loading="loading" stripe class="mt-5 w-full">
+        <DataColumn prop="id" label="ID" width="80" />
+        <DataColumn prop="user" label="用户" width="120">
           <template #default="{ row }">
             {{ row.user?.username || row.user }}
           </template>
-        </el-table-column>
-        <el-table-column prop="zone" label="专区" width="120" />
-        <el-table-column prop="task_type" label="任务类型" width="150" />
-        <el-table-column prop="status" label="状态" width="100">
+        </DataColumn>
+        <DataColumn prop="zone" label="专区" width="120" />
+        <DataColumn prop="task_type" label="任务类型" width="150" />
+        <DataColumn prop="status" label="状态" width="100">
           <template #default="{ row }">
-            <el-tag :type="getStatusType(row.status)">{{ getStatusText(row.status) }}</el-tag>
+            <Tag :type="getStatusType(row.status)">{{ getStatusText(row.status) }}</Tag>
           </template>
-        </el-table-column>
-        <el-table-column prop="progress" label="进度" width="120">
+        </DataColumn>
+        <DataColumn prop="progress" label="进度" width="120">
           <template #default="{ row }">
-            <el-progress :percentage="row.progress" />
+            <ProgressBar :percentage="row.progress" />
           </template>
-        </el-table-column>
-        <el-table-column prop="cost_amount" label="费用" width="100" />
-        <el-table-column prop="created_at" label="创建时间" />
-        <el-table-column label="操作" width="150" fixed="right">
+        </DataColumn>
+        <DataColumn prop="cost_amount" label="费用" width="100" />
+        <DataColumn prop="created_at" label="创建时间" />
+        <DataColumn label="操作" width="150" fixed="right">
           <template #default="{ row }">
-            <el-button text type="primary" @click="viewDetail(row)">详情</el-button>
-            <el-button text type="danger" @click="deleteTask(row)">删除</el-button>
+            <Button text  variant="default" type="button" @click="viewDetail(row)">详情</Button>
+            <Button text  variant="destructive" type="button" @click="deleteTask(row)">删除</Button>
           </template>
-        </el-table-column>
-      </el-table>
+        </DataColumn>
+      </DataTable>
 
-      <el-pagination
+      <Paginator
         v-model:current-page="currentPage"
         v-model:page-size="pageSize"
         :total="total"
         layout="total, sizes, prev, pager, next"
+        class="mt-5 justify-center"
         @current-change="fetchTasks"
         @size-change="fetchTasks"
       />
-    </el-card>
+      </CardContent>
+    </Card>
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, reactive, onMounted } from 'vue'
 import { tasksApi } from '@/api/tasks'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessage, ElMessageBox } from '@/lib/element'
 import type { Task } from '@/types'
+import { Card, CardContent } from '@/components/ui/card'
 
 const loading = ref(false)
 const tasks = ref<Task[]>([])
@@ -203,64 +199,3 @@ onMounted(() => {
   fetchTasks()
 })
 </script>
-
-<style scoped lang="scss">
-.task-management {
-  .page-header {
-    margin-bottom: 24px;
-    
-    h1 {
-      margin: 0;
-      font-size: 28px;
-    }
-  }
-
-  .stats-row {
-    margin-bottom: 24px;
-
-    .stat-mini-card {
-      display: flex;
-      align-items: center;
-      gap: 16px;
-      padding: 20px;
-      background: white;
-      border-radius: 8px;
-      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
-
-      .stat-icon {
-        font-size: 32px;
-        width: 56px;
-        height: 56px;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        border-radius: 12px;
-
-        &.pending { background: #ecf5ff; }
-        &.running { background: #fef0f0; }
-        &.success { background: #f0f9ff; }
-        &.failed { background: #fef0f0; }
-      }
-
-      .stat-content {
-        .stat-value {
-          font-size: 24px;
-          font-weight: bold;
-          color: #303133;
-        }
-
-        .stat-label {
-          font-size: 14px;
-          color: #909399;
-          margin-top: 4px;
-        }
-      }
-    }
-  }
-
-  .el-pagination {
-    margin-top: 20px;
-    justify-content: center;
-  }
-}
-</style>

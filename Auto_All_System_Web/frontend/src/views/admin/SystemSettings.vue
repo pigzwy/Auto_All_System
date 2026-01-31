@@ -1,99 +1,115 @@
 <template>
-  <div class="system-settings">
-    <h1>系统设置</h1>
+  <div class="space-y-6 p-5">
+    <h1 class="text-2xl font-semibold text-foreground">系统设置</h1>
 
-    <el-row :gutter="20">
-      <el-col :span="12">
-        <el-card shadow="hover" header="基本设置">
-          <el-form label-width="120px">
-            <el-form-item label="系统名称">
-              <el-input v-model="settings.systemName" />
-            </el-form-item>
-            <el-form-item label="系统Logo">
-              <el-upload>
-                <el-button>点击上传</el-button>
-              </el-upload>
-            </el-form-item>
-            <el-form-item label="系统维护">
-              <el-switch v-model="settings.maintenance" />
-            </el-form-item>
-            <el-form-item>
-              <el-button type="primary">保存</el-button>
-            </el-form-item>
-          </el-form>
-        </el-card>
-      </el-col>
+    <div class="grid grid-cols-1 gap-5 lg:grid-cols-2">
+      <Card class="shadow-sm">
+        <CardHeader class="pb-3">
+          <CardTitle class="text-base">基本设置</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <SimpleForm label-width="120px">
+            <SimpleFormItem label="系统名称">
+              <TextInput v-model="settings.systemName" />
+            </SimpleFormItem>
+            <SimpleFormItem label="系统Logo">
+              <FileUpload>
+                <Button>点击上传</Button>
+              </FileUpload>
+            </SimpleFormItem>
+            <SimpleFormItem label="系统维护">
+              <Toggle v-model="settings.maintenance" />
+            </SimpleFormItem>
+            <SimpleFormItem>
+              <Button  variant="default" type="button">保存</Button>
+            </SimpleFormItem>
+          </SimpleForm>
+        </CardContent>
+      </Card>
 
-      <el-col :span="12">
-        <el-card shadow="hover" header="安全设置">
-          <el-form label-width="120px">
-            <el-form-item label="密码强度">
-              <el-select v-model="settings.passwordStrength">
-                <el-option label="低" value="low" />
-                <el-option label="中" value="medium" />
-                <el-option label="高" value="high" />
-              </el-select>
-            </el-form-item>
-            <el-form-item label="登录失败锁定">
-              <el-switch v-model="settings.loginLock" />
-            </el-form-item>
-            <el-form-item label="Session超时">
-              <el-input-number v-model="settings.sessionTimeout" :min="5" :max="1440" />
-              <span style="margin-left: 8px;">分钟</span>
-            </el-form-item>
-            <el-form-item>
-              <el-button type="primary">保存</el-button>
-            </el-form-item>
-          </el-form>
-        </el-card>
-      </el-col>
-    </el-row>
+      <Card class="shadow-sm">
+        <CardHeader class="pb-3">
+          <CardTitle class="text-base">安全设置</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <SimpleForm label-width="120px">
+            <SimpleFormItem label="密码强度">
+              <SelectNative v-model="settings.passwordStrength">
+                <SelectOption label="低" value="low" />
+                <SelectOption label="中" value="medium" />
+                <SelectOption label="高" value="high" />
+              </SelectNative>
+            </SimpleFormItem>
+            <SimpleFormItem label="登录失败锁定">
+              <Toggle v-model="settings.loginLock" />
+            </SimpleFormItem>
+            <SimpleFormItem label="Session超时">
+              <NumberInput v-model="settings.sessionTimeout" :min="5" :max="1440" />
+              <span class="ml-2 text-sm text-muted-foreground">分钟</span>
+            </SimpleFormItem>
+            <SimpleFormItem>
+              <Button  variant="default" type="button">保存</Button>
+            </SimpleFormItem>
+          </SimpleForm>
+        </CardContent>
+      </Card>
+    </div>
 
-    <el-row :gutter="20" style="margin-top: 20px">
-      <el-col :span="12">
-        <el-card shadow="hover" header="支付设置" v-loading="paymentLoading">
-          <el-form label-width="120px">
-            <el-form-item 
+    <div class="grid grid-cols-1 gap-5 lg:grid-cols-2">
+      <Card class="shadow-sm">
+        <CardHeader class="pb-3">
+          <CardTitle class="text-base">支付设置</CardTitle>
+        </CardHeader>
+        <CardContent v-loading="paymentLoading">
+          <SimpleForm label-width="120px">
+            <SimpleFormItem 
               v-for="config in paymentConfigs" 
               :key="config.id" 
               :label="config.name"
             >
-              <el-switch 
+              <Toggle 
                 v-model="config.is_enabled" 
                 @change="togglePayment(config)"
               />
-            </el-form-item>
-            <el-empty v-if="paymentConfigs.length === 0" description="暂无支付方式" />
-          </el-form>
-        </el-card>
-      </el-col>
+            </SimpleFormItem>
+            <div v-if="paymentConfigs.length === 0" class="rounded-lg border border-border bg-muted/10 p-8 text-center">
+              <div class="text-sm font-medium text-foreground">暂无支付方式</div>
+              <div class="mt-1 text-xs text-muted-foreground">请先创建支付配置后再启用。</div>
+            </div>
+          </SimpleForm>
+        </CardContent>
+      </Card>
 
-      <el-col :span="12">
-        <el-card shadow="hover" header="邮件设置">
-          <el-form label-width="120px">
-            <el-form-item label="SMTP服务器">
-              <el-input v-model="settings.smtpHost" />
-            </el-form-item>
-            <el-form-item label="SMTP端口">
-              <el-input-number v-model="settings.smtpPort" />
-            </el-form-item>
-            <el-form-item label="发件人">
-              <el-input v-model="settings.emailFrom" />
-            </el-form-item>
-            <el-form-item>
-              <el-button type="primary">保存</el-button>
-            </el-form-item>
-          </el-form>
-        </el-card>
-      </el-col>
-    </el-row>
+      <Card class="shadow-sm">
+        <CardHeader class="pb-3">
+          <CardTitle class="text-base">邮件设置</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <SimpleForm label-width="120px">
+            <SimpleFormItem label="SMTP服务器">
+              <TextInput v-model="settings.smtpHost" />
+            </SimpleFormItem>
+            <SimpleFormItem label="SMTP端口">
+              <NumberInput v-model="settings.smtpPort" />
+            </SimpleFormItem>
+            <SimpleFormItem label="发件人">
+              <TextInput v-model="settings.emailFrom" />
+            </SimpleFormItem>
+            <SimpleFormItem>
+              <Button  variant="default" type="button">保存</Button>
+            </SimpleFormItem>
+          </SimpleForm>
+        </CardContent>
+      </Card>
+    </div>
   </div>
 </template>
 
 <script setup lang="ts">
 import { reactive, ref, onMounted } from 'vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage } from '@/lib/element'
 import { paymentsApi } from '@/api/payments'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 
 const settings = reactive({
   systemName: 'Auto All System',
@@ -145,11 +161,3 @@ onMounted(() => {
   loadPaymentConfigs()
 })
 </script>
-
-<style scoped lang="scss">
-.system-settings {
-  h1 {
-    margin-bottom: 24px;
-  }
-}
-</style>

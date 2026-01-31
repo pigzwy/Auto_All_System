@@ -1,133 +1,136 @@
 <template>
-  <div class="geekez-management">
-    <el-card shadow="never">
-      <template #header>
-        <div class="card-header">
+  <div class="space-y-6 p-5">
+    <Card class="shadow-sm">
+      <CardHeader>
+        <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div>
-            <div class="title">GeekezBrowser 配置</div>
-            <div class="sub">默认本机：Control 19527 / API 12138</div>
+            <CardTitle class="text-base">GeekezBrowser 配置</CardTitle>
+            <p class="mt-1 text-xs text-muted-foreground">默认本机：Control 19527 / API 12138</p>
           </div>
-          <div class="actions">
-            <el-button @click="load" :loading="loading">刷新</el-button>
-            <el-button @click="applyLocalPreset">本机直连</el-button>
-            <el-button @click="applyDockerPreset">Docker 推荐</el-button>
-            <el-button @click="test" :loading="testing">测试连接</el-button>
-            <el-button type="primary" @click="save" :loading="saving">保存</el-button>
+          <div class="flex flex-wrap justify-end gap-2">
+            <Button @click="load" :loading="loading">刷新</Button>
+            <Button @click="applyLocalPreset">本机直连</Button>
+            <Button @click="applyDockerPreset">Docker 推荐</Button>
+            <Button @click="test" :loading="testing">测试连接</Button>
+            <Button  variant="default" type="button" @click="save" :loading="saving">保存</Button>
           </div>
         </div>
-      </template>
+      </CardHeader>
 
-      <el-form :model="form" label-width="160px">
-        <el-divider content-position="left">Control Server（用于 launch/wsEndpoint）</el-divider>
+      <CardContent>
+        <SimpleForm :model="form" label-width="160px">
+        <Divider content-position="left">Control Server（用于 launch/wsEndpoint）</Divider>
 
-        <el-form-item label="Control Host">
-          <el-input v-model="form.control_host" placeholder="127.0.0.1" />
-        </el-form-item>
-        <el-form-item label="Control Port">
-          <el-input-number v-model="form.control_port" :min="1" :max="65535" />
-          <div class="hint">默认 19527（Control Server），不要填 12138（那是 API Server）。Docker 场景下如果 Geekez 仅监听 127.0.0.1，可用转发端口 19528。</div>
-        </el-form-item>
+        <SimpleFormItem label="Control Host">
+          <TextInput v-model="form.control_host" placeholder="127.0.0.1" />
+        </SimpleFormItem>
+        <SimpleFormItem label="Control Port">
+          <NumberInput v-model="form.control_port" :min="1" :max="65535" />
+          <div class="mt-2 text-xs text-muted-foreground">默认 19527（Control Server），不要填 12138（那是 API Server）。Docker 场景下如果 Geekez 仅监听 127.0.0.1，可用转发端口 19528。</div>
+        </SimpleFormItem>
 
-        <el-form-item label="Control Token">
-          <el-input
+        <SimpleFormItem label="Control Token">
+          <TextInput
             v-model="form.control_token"
             show-password
             placeholder="可选；留空表示不修改"
           />
-          <div class="hint">
+          <div class="mt-2 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
             当前已保存 token：
-            <el-tag size="small" :type="form.has_control_token ? 'success' : 'info'">
+            <Tag size="small" :type="form.has_control_token ? 'success' : 'info'">
               {{ form.has_control_token ? 'YES' : 'NO' }}
-            </el-tag>
-            <el-button v-if="form.has_control_token" text type="danger" @click="clearToken">
+            </Tag>
+            <Button v-if="form.has_control_token" text  variant="destructive" type="button" @click="clearToken">
               清空
-            </el-button>
+            </Button>
           </div>
-        </el-form-item>
+        </SimpleFormItem>
 
-        <el-divider content-position="left">API Server（用于 stop 回收环境）</el-divider>
+        <Divider content-position="left">API Server（用于 stop 回收环境）</Divider>
 
-        <el-form-item label="API Host">
-          <el-input v-model="form.api_server_host" placeholder="127.0.0.1" />
-          <div class="hint">官方文档默认只监听 127.0.0.1；Docker 场景需要使用可达地址（例如 host.docker.internal），并配合转发端口。</div>
-        </el-form-item>
-        <el-form-item label="API Port">
-          <el-input-number v-model="form.api_server_port" :min="1" :max="65535" />
-          <div class="hint">默认 12138（API Server）。Docker 场景如果 Geekez 只监听 127.0.0.1，可用转发端口 12139。</div>
-        </el-form-item>
-      </el-form>
-    </el-card>
+        <SimpleFormItem label="API Host">
+          <TextInput v-model="form.api_server_host" placeholder="127.0.0.1" />
+          <div class="mt-2 text-xs text-muted-foreground">官方文档默认只监听 127.0.0.1；Docker 场景需要使用可达地址（例如 host.docker.internal），并配合转发端口。</div>
+        </SimpleFormItem>
+        <SimpleFormItem label="API Port">
+          <NumberInput v-model="form.api_server_port" :min="1" :max="65535" />
+          <div class="mt-2 text-xs text-muted-foreground">默认 12138（API Server）。Docker 场景如果 Geekez 只监听 127.0.0.1，可用转发端口 12139。</div>
+        </SimpleFormItem>
+      </SimpleForm>
+      </CardContent>
+    </Card>
 
-    <el-card v-if="testResult" shadow="never" style="margin-top: 16px;">
-      <template #header>
-        <div class="card-header">
-          <div class="title">连接测试结果</div>
-        </div>
-      </template>
+    <Card v-if="testResult" class="shadow-sm">
+      <CardHeader class="pb-3">
+        <CardTitle class="text-base">连接测试结果</CardTitle>
+      </CardHeader>
 
-      <el-descriptions :column="1" border>
-        <el-descriptions-item label="Control Server">
-          <el-tag :type="testResult.control.ok ? 'success' : 'danger'">
+      <CardContent>
+        <Descriptions :column="1" border>
+        <DescriptionsItem label="Control Server">
+          <Tag :type="testResult.control.ok ? 'success' : 'danger'">
             {{ testResult.control.ok ? 'OK' : 'FAIL' }}
-          </el-tag>
-          <span class="mono">{{ testResult.control.base_url }}</span>
-          <span class="mono">{{ testResult.control.latency_ms }}ms</span>
-          <span v-if="testResult.control.note" class="note">{{ testResult.control.note }}</span>
-          <span v-if="testResult.control.error" class="error">{{ testResult.control.error }}</span>
+          </Tag>
+          <span class="ml-2 font-mono text-xs text-muted-foreground">{{ testResult.control.base_url }}</span>
+          <span class="ml-2 font-mono text-xs text-muted-foreground">{{ testResult.control.latency_ms }}ms</span>
+          <span v-if="testResult.control.note" class="ml-2 text-xs text-primary">{{ testResult.control.note }}</span>
+          <span v-if="testResult.control.error" class="ml-2 text-xs text-rose-600">{{ testResult.control.error }}</span>
 
-          <el-collapse v-if="(testResult.control.attempts || []).length" class="collapse">
-            <el-collapse-item title="查看探测明细" name="control">
-              <el-table :data="testResult.control.attempts" size="small" style="width: 100%">
-                <el-table-column prop="url" label="URL" min-width="260" />
-                <el-table-column prop="ok" label="OK" width="70">
+          <Collapse v-if="(testResult.control.attempts || []).length" class="mt-3">
+            <CollapseItem title="查看探测明细" name="control">
+              <DataTable :data="testResult.control.attempts" size="small" class="w-full">
+                <DataColumn prop="url" label="URL" min-width="260" />
+                <DataColumn prop="ok" label="OK" width="70">
                   <template #default="scope">
-                    <el-tag size="small" :type="scope.row.ok ? 'success' : 'danger'">
+                    <Tag size="small" :type="scope.row.ok ? 'success' : 'danger'">
                       {{ scope.row.ok ? 'YES' : 'NO' }}
-                    </el-tag>
+                    </Tag>
                   </template>
-                </el-table-column>
-                <el-table-column prop="status_code" label="HTTP" width="80" />
-                <el-table-column prop="error" label="Error" min-width="260" />
-              </el-table>
-            </el-collapse-item>
-          </el-collapse>
-        </el-descriptions-item>
-        <el-descriptions-item label="API Server">
-          <el-tag :type="testResult.api_server.ok ? 'success' : 'danger'">
+                </DataColumn>
+                <DataColumn prop="status_code" label="HTTP" width="80" />
+                <DataColumn prop="error" label="Error" min-width="260" />
+              </DataTable>
+            </CollapseItem>
+          </Collapse>
+        </DescriptionsItem>
+        <DescriptionsItem label="API Server">
+          <Tag :type="testResult.api_server.ok ? 'success' : 'danger'">
             {{ testResult.api_server.ok ? 'OK' : 'FAIL' }}
-          </el-tag>
-          <span class="mono">{{ testResult.api_server.url }}</span>
-          <span class="mono">{{ testResult.api_server.latency_ms }}ms</span>
-          <span v-if="testResult.api_server.status_code" class="mono">HTTP {{ testResult.api_server.status_code }}</span>
-          <span v-if="testResult.api_server.note" class="note">{{ testResult.api_server.note }}</span>
-          <span v-if="testResult.api_server.error" class="error">{{ testResult.api_server.error }}</span>
+          </Tag>
+          <span class="ml-2 font-mono text-xs text-muted-foreground">{{ testResult.api_server.url }}</span>
+          <span class="ml-2 font-mono text-xs text-muted-foreground">{{ testResult.api_server.latency_ms }}ms</span>
+          <span v-if="testResult.api_server.status_code" class="ml-2 font-mono text-xs text-muted-foreground">HTTP {{ testResult.api_server.status_code }}</span>
+          <span v-if="testResult.api_server.note" class="ml-2 text-xs text-primary">{{ testResult.api_server.note }}</span>
+          <span v-if="testResult.api_server.error" class="ml-2 text-xs text-rose-600">{{ testResult.api_server.error }}</span>
 
-          <el-collapse v-if="(testResult.api_server.attempts || []).length" class="collapse">
-            <el-collapse-item title="查看探测明细" name="api">
-              <el-table :data="testResult.api_server.attempts" size="small" style="width: 100%">
-                <el-table-column prop="url" label="URL" min-width="260" />
-                <el-table-column prop="ok" label="OK" width="70">
+          <Collapse v-if="(testResult.api_server.attempts || []).length" class="mt-3">
+            <CollapseItem title="查看探测明细" name="api">
+              <DataTable :data="testResult.api_server.attempts" size="small" class="w-full">
+                <DataColumn prop="url" label="URL" min-width="260" />
+                <DataColumn prop="ok" label="OK" width="70">
                   <template #default="scope">
-                    <el-tag size="small" :type="scope.row.ok ? 'success' : 'danger'">
+                    <Tag size="small" :type="scope.row.ok ? 'success' : 'danger'">
                       {{ scope.row.ok ? 'YES' : 'NO' }}
-                    </el-tag>
+                    </Tag>
                   </template>
-                </el-table-column>
-                <el-table-column prop="status_code" label="HTTP" width="80" />
-                <el-table-column prop="error" label="Error" min-width="260" />
-              </el-table>
-            </el-collapse-item>
-          </el-collapse>
-        </el-descriptions-item>
-      </el-descriptions>
-    </el-card>
+                </DataColumn>
+                <DataColumn prop="status_code" label="HTTP" width="80" />
+                <DataColumn prop="error" label="Error" min-width="260" />
+              </DataTable>
+            </CollapseItem>
+          </Collapse>
+        </DescriptionsItem>
+      </Descriptions>
+      </CardContent>
+    </Card>
   </div>
 </template>
 
 <script setup lang="ts">
 import { onMounted, reactive, ref } from 'vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage } from '@/lib/element'
 import { geekezApi, type GeekezConnectionTestResult } from '@/api/geekez'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 
 const loading = ref(false)
 const saving = ref(false)
@@ -236,64 +239,3 @@ onMounted(() => {
   load()
 })
 </script>
-
-<style scoped lang="scss">
-.geekez-management {
-  .card-header {
-    display: flex;
-    align-items: flex-start;
-    justify-content: space-between;
-    gap: 12px;
-
-    .title {
-      font-weight: 700;
-      color: #111827;
-    }
-
-    .sub {
-      font-size: 12px;
-      color: #6b7280;
-      margin-top: 4px;
-    }
-  }
-
-  .actions {
-    display: flex;
-    gap: 8px;
-    flex-wrap: wrap;
-    justify-content: flex-end;
-  }
-
-  .hint {
-    font-size: 12px;
-    color: #6b7280;
-    margin-top: 6px;
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    flex-wrap: wrap;
-  }
-
-  .mono {
-    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
-    margin-left: 8px;
-    color: #374151;
-  }
-
-  .error {
-    margin-left: 8px;
-    color: #dc2626;
-    font-size: 12px;
-  }
-
-  .note {
-    margin-left: 8px;
-    color: #2563eb;
-    font-size: 12px;
-  }
-
-  .collapse {
-    margin-top: 10px;
-  }
-}
-</style>

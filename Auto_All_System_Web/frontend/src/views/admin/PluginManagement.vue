@@ -1,306 +1,276 @@
 <template>
-  <div class="plugin-management">
+  <div class="space-y-6 p-5">
     <!-- 页面标题 -->
-    <div class="page-header">
-      <div class="header-left">
-        <h2>🔌 插件管理中心</h2>
-        <p>管理和配置系统插件，扩展系统功能</p>
+    <div class="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+      <div>
+        <h2 class="text-2xl font-semibold text-foreground">插件管理中心</h2>
+        <p class="mt-1 text-sm text-muted-foreground">管理和配置系统插件，扩展系统功能</p>
       </div>
-      <div class="header-actions">
-        <el-button 
-          type="primary" 
-          :icon="Refresh" 
-          @click="handleReload"
-          :loading="reloading"
-        >
-          重新加载
-        </el-button>
-      </div>
+      <Button  variant="default" type="button" :icon="Refresh" @click="handleReload" :loading="reloading">
+        重新加载
+      </Button>
     </div>
 
     <!-- 统计卡片 -->
-    <el-row :gutter="20" class="stats-row">
-      <el-col :span="6">
-        <el-card class="stat-card total">
-          <div class="stat-content">
-            <el-icon :size="40"><Box /></el-icon>
-            <div class="stat-info">
-              <div class="stat-value">{{ stats.total }}</div>
-              <div class="stat-label">总插件数</div>
+    <div class="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-4">
+      <Card class="overflow-hidden">
+        <CardContent class="bg-gradient-to-br from-indigo-500 to-fuchsia-500 p-6 text-white">
+          <div class="flex items-center gap-4">
+            <Icon :size="40" class="opacity-90"><Box /></Icon>
+            <div>
+              <div class="text-3xl font-bold leading-none">{{ stats.total }}</div>
+              <div class="mt-1 text-sm text-white/90">总插件数</div>
             </div>
           </div>
-        </el-card>
-      </el-col>
-      <el-col :span="6">
-        <el-card class="stat-card enabled">
-          <div class="stat-content">
-            <el-icon :size="40"><CircleCheck /></el-icon>
-            <div class="stat-info">
-              <div class="stat-value">{{ stats.enabled }}</div>
-              <div class="stat-label">已启用</div>
+        </CardContent>
+      </Card>
+
+      <Card class="overflow-hidden">
+        <CardContent class="bg-gradient-to-br from-emerald-500 to-cyan-400 p-6 text-white">
+          <div class="flex items-center gap-4">
+            <Icon :size="40" class="opacity-90"><CircleCheck /></Icon>
+            <div>
+              <div class="text-3xl font-bold leading-none">{{ stats.enabled }}</div>
+              <div class="mt-1 text-sm text-white/90">已启用</div>
             </div>
           </div>
-        </el-card>
-      </el-col>
-      <el-col :span="6">
-        <el-card class="stat-card disabled">
-          <div class="stat-content">
-            <el-icon :size="40"><CircleClose /></el-icon>
-            <div class="stat-info">
-              <div class="stat-value">{{ stats.disabled }}</div>
-              <div class="stat-label">已禁用</div>
+        </CardContent>
+      </Card>
+
+      <Card class="overflow-hidden">
+        <CardContent class="bg-gradient-to-br from-slate-500 to-slate-400 p-6 text-white">
+          <div class="flex items-center gap-4">
+            <Icon :size="40" class="opacity-90"><CircleClose /></Icon>
+            <div>
+              <div class="text-3xl font-bold leading-none">{{ stats.disabled }}</div>
+              <div class="mt-1 text-sm text-white/90">已禁用</div>
             </div>
           </div>
-        </el-card>
-      </el-col>
-      <el-col :span="6">
-        <el-card class="stat-card categories">
-          <div class="stat-content">
-            <el-icon :size="40"><Grid /></el-icon>
-            <div class="stat-info">
-              <div class="stat-value">{{ Object.keys(stats.categories || {}).length }}</div>
-              <div class="stat-label">插件分类</div>
+        </CardContent>
+      </Card>
+
+      <Card class="overflow-hidden">
+        <CardContent class="bg-gradient-to-br from-amber-500 to-orange-500 p-6 text-white">
+          <div class="flex items-center gap-4">
+            <Icon :size="40" class="opacity-90"><Grid /></Icon>
+            <div>
+              <div class="text-3xl font-bold leading-none">{{ Object.keys(stats.categories || {}).length }}</div>
+              <div class="mt-1 text-sm text-white/90">插件分类</div>
             </div>
           </div>
-        </el-card>
-      </el-col>
-    </el-row>
+        </CardContent>
+      </Card>
+    </div>
 
     <!-- 筛选和搜索 -->
-    <el-card class="filter-card">
-      <el-row :gutter="16">
-        <el-col :span="8">
-          <el-input
-            v-model="searchText"
-            placeholder="搜索插件名称或描述..."
-            :prefix-icon="Search"
-            clearable
-          />
-        </el-col>
-        <el-col :span="6">
-          <el-select v-model="filterCategory" placeholder="选择分类" clearable style="width: 100%">
-            <el-option label="全部分类" value="" />
-            <el-option
-              v-for="category in categories"
-              :key="category"
-              :label="category"
-              :value="category"
+    <Card class="shadow-sm">
+      <CardContent class="p-6">
+        <div class="grid grid-cols-1 gap-4 md:grid-cols-12">
+          <div class="md:col-span-6">
+            <TextInput
+              v-model="searchText"
+              placeholder="搜索插件名称或描述..."
+              :prefix-icon="Search"
+              clearable
             />
-          </el-select>
-        </el-col>
-        <el-col :span="6">
-          <el-select v-model="filterStatus" placeholder="选择状态" clearable style="width: 100%">
-            <el-option label="全部状态" value="" />
-            <el-option label="已启用" value="enabled" />
-            <el-option label="已禁用" value="disabled" />
-          </el-select>
-        </el-col>
-      </el-row>
-    </el-card>
+          </div>
+          <div class="md:col-span-3">
+            <SelectNative v-model="filterCategory" placeholder="选择分类" clearable class="w-full">
+              <SelectOption label="全部分类" value="" />
+              <SelectOption
+                v-for="category in categories"
+                :key="category"
+                :label="category"
+                :value="category"
+              />
+            </SelectNative>
+          </div>
+          <div class="md:col-span-3">
+            <SelectNative v-model="filterStatus" placeholder="选择状态" clearable class="w-full">
+              <SelectOption label="全部状态" value="" />
+              <SelectOption label="已启用" value="enabled" />
+              <SelectOption label="已禁用" value="disabled" />
+            </SelectNative>
+          </div>
+        </div>
+      </CardContent>
+    </Card>
 
     <!-- 插件列表 -->
-    <div class="plugins-grid">
-      <el-row :gutter="20">
-        <el-col 
-          v-for="plugin in filteredPlugins" 
-          :key="plugin.name" 
-          :span="8"
+    <div>
+      <div class="grid grid-cols-1 gap-5 lg:grid-cols-3">
+        <Card
+          v-for="plugin in filteredPlugins"
+          :key="plugin.name"
+          class="border-2 shadow-sm transition-all hover:-translate-y-1 hover:shadow-md"
+          :class="!plugin.dependencies_met ? 'border-amber-500/60' : plugin.enabled ? 'border-emerald-500/60' : 'border-border'"
         >
-          <el-card 
-            class="plugin-card"
-            :class="{ 
-              'enabled': plugin.enabled, 
-              'disabled': !plugin.enabled,
-              'has-issue': !plugin.dependencies_met
-            }"
-            shadow="hover"
-          >
-            <!-- 插件头部 -->
-            <div class="plugin-header">
-              <div class="plugin-icon">
-                <el-icon :size="48" :color="plugin.enabled ? '#409eff' : '#909399'">
+          <CardContent class="space-y-4 p-5">
+            <div class="flex items-center justify-between border-b border-border pb-4">
+              <div class="flex h-14 w-14 items-center justify-center rounded-xl bg-muted/40">
+                <Icon :size="48" :class="plugin.enabled ? 'text-primary' : 'text-muted-foreground'">
                   <component :is="getIconComponent(plugin.icon)" />
-                </el-icon>
+                </Icon>
               </div>
-              <div class="plugin-status">
-                <el-switch
-                  v-model="plugin.enabled"
-                  @change="handleTogglePlugin(plugin)"
-                  :disabled="!plugin.dependencies_met"
-                  active-text="启用"
-                  inactive-text="禁用"
-                />
-              </div>
+              <Toggle
+                v-model="plugin.enabled"
+                @change="handleTogglePlugin(plugin)"
+                :disabled="!plugin.dependencies_met"
+                active-text="启用"
+                inactive-text="禁用"
+              />
             </div>
 
-            <!-- 插件信息 -->
-            <div class="plugin-info">
-              <h3 class="plugin-title">{{ plugin.display_name }}</h3>
-              <p class="plugin-description">{{ plugin.description || '暂无描述' }}</p>
-              
-              <div class="plugin-meta">
-                <el-tag size="small" type="info">{{ plugin.category }}</el-tag>
-                <el-tag size="small">v{{ plugin.version }}</el-tag>
-                <el-tag 
-                  v-if="!plugin.dependencies_met" 
-                  size="small" 
-                  type="warning"
-                >
-                  依赖未满足
-                </el-tag>
+            <div>
+              <h3 class="text-lg font-semibold text-foreground">{{ plugin.display_name }}</h3>
+              <p class="mt-1 min-h-[40px] text-sm leading-relaxed text-muted-foreground">{{ plugin.description || '暂无描述' }}</p>
+
+              <div class="mt-3 flex flex-wrap gap-2">
+                <Tag size="small" type="info">{{ plugin.category }}</Tag>
+                <Tag size="small">v{{ plugin.version }}</Tag>
+                <Tag v-if="!plugin.dependencies_met" size="small" type="warning">依赖未满足</Tag>
               </div>
 
-              <div class="plugin-author">
-                <el-icon><User /></el-icon>
+              <div class="mt-3 flex items-center gap-2 text-xs text-muted-foreground">
+                <Icon><User /></Icon>
                 <span>{{ plugin.author }}</span>
               </div>
             </div>
 
-            <!-- 插件操作 -->
-            <div class="plugin-actions">
-              <el-button 
-                type="primary" 
-                size="small" 
-                @click="handleViewDetail(plugin)"
-                :icon="InfoFilled"
-              >
+            <div class="flex gap-2 border-t border-border pt-4">
+              <Button  variant="default" type="button" size="small" @click="handleViewDetail(plugin)" :icon="InfoFilled">
                 详情
-              </el-button>
-              <el-button 
-                v-if="plugin.settings_available" 
-                size="small" 
-                @click="handleSettings(plugin)"
-                :icon="Setting"
-              >
+              </Button>
+              <Button v-if="plugin.settings_available" size="small" @click="handleSettings(plugin)" :icon="Setting">
                 配置
-              </el-button>
+              </Button>
             </div>
-          </el-card>
-        </el-col>
-      </el-row>
+          </CardContent>
+        </Card>
+      </div>
 
-      <!-- 空状态 -->
-      <el-empty 
-        v-if="filteredPlugins.length === 0" 
-        description="没有找到符合条件的插件"
-      />
+      <div v-if="filteredPlugins.length === 0" class="mt-8 rounded-xl border border-border bg-muted/10 p-10 text-center">
+        <div class="text-sm font-medium text-foreground">没有找到符合条件的插件</div>
+        <div class="mt-1 text-xs text-muted-foreground">调整筛选条件或清空搜索后重试。</div>
+      </div>
     </div>
 
     <!-- 插件详情弹窗 -->
-    <el-dialog
+    <Modal
       v-model="detailDialogVisible"
       :title="currentPlugin?.display_name"
       width="800px"
       destroy-on-close
     >
       <div v-if="currentPlugin" class="plugin-detail">
-        <el-descriptions :column="2" border>
-          <el-descriptions-item label="插件名称">
+        <Descriptions :column="2" border>
+          <DescriptionsItem label="插件名称">
             {{ currentPlugin.display_name }}
-          </el-descriptions-item>
-          <el-descriptions-item label="版本">
-            <el-tag>v{{ currentPlugin.version }}</el-tag>
-          </el-descriptions-item>
-          <el-descriptions-item label="作者">
+          </DescriptionsItem>
+          <DescriptionsItem label="版本">
+            <Tag>v{{ currentPlugin.version }}</Tag>
+          </DescriptionsItem>
+          <DescriptionsItem label="作者">
             {{ currentPlugin.author }}
-          </el-descriptions-item>
-          <el-descriptions-item label="分类">
-            <el-tag type="info">{{ currentPlugin.category }}</el-tag>
-          </el-descriptions-item>
-          <el-descriptions-item label="状态">
-            <el-tag :type="currentPlugin.enabled ? 'success' : 'info'">
+          </DescriptionsItem>
+          <DescriptionsItem label="分类">
+            <Tag type="info">{{ currentPlugin.category }}</Tag>
+          </DescriptionsItem>
+          <DescriptionsItem label="状态">
+            <Tag :type="currentPlugin.enabled ? 'success' : 'info'">
               {{ currentPlugin.enabled ? '已启用' : '已禁用' }}
-            </el-tag>
-          </el-descriptions-item>
-          <el-descriptions-item label="依赖">
-            <el-tag 
+            </Tag>
+          </DescriptionsItem>
+          <DescriptionsItem label="依赖">
+            <Tag 
               v-if="currentPlugin.dependencies_met" 
               type="success"
             >
               已满足
-            </el-tag>
-            <el-tag v-else type="warning">未满足</el-tag>
-          </el-descriptions-item>
-        </el-descriptions>
+            </Tag>
+            <Tag v-else type="warning">未满足</Tag>
+          </DescriptionsItem>
+        </Descriptions>
 
-        <div class="detail-section">
-          <h4>插件描述</h4>
-          <p>{{ currentPlugin.description || '暂无描述' }}</p>
+        <div class="mt-6">
+          <h4 class="text-base font-semibold text-foreground">插件描述</h4>
+          <p class="mt-2 text-sm leading-relaxed text-muted-foreground">{{ currentPlugin.description || '暂无描述' }}</p>
         </div>
 
-        <div v-if="currentPlugin.dependencies && currentPlugin.dependencies.length > 0" class="detail-section">
-          <h4>依赖项</h4>
-          <el-tag 
+        <div v-if="currentPlugin.dependencies && currentPlugin.dependencies.length > 0" class="mt-6">
+          <h4 class="text-base font-semibold text-foreground">依赖项</h4>
+          <Tag 
             v-for="dep in currentPlugin.dependencies" 
             :key="dep"
-            style="margin-right: 8px; margin-bottom: 8px"
+            class="mr-2 mb-2"
           >
             {{ dep }}
-          </el-tag>
+          </Tag>
         </div>
       </div>
 
       <template #footer>
-        <el-button @click="detailDialogVisible = false">关闭</el-button>
-        <el-button 
+        <Button @click="detailDialogVisible = false">关闭</Button>
+        <Button 
           v-if="currentPlugin?.settings_available" 
-          type="primary" 
+           variant="default" type="button" 
           @click="handleSettingsFromDetail"
         >
           配置插件
-        </el-button>
+        </Button>
       </template>
-    </el-dialog>
+    </Modal>
 
     <!-- 插件配置弹窗 -->
-    <el-dialog
+    <Modal
       v-model="settingsDialogVisible"
       :title="`配置 ${currentPlugin?.display_name}`"
       width="700px"
       destroy-on-close
     >
-      <div v-if="pluginSettings" class="plugin-settings">
-        <el-form :model="pluginSettings" label-width="120px">
-          <el-form-item 
+      <div v-if="pluginSettings" class="max-h-[500px] overflow-y-auto">
+        <SimpleForm :model="pluginSettings" label-width="120px">
+          <SimpleFormItem 
             v-for="(value, key) in pluginSettings" 
             :key="key"
             :label="formatLabel(String(key))"
           >
-            <el-input v-model="pluginSettings[key]" v-if="typeof value === 'string'" />
-            <el-input-number v-model="pluginSettings[key]" v-else-if="typeof value === 'number'" />
-            <el-switch v-model="pluginSettings[key]" v-else-if="typeof value === 'boolean'" />
-            <el-input 
+            <TextInput v-model="pluginSettings[key]" v-if="typeof value === 'string'" />
+            <NumberInput v-model="pluginSettings[key]" v-else-if="typeof value === 'number'" />
+            <Toggle v-model="pluginSettings[key]" v-else-if="typeof value === 'boolean'" />
+            <TextInput 
               v-else 
               v-model="pluginSettings[key]"
               type="textarea"
               :rows="4"
             />
-          </el-form-item>
-        </el-form>
+          </SimpleFormItem>
+        </SimpleForm>
       </div>
 
       <template #footer>
-        <el-button @click="settingsDialogVisible = false">取消</el-button>
-        <el-button 
-          type="primary" 
+        <Button @click="settingsDialogVisible = false">取消</Button>
+        <Button 
+           variant="default" type="button" 
           @click="handleSaveSettings"
           :loading="savingSettings"
         >
           保存配置
-        </el-button>
+        </Button>
       </template>
-    </el-dialog>
+    </Modal>
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessage, ElMessageBox } from '@/lib/element'
 import {
   Refresh, Box, CircleCheck, CircleClose, Grid, Search,
   User, InfoFilled, Setting
-} from '@element-plus/icons-vue'
+} from '@/icons'
 import pluginsApi, { type PluginInfo, type PluginStats } from '@/api/plugins'
+import { Card, CardContent } from '@/components/ui/card'
 
 // 响应式数据
 const plugins = ref<PluginInfo[]>([])
@@ -513,194 +483,3 @@ onMounted(async () => {
   await fetchStats()
 })
 </script>
-
-<style scoped lang="scss">
-.plugin-management {
-  .page-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 24px;
-
-    .header-left {
-      h2 {
-        margin: 0 0 8px 0;
-        font-size: 24px;
-        font-weight: 600;
-        color: #303133;
-      }
-
-      p {
-        margin: 0;
-        color: #909399;
-        font-size: 14px;
-      }
-    }
-  }
-
-  .stats-row {
-    margin-bottom: 24px;
-
-    .stat-card {
-      border-radius: 12px;
-      border: none;
-      
-      &.total {
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        color: #fff;
-      }
-
-      &.enabled {
-        background: linear-gradient(135deg, #84fab0 0%, #8fd3f4 100%);
-        color: #fff;
-      }
-
-      &.disabled {
-        background: linear-gradient(135deg, #a8a8a8 0%, #d4d4d4 100%);
-        color: #fff;
-      }
-
-      &.categories {
-        background: linear-gradient(135deg, #fa709a 0%, #fee140 100%);
-        color: #fff;
-      }
-
-      :deep(.el-card__body) {
-        padding: 20px;
-      }
-
-      .stat-content {
-        display: flex;
-        align-items: center;
-        gap: 16px;
-
-        .stat-info {
-          flex: 1;
-
-          .stat-value {
-            font-size: 32px;
-            font-weight: 700;
-            line-height: 1;
-            margin-bottom: 8px;
-          }
-
-          .stat-label {
-            font-size: 14px;
-            opacity: 0.9;
-          }
-        }
-      }
-    }
-  }
-
-  .filter-card {
-    margin-bottom: 24px;
-    border-radius: 12px;
-  }
-
-  .plugins-grid {
-    .plugin-card {
-      margin-bottom: 20px;
-      border-radius: 12px;
-      transition: all 0.3s;
-      border: 2px solid transparent;
-
-      &.enabled {
-        border-color: #67c23a;
-      }
-
-      &.has-issue {
-        border-color: #e6a23c;
-      }
-
-      &:hover {
-        transform: translateY(-4px);
-        box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
-      }
-
-      .plugin-header {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        margin-bottom: 16px;
-        padding-bottom: 16px;
-        border-bottom: 1px solid #ebeef5;
-
-        .plugin-icon {
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          width: 60px;
-          height: 60px;
-          background: #f5f7fa;
-          border-radius: 12px;
-        }
-      }
-
-      .plugin-info {
-        .plugin-title {
-          margin: 0 0 8px 0;
-          font-size: 18px;
-          font-weight: 600;
-          color: #303133;
-        }
-
-        .plugin-description {
-          margin: 0 0 12px 0;
-          color: #606266;
-          font-size: 14px;
-          line-height: 1.6;
-          min-height: 40px;
-        }
-
-        .plugin-meta {
-          display: flex;
-          gap: 8px;
-          margin-bottom: 12px;
-        }
-
-        .plugin-author {
-          display: flex;
-          align-items: center;
-          gap: 6px;
-          color: #909399;
-          font-size: 13px;
-        }
-      }
-
-      .plugin-actions {
-        display: flex;
-        gap: 8px;
-        margin-top: 16px;
-        padding-top: 16px;
-        border-top: 1px solid #ebeef5;
-      }
-    }
-  }
-
-  .plugin-detail {
-    .detail-section {
-      margin-top: 24px;
-
-      h4 {
-        margin: 0 0 12px 0;
-        font-size: 16px;
-        font-weight: 600;
-        color: #303133;
-      }
-
-      p {
-        margin: 0;
-        color: #606266;
-        line-height: 1.6;
-      }
-    }
-  }
-
-  .plugin-settings {
-    max-height: 500px;
-    overflow-y: auto;
-  }
-}
-</style>
-

@@ -1,105 +1,140 @@
 <template>
-  <div class="vip-page">
-    <el-card shadow="hover" class="page-header">
-      <h1>👑 VIP会员</h1>
-      <p class="subtitle">升级VIP，享受专属特权</p>
-    </el-card>
+  <div class="space-y-6">
+    <Card class="bg-card text-card-foreground text-center py-6">
+      <CardHeader>
+        <CardTitle class="text-3xl">👑 VIP会员</CardTitle>
+        <CardDescription class="text-base">升级VIP，享受专属特权</CardDescription>
+      </CardHeader>
+    </Card>
 
     <!-- 当前会员状态 -->
-    <el-card shadow="hover" class="current-vip" v-if="userVip.level > 0">
-      <div class="vip-status">
-        <div class="vip-badge">
-          <span class="crown">👑</span>
-          <span class="level">VIP {{ userVip.level }}</span>
+    <Card v-if="userVip.level > 0" class="bg-gradient-to-br from-indigo-500 to-purple-600 text-white border-none shadow-lg">
+      <CardContent class="flex items-center gap-6 p-6">
+        <div class="flex flex-col items-center gap-2">
+          <span class="text-5xl">👑</span>
+          <span class="text-2xl font-bold">VIP {{ userVip.level }}</span>
         </div>
-        <div class="vip-info">
-          <div class="expire-info">
-            到期时间: {{ userVip.expire_date }}
+        <div class="flex-1 space-y-3">
+          <div class="text-lg">到期时间: {{ userVip.expire_date }}</div>
+          <div class="space-y-1">
+            <div class="flex justify-between text-sm opacity-90">
+              <span>进度</span>
+              <span>剩余{{ remainingDays }}天</span>
+            </div>
+            <Progress :model-value="daysProgress" class="h-2 bg-white/20" />
           </div>
-          <el-progress 
-            :percentage="daysProgress" 
-            :format="() => `剩余${remainingDays}天`"
-            :color="progressColor"
-          />
         </div>
-      </div>
-    </el-card>
+      </CardContent>
+    </Card>
 
     <!-- VIP套餐 -->
-    <el-row :gutter="20" style="margin-top: 20px;">
-      <el-col :span="8" v-for="plan in vipPlans" :key="plan.level">
-        <el-card 
-          shadow="hover" 
-          class="vip-card"
-          :class="{ 
-            recommended: plan.recommended,
-            current: userVip.level === plan.level
-          }"
-        >
-          <div class="plan-badge" v-if="plan.recommended">🔥 推荐</div>
-          <div class="plan-badge current-badge" v-if="userVip.level === plan.level">✓ 当前</div>
-          
-          <div class="plan-header">
-            <div class="plan-icon">{{ plan.icon }}</div>
-            <h2>{{ plan.name }}</h2>
-            <div class="plan-price">
-              <span class="price">¥{{ plan.price }}</span>
-              <span class="period">/{{ plan.period }}</span>
-            </div>
+    <div class="grid gap-6 md:grid-cols-3">
+      <Card
+        v-for="plan in vipPlans"
+        :key="plan.level"
+        class="relative flex flex-col transition-all hover:-translate-y-2 hover:shadow-lg"
+        :class="{
+          'border-primary shadow-md': plan.recommended,
+          'border-emerald-500': userVip.level === plan.level
+        }"
+      >
+        <div v-if="plan.recommended" class="absolute top-3 right-3 rounded-full bg-primary px-3 py-1 text-xs font-bold text-primary-foreground">
+          🔥 推荐
+        </div>
+        <div v-if="userVip.level === plan.level" class="absolute top-3 right-3 rounded-full bg-emerald-500 px-3 py-1 text-xs font-bold text-white">
+          ✓ 当前
+        </div>
+
+        <CardHeader class="text-center pb-2">
+          <div class="text-6xl mb-4">{{ plan.icon }}</div>
+          <CardTitle class="text-2xl">{{ plan.name }}</CardTitle>
+          <div class="flex items-baseline justify-center gap-1 mt-2">
+            <span class="text-3xl font-bold text-primary">¥{{ plan.price }}</span>
+            <span class="text-muted-foreground">/{{ plan.period }}</span>
           </div>
+        </CardHeader>
 
-          <el-divider />
-
-          <div class="plan-features">
-            <div class="feature" v-for="feature in plan.features" :key="feature">
-              <el-icon color="#67c23a"><Check /></el-icon>
+        <CardContent class="flex-1">
+          <div class="space-y-3">
+            <div v-for="feature in plan.features" :key="feature" class="flex items-center gap-2 text-sm">
+              <Check class="h-4 w-4 text-emerald-500 shrink-0" />
               <span>{{ feature }}</span>
             </div>
           </div>
+        </CardContent>
 
-          <el-button 
-            :type="plan.recommended ? 'primary' : 'default'"
-            size="large"
-            style="width: 100%; margin-top: 20px;"
-            @click="handleSubscribe(plan)"
+        <CardFooter>
+          <Button
+            :variant="plan.recommended ? 'default' : 'outline'"
+            size="lg"
+            class="w-full"
             :disabled="userVip.level >= plan.level"
+            @click="handleSubscribe(plan)"
           >
             {{ userVip.level >= plan.level ? '已订阅' : '立即订阅' }}
-          </el-button>
-        </el-card>
-      </el-col>
-    </el-row>
+          </Button>
+        </CardFooter>
+      </Card>
+    </div>
 
     <!-- VIP特权说明 -->
-    <el-card shadow="hover" style="margin-top: 20px;" header="VIP特权详细说明">
-      <el-collapse>
-        <el-collapse-item title="🚀 任务优先执行" name="1">
-          <p>VIP用户的任务将获得更高的执行优先级，更快完成任务</p>
-        </el-collapse-item>
-        <el-collapse-item title="💎 专属浏览器配置" name="2">
-          <p>获得性能更好、稳定性更高的浏览器实例配置</p>
-        </el-collapse-item>
-        <el-collapse-item title="📊 更多并发任务" name="3">
-          <p>可以同时运行更多数量的任务，提升工作效率</p>
-        </el-collapse-item>
-        <el-collapse-item title="🎁 每日任务奖励" name="4">
-          <p>完成每日任务可获得额外奖励金币</p>
-        </el-collapse-item>
-        <el-collapse-item title="👨‍💼 专属客服支持" name="5">
-          <p>享受一对一专属客服支持，问题快速响应</p>
-        </el-collapse-item>
-        <el-collapse-item title="💰 充值优惠折扣" name="6">
-          <p>充值时可享受专属折扣优惠</p>
-        </el-collapse-item>
-      </el-collapse>
-    </el-card>
+    <Card class="bg-card text-card-foreground">
+      <CardHeader>
+        <CardTitle>VIP特权详细说明</CardTitle>
+      </CardHeader>
+      <CardContent>
+        <Accordion type="single" collapsible class="w-full">
+          <AccordionItem value="item-1">
+            <AccordionTrigger>🚀 任务优先执行</AccordionTrigger>
+            <AccordionContent>VIP用户的任务将获得更高的执行优先级，更快完成任务</AccordionContent>
+          </AccordionItem>
+          <AccordionItem value="item-2">
+            <AccordionTrigger>💎 专属浏览器配置</AccordionTrigger>
+            <AccordionContent>获得性能更好、稳定性更高的浏览器实例配置</AccordionContent>
+          </AccordionItem>
+          <AccordionItem value="item-3">
+            <AccordionTrigger>📊 更多并发任务</AccordionTrigger>
+            <AccordionContent>可以同时运行更多数量的任务，提升工作效率</AccordionContent>
+          </AccordionItem>
+          <AccordionItem value="item-4">
+            <AccordionTrigger>🎁 每日任务奖励</AccordionTrigger>
+            <AccordionContent>完成每日任务可获得额外奖励金币</AccordionContent>
+          </AccordionItem>
+          <AccordionItem value="item-5">
+            <AccordionTrigger>👨‍💼 专属客服支持</AccordionTrigger>
+            <AccordionContent>享受一对一专属客服支持，问题快速响应</AccordionContent>
+          </AccordionItem>
+          <AccordionItem value="item-6">
+            <AccordionTrigger>💰 充值优惠折扣</AccordionTrigger>
+            <AccordionContent>充值时可享受专属折扣优惠</AccordionContent>
+          </AccordionItem>
+        </Accordion>
+      </CardContent>
+    </Card>
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, computed } from 'vue'
-import { ElMessage } from 'element-plus'
-import { Check } from '@element-plus/icons-vue'
+import { ElMessage } from '@/lib/element'
+import { Check } from 'lucide-vue-next'
+
+import { Button } from '@/components/ui/button'
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardFooter,
+  CardHeader,
+  CardTitle,
+} from '@/components/ui/card'
+import { Progress } from '@/components/ui/progress'
+import {
+  Accordion,
+  AccordionContent,
+  AccordionItem,
+  AccordionTrigger,
+} from '@/components/ui/accordion'
 
 const userVip = ref({
   level: 1,
@@ -173,161 +208,8 @@ const daysProgress = computed(() => {
   return Math.max(0, Math.min(100, (used / total) * 100))
 })
 
-const progressColor = computed(() => {
-  if (remainingDays.value < 7) return '#f56c6c'
-  if (remainingDays.value < 15) return '#e6a23c'
-  return '#67c23a'
-})
-
 const handleSubscribe = (plan: any) => {
   ElMessage.success(`准备订阅 ${plan.name}，价格: ¥${plan.price}`)
   // TODO: 调用订阅API
 }
 </script>
-
-<style scoped lang="scss">
-.vip-page {
-  .page-header {
-    margin-bottom: 20px;
-    text-align: center;
-
-    h1 {
-      margin: 0 0 8px 0;
-      font-size: 32px;
-    }
-
-    .subtitle {
-      margin: 0;
-      color: #909399;
-      font-size: 16px;
-    }
-  }
-
-  .current-vip {
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-    color: white;
-
-    .vip-status {
-      display: flex;
-      align-items: center;
-      gap: 24px;
-
-      .vip-badge {
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        gap: 8px;
-
-        .crown {
-          font-size: 48px;
-        }
-
-        .level {
-          font-size: 24px;
-          font-weight: bold;
-        }
-      }
-
-      .vip-info {
-        flex: 1;
-
-        .expire-info {
-          margin-bottom: 12px;
-          font-size: 16px;
-        }
-      }
-    }
-  }
-
-  .vip-card {
-    position: relative;
-    transition: all 0.3s;
-    height: 100%;
-    display: flex;
-    flex-direction: column;
-
-    :deep(.el-card__body) {
-      flex: 1;
-      display: flex;
-      flex-direction: column;
-    }
-
-    &:hover {
-      transform: translateY(-8px);
-    }
-
-    &.recommended {
-      border: 2px solid #409eff;
-      box-shadow: 0 0 20px rgba(64, 158, 255, 0.3);
-    }
-
-    &.current {
-      border: 2px solid #67c23a;
-    }
-
-    .plan-badge {
-      position: absolute;
-      top: 12px;
-      right: 12px;
-      background: #409eff;
-      color: white;
-      padding: 4px 12px;
-      border-radius: 12px;
-      font-size: 12px;
-      font-weight: bold;
-
-      &.current-badge {
-        background: #67c23a;
-      }
-    }
-
-    .plan-header {
-      text-align: center;
-
-      .plan-icon {
-        font-size: 64px;
-        margin-bottom: 16px;
-      }
-
-      h2 {
-        margin: 0 0 16px 0;
-        font-size: 24px;
-      }
-
-      .plan-price {
-        .price {
-          font-size: 36px;
-          font-weight: bold;
-          color: #f56c6c;
-        }
-
-        .period {
-          font-size: 16px;
-          color: #909399;
-        }
-      }
-    }
-
-    .plan-features {
-      flex: 1;
-      min-height: 240px;
-      
-      .feature {
-        display: flex;
-        align-items: center;
-        gap: 8px;
-        margin-bottom: 12px;
-        font-size: 14px;
-      }
-    }
-  }
-
-  .el-collapse {
-    :deep(.el-collapse-item__header) {
-      font-size: 16px;
-      font-weight: bold;
-    }
-  }
-}
-</style>
-

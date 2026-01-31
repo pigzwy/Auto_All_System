@@ -1,209 +1,209 @@
 <template>
-  <div class="google-business-dashboard">
-    <el-page-header @back="$router.push('/admin')" content="Google Business 插件仪表板" />
-    
-    <el-row :gutter="20" class="stats-row">
-      <!-- 账号统计 -->
-      <el-col :span="6">
-        <el-card shadow="hover" class="stat-card">
-          <div class="stat-icon" style="background: #409EFF">
-            <el-icon :size="30"><User /></el-icon>
-          </div>
-          <div class="stat-info">
-            <div class="stat-value">{{ accountStats.total || 0 }}</div>
-            <div class="stat-label">总账号数</div>
-          </div>
-          <div class="stat-details">
-            <span>待验证: {{ accountStats.pending || 0 }}</span>
-            <span>已验证: {{ accountStats.verified || 0 }}</span>
-            <span>已绑卡: {{ accountStats.subscribed || 0 }}</span>
-          </div>
-        </el-card>
-      </el-col>
+  <div class="space-y-6 p-5">
+    <Card class="shadow-sm">
+      <CardContent class="px-4 py-3">
+        <PageHeader @back="$router.push('/admin')" content="Google Business 插件仪表板" />
+      </CardContent>
+    </Card>
 
-      <!-- 任务统计 -->
-      <el-col :span="6">
-        <el-card shadow="hover" class="stat-card">
-          <div class="stat-icon" style="background: #67C23A">
-            <el-icon :size="30"><DocumentChecked /></el-icon>
-          </div>
-          <div class="stat-info">
-            <div class="stat-value">{{ taskStats.total || 0 }}</div>
-            <div class="stat-label">总任务数</div>
-          </div>
-          <div class="stat-details">
-            <span>运行中: {{ taskStats.running || 0 }}</span>
-            <span>已完成: {{ taskStats.completed || 0 }}</span>
-            <span>失败: {{ taskStats.failed || 0 }}</span>
-          </div>
-        </el-card>
-      </el-col>
-
-      <!-- 卡信息统计 -->
-      <el-col :span="6">
-        <el-card shadow="hover" class="stat-card">
-          <div class="stat-icon" style="background: #F56C6C">
-            <el-icon :size="30"><CreditCard /></el-icon>
-          </div>
-          <div class="stat-info">
-            <div class="stat-value">{{ cardStats.total || 0 }}</div>
-            <div class="stat-label">总卡片数</div>
-          </div>
-          <div class="stat-details">
-            <span>可用: {{ cardStats.active || 0 }}</span>
-            <span>已用: {{ cardStats.used || 0 }}</span>
-            <span>使用次数: {{ cardStats.times_used || 0 }}</span>
-          </div>
-        </el-card>
-      </el-col>
-
-      <!-- 费用统计 -->
-      <el-col :span="6">
-        <el-card shadow="hover" class="stat-card">
-          <div class="stat-icon" style="background: #E6A23C">
-            <el-icon :size="30"><Coin /></el-icon>
-          </div>
-          <div class="stat-info">
-            <div class="stat-value">{{ costStats.total_cost || 0 }}</div>
-            <div class="stat-label">总费用（积分）</div>
-          </div>
-          <div class="stat-details">
-            <span>今日: {{ costStats.today_cost || 0 }}</span>
-            <span>本周: {{ costStats.week_cost || 0 }}</span>
-            <span>本月: {{ costStats.month_cost || 0 }}</span>
-          </div>
-        </el-card>
-      </el-col>
-    </el-row>
-
-    <!-- 快速操作 -->
-    <el-row :gutter="20" class="action-row">
-      <el-col :span="24">
-        <el-card>
-          <template #header>
-            <div class="card-header">
-              <span>快速操作</span>
+    <div class="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-4">
+      <Card class="relative overflow-hidden shadow-sm">
+        <CardContent class="p-6 pb-16">
+          <div class="flex items-center gap-4">
+            <div class="flex h-14 w-14 items-center justify-center rounded-xl bg-primary text-primary-foreground">
+              <Icon :size="30"><User /></Icon>
             </div>
-          </template>
-          <div class="quick-actions">
-            <el-button type="primary" @click="$router.push('/admin/google-business/accounts')">
-              <el-icon><UserFilled /></el-icon>
-              管理账号
-            </el-button>
-            <el-button type="success" @click="$router.push('/admin/google-business/tasks/create')">
-              <el-icon><Plus /></el-icon>
-              创建任务
-            </el-button>
-            <el-button type="warning" @click="$router.push('/admin/google-business/cards')">
-              <el-icon><CreditCard /></el-icon>
-              管理卡片
-            </el-button>
-            <el-button type="info" @click="$router.push('/admin/google-business/tasks')">
-              <el-icon><List /></el-icon>
-              查看任务
-            </el-button>
+            <div class="min-w-0">
+              <div class="text-2xl font-bold leading-none text-foreground">{{ accountStats.total || 0 }}</div>
+              <div class="mt-1 text-sm text-muted-foreground">总账号数</div>
+            </div>
           </div>
-        </el-card>
-      </el-col>
-    </el-row>
+        </CardContent>
+        <div class="absolute bottom-0 left-0 right-0 flex justify-between gap-2 bg-muted/30 px-6 py-3 text-xs text-muted-foreground">
+          <span>待验证: {{ accountStats.pending || 0 }}</span>
+          <span>已验证: {{ accountStats.verified || 0 }}</span>
+          <span>已绑卡: {{ accountStats.subscribed || 0 }}</span>
+        </div>
+      </Card>
 
-    <!-- 任务趋势图表 -->
-    <el-row :gutter="20">
-      <el-col :span="12">
-        <el-card>
-          <template #header>
-            <div class="card-header">
-              <span>任务趋势（最近7天）</span>
-              <el-radio-group v-model="trendGroupBy" size="small" @change="loadTaskTrends">
-                <el-radio-button label="day">按天</el-radio-button>
-                <el-radio-button label="week">按周</el-radio-button>
-                <el-radio-button label="month">按月</el-radio-button>
-              </el-radio-group>
+      <Card class="relative overflow-hidden shadow-sm">
+        <CardContent class="p-6 pb-16">
+          <div class="flex items-center gap-4">
+            <div class="flex h-14 w-14 items-center justify-center rounded-xl bg-emerald-500 text-white">
+              <Icon :size="30"><DocumentChecked /></Icon>
             </div>
-          </template>
-          <div ref="taskTrendChart" style="height: 300px"></div>
-        </el-card>
-      </el-col>
+            <div class="min-w-0">
+              <div class="text-2xl font-bold leading-none text-foreground">{{ taskStats.total || 0 }}</div>
+              <div class="mt-1 text-sm text-muted-foreground">总任务数</div>
+            </div>
+          </div>
+        </CardContent>
+        <div class="absolute bottom-0 left-0 right-0 flex justify-between gap-2 bg-muted/30 px-6 py-3 text-xs text-muted-foreground">
+          <span>运行中: {{ taskStats.running || 0 }}</span>
+          <span>已完成: {{ taskStats.completed || 0 }}</span>
+          <span>失败: {{ taskStats.failed || 0 }}</span>
+        </div>
+      </Card>
 
-      <el-col :span="12">
-        <el-card>
-          <template #header>
-            <div class="card-header">
-              <span>费用统计（最近7天）</span>
-              <el-radio-group v-model="costGroupBy" size="small" @change="loadCostStats">
-                <el-radio-button label="day">按天</el-radio-button>
-                <el-radio-button label="week">按周</el-radio-button>
-                <el-radio-button label="month">按月</el-radio-button>
-              </el-radio-group>
+      <Card class="relative overflow-hidden shadow-sm">
+        <CardContent class="p-6 pb-16">
+          <div class="flex items-center gap-4">
+            <div class="flex h-14 w-14 items-center justify-center rounded-xl bg-rose-500 text-white">
+              <Icon :size="30"><CreditCard /></Icon>
             </div>
-          </template>
-          <div ref="costStatsChart" style="height: 300px"></div>
-        </el-card>
-      </el-col>
-    </el-row>
+            <div class="min-w-0">
+              <div class="text-2xl font-bold leading-none text-foreground">{{ cardStats.total || 0 }}</div>
+              <div class="mt-1 text-sm text-muted-foreground">总卡片数</div>
+            </div>
+          </div>
+        </CardContent>
+        <div class="absolute bottom-0 left-0 right-0 flex justify-between gap-2 bg-muted/30 px-6 py-3 text-xs text-muted-foreground">
+          <span>可用: {{ cardStats.active || 0 }}</span>
+          <span>已用: {{ cardStats.used || 0 }}</span>
+          <span>使用次数: {{ cardStats.times_used || 0 }}</span>
+        </div>
+      </Card>
 
-    <!-- 最近任务 -->
-    <el-row>
-      <el-col :span="24">
-        <el-card>
-          <template #header>
-            <div class="card-header">
-              <span>最近任务</span>
-              <el-button text @click="$router.push('/admin/google-business/tasks')">
-                查看全部
-                <el-icon><ArrowRight /></el-icon>
-              </el-button>
+      <Card class="relative overflow-hidden shadow-sm">
+        <CardContent class="p-6 pb-16">
+          <div class="flex items-center gap-4">
+            <div class="flex h-14 w-14 items-center justify-center rounded-xl bg-amber-500 text-white">
+              <Icon :size="30"><Coin /></Icon>
             </div>
-          </template>
-          <el-table :data="recentTasks" style="width: 100%">
-            <el-table-column prop="id" label="ID" width="80" />
-            <el-table-column prop="task_type" label="任务类型" width="120">
+            <div class="min-w-0">
+              <div class="text-2xl font-bold leading-none text-foreground">{{ costStats.total_cost || 0 }}</div>
+              <div class="mt-1 text-sm text-muted-foreground">总费用（积分）</div>
+            </div>
+          </div>
+        </CardContent>
+        <div class="absolute bottom-0 left-0 right-0 flex justify-between gap-2 bg-muted/30 px-6 py-3 text-xs text-muted-foreground">
+          <span>今日: {{ costStats.today_cost || 0 }}</span>
+          <span>本周: {{ costStats.week_cost || 0 }}</span>
+          <span>本月: {{ costStats.month_cost || 0 }}</span>
+        </div>
+      </Card>
+    </div>
+
+    <Card class="shadow-sm">
+      <CardHeader class="pb-3">
+        <CardTitle class="text-base">快速操作</CardTitle>
+      </CardHeader>
+      <CardContent>
+        <div class="grid grid-cols-2 gap-3 sm:grid-cols-4">
+          <Button  variant="default" type="button" class="w-full" @click="$router.push('/admin/google-business/accounts')">
+            <Icon><UserFilled /></Icon>
+            <span class="ml-1.5">管理账号</span>
+          </Button>
+          <Button  variant="default" type="button" class="w-full" @click="$router.push('/admin/google-business/tasks/create')">
+            <Icon><Plus /></Icon>
+            <span class="ml-1.5">创建任务</span>
+          </Button>
+          <Button  variant="secondary" type="button" class="w-full" @click="$router.push('/admin/google-business/cards')">
+            <Icon><CreditCard /></Icon>
+            <span class="ml-1.5">管理卡片</span>
+          </Button>
+          <Button  variant="secondary" type="button" class="w-full" @click="$router.push('/admin/google-business/tasks')">
+            <Icon><List /></Icon>
+            <span class="ml-1.5">查看任务</span>
+          </Button>
+        </div>
+      </CardContent>
+    </Card>
+
+    <div class="grid grid-cols-1 gap-5 lg:grid-cols-2">
+      <Card class="shadow-sm">
+        <CardHeader class="pb-3">
+          <div class="flex items-center justify-between gap-4">
+            <CardTitle class="text-base">任务趋势（最近7天）</CardTitle>
+            <RadioGroup v-model="trendGroupBy" size="small" @change="loadTaskTrends">
+              <RadioButton label="day">按天</RadioButton>
+              <RadioButton label="week">按周</RadioButton>
+              <RadioButton label="month">按月</RadioButton>
+            </RadioGroup>
+          </div>
+        </CardHeader>
+        <CardContent>
+          <div ref="taskTrendChart" class="h-[300px]" />
+        </CardContent>
+      </Card>
+
+      <Card class="shadow-sm">
+        <CardHeader class="pb-3">
+          <div class="flex items-center justify-between gap-4">
+            <CardTitle class="text-base">费用统计（最近7天）</CardTitle>
+            <RadioGroup v-model="costGroupBy" size="small" @change="loadCostStats">
+              <RadioButton label="day">按天</RadioButton>
+              <RadioButton label="week">按周</RadioButton>
+              <RadioButton label="month">按月</RadioButton>
+            </RadioGroup>
+          </div>
+        </CardHeader>
+        <CardContent>
+          <div ref="costStatsChart" class="h-[300px]" />
+        </CardContent>
+      </Card>
+    </div>
+
+    <Card class="shadow-sm">
+      <CardHeader class="pb-3">
+        <div class="flex items-center justify-between gap-4">
+          <CardTitle class="text-base">最近任务</CardTitle>
+          <Button text @click="$router.push('/admin/google-business/tasks')">
+            查看全部
+            <Icon><ArrowRight /></Icon>
+          </Button>
+        </div>
+      </CardHeader>
+      <CardContent>
+        <DataTable :data="recentTasks" class="w-full">
+            <DataColumn prop="id" label="ID" width="80" />
+            <DataColumn prop="task_type" label="任务类型" width="120">
               <template #default="{ row }">
-                <el-tag :type="getTaskTypeColor(row.task_type)" size="small">
+                <Tag :type="getTaskTypeColor(row.task_type)" size="small">
                   {{ getTaskTypeName(row.task_type) }}
-                </el-tag>
+                </Tag>
               </template>
-            </el-table-column>
-            <el-table-column prop="total_count" label="账号数" width="100" />
-            <el-table-column prop="success_count" label="成功" width="80" />
-            <el-table-column prop="failed_count" label="失败" width="80" />
-            <el-table-column prop="status" label="状态" width="100">
+            </DataColumn>
+            <DataColumn prop="total_count" label="账号数" width="100" />
+            <DataColumn prop="success_count" label="成功" width="80" />
+            <DataColumn prop="failed_count" label="失败" width="80" />
+            <DataColumn prop="status" label="状态" width="100">
               <template #default="{ row }">
-                <el-tag :type="getStatusColor(row.status)" size="small">
+                <Tag :type="getStatusColor(row.status)" size="small">
                   {{ getStatusName(row.status) }}
-                </el-tag>
+                </Tag>
               </template>
-            </el-table-column>
-            <el-table-column prop="total_cost" label="费用" width="100">
+            </DataColumn>
+            <DataColumn prop="total_cost" label="费用" width="100">
               <template #default="{ row }">
-                <span style="color: #E6A23C; font-weight: bold;">{{ row.total_cost }}</span>
+                <span class="font-semibold text-amber-600">{{ row.total_cost }}</span>
               </template>
-            </el-table-column>
-            <el-table-column prop="created_at" label="创建时间" width="180" />
-            <el-table-column label="操作" width="150">
+            </DataColumn>
+            <DataColumn prop="created_at" label="创建时间" width="180" />
+            <DataColumn label="操作" width="150">
               <template #default="{ row }">
-                <el-button size="small" @click="viewTask(row.id)">查看</el-button>
-                <el-button v-if="row.status === 'running'" size="small" type="danger" @click="cancelTask(row.id)">
+                <Button size="small" @click="viewTask(row.id)">查看</Button>
+                <Button v-if="row.status === 'running'" size="small"  variant="destructive" type="button" @click="cancelTask(row.id)">
                   取消
-                </el-button>
+                </Button>
               </template>
-            </el-table-column>
-          </el-table>
-        </el-card>
-      </el-col>
-    </el-row>
+            </DataColumn>
+          </DataTable>
+      </CardContent>
+    </Card>
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted } from 'vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage } from '@/lib/element'
 import { 
   User, 
   DocumentChecked, 
   CreditCard, 
   Plus
-} from '@element-plus/icons-vue'
+} from '@/icons'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { useRouter } from 'vue-router'
 // import * as echarts from 'echarts'
 import {
@@ -446,96 +446,3 @@ onMounted(async () => {
   })
 })
 </script>
-
-<style scoped lang="scss">
-.google-business-dashboard {
-  padding: 20px;
-
-  .el-page-header {
-    margin-bottom: 20px;
-  }
-
-  .stats-row {
-    margin-bottom: 20px;
-  }
-
-  .stat-card {
-    position: relative;
-    overflow: hidden;
-
-    :deep(.el-card__body) {
-      padding: 20px;
-      display: flex;
-      align-items: center;
-    }
-
-    .stat-icon {
-      width: 60px;
-      height: 60px;
-      border-radius: 10px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      color: white;
-      margin-right: 15px;
-    }
-
-    .stat-info {
-      flex: 1;
-
-      .stat-value {
-        font-size: 28px;
-        font-weight: bold;
-        color: #303133;
-        margin-bottom: 5px;
-      }
-
-      .stat-label {
-        font-size: 14px;
-        color: #909399;
-      }
-    }
-
-    .stat-details {
-      position: absolute;
-      bottom: 0;
-      left: 0;
-      right: 0;
-      background: #f5f7fa;
-      padding: 8px 20px;
-      display: flex;
-      justify-content: space-between;
-      font-size: 12px;
-      color: #606266;
-    }
-  }
-
-  .action-row {
-    margin-bottom: 20px;
-
-    .quick-actions {
-      display: flex;
-      gap: 10px;
-
-      .el-button {
-        flex: 1;
-      }
-    }
-  }
-
-  .card-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-  }
-
-  .el-row {
-    margin-bottom: 20px;
-
-    &:last-child {
-      margin-bottom: 0;
-    }
-  }
-}
-</style>
-

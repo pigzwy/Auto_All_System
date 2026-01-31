@@ -1,103 +1,108 @@
 <template>
-  <div class="google-business-task-create">
-    <el-page-header @back="$router.push('/admin/google-business/tasks')" content="创建任务" />
+  <div class="space-y-6 p-5">
+    <Card class="shadow-sm">
+      <CardContent class="px-4 py-3">
+        <PageHeader @back="$router.push('/admin/google-business/tasks')" content="创建任务" />
+      </CardContent>
+    </Card>
 
-    <el-card>
-      <el-form :model="form" :rules="rules" ref="formRef" label-width="120px">
+    <Card class="shadow-sm">
+      <CardContent class="p-6">
+        <SimpleForm :model="form" :rules="rules" ref="formRef" label-width="120px">
         <!-- 任务类型 -->
-        <el-form-item label="任务类型" prop="task_type">
-          <el-radio-group v-model="form.task_type" @change="handleTaskTypeChange">
-            <el-radio-button label="login">
-              <div class="radio-content">
-                <div class="radio-title">登录 (1积分)</div>
-                <div class="radio-desc">自动登录Google账号</div>
+        <SimpleFormItem label="任务类型" prop="task_type">
+          <RadioGroup v-model="form.task_type" @change="handleTaskTypeChange">
+            <RadioButton label="login">
+              <div class="space-y-1 p-2 text-left">
+                <div class="font-semibold">登录 (1积分)</div>
+                <div class="text-xs text-muted-foreground">自动登录Google账号</div>
               </div>
-            </el-radio-button>
-            <el-radio-button label="get_link">
-              <div class="radio-content">
-                <div class="radio-title">获取链接 (2积分)</div>
-                <div class="radio-desc">获取SheerID验证链接</div>
+            </RadioButton>
+            <RadioButton label="get_link">
+              <div class="space-y-1 p-2 text-left">
+                <div class="font-semibold">获取链接 (2积分)</div>
+                <div class="text-xs text-muted-foreground">获取SheerID验证链接</div>
               </div>
-            </el-radio-button>
-            <el-radio-button label="verify">
-              <div class="radio-content">
-                <div class="radio-title">SheerID验证 (5积分)</div>
-                <div class="radio-desc">批量验证学生资格</div>
+            </RadioButton>
+            <RadioButton label="verify">
+              <div class="space-y-1 p-2 text-left">
+                <div class="font-semibold">SheerID验证 (5积分)</div>
+                <div class="text-xs text-muted-foreground">批量验证学生资格</div>
               </div>
-            </el-radio-button>
-            <el-radio-button label="bind_card">
-              <div class="radio-content">
-                <div class="radio-title">绑卡订阅 (10积分)</div>
-                <div class="radio-desc">绑定卡片并订阅</div>
+            </RadioButton>
+            <RadioButton label="bind_card">
+              <div class="space-y-1 p-2 text-left">
+                <div class="font-semibold">绑卡订阅 (10积分)</div>
+                <div class="text-xs text-muted-foreground">绑定卡片并订阅</div>
               </div>
-            </el-radio-button>
-            <el-radio-button label="one_click">
-              <div class="radio-content">
-                <div class="radio-title">一键到底 (18积分)</div>
-                <div class="radio-desc">登录→获取链接→验证→绑卡</div>
+            </RadioButton>
+            <RadioButton label="one_click">
+              <div class="space-y-1 p-2 text-left">
+                <div class="font-semibold">一键到底 (18积分)</div>
+                <div class="text-xs text-muted-foreground">登录→获取链接→验证→绑卡</div>
               </div>
-            </el-radio-button>
-          </el-radio-group>
-        </el-form-item>
+            </RadioButton>
+          </RadioGroup>
+        </SimpleFormItem>
 
         <!-- 任务配置 -->
-        <el-divider content-position="left">任务配置</el-divider>
+        <Divider content-position="left">任务配置</Divider>
 
         <!-- SheerID API密钥（verify和one_click需要） -->
-        <el-form-item
+        <SimpleFormItem
           v-if="['verify', 'one_click'].includes(form.task_type)"
           label="SheerID API Key"
           prop="config.api_key"
         >
-          <el-input
+          <TextInput
             v-model="form.config.api_key"
             placeholder="请输入SheerID API密钥"
             show-password
           >
             <template #append>
-              <el-button @click="loadApiKey">从配置加载</el-button>
+              <Button @click="loadApiKey">从配置加载</Button>
             </template>
-          </el-input>
-          <div class="form-tip">
+          </TextInput>
+          <div class="mt-2 text-xs text-muted-foreground">
             用于绕过hCaptcha验证，提高成功率
           </div>
-        </el-form-item>
+        </SimpleFormItem>
 
         <!-- 卡片选择（bind_card和one_click需要） -->
-        <el-form-item
+        <SimpleFormItem
           v-if="['bind_card', 'one_click'].includes(form.task_type)"
           label="选择卡片"
           prop="config.card_id"
         >
-          <el-select v-model="form.config.card_id" placeholder="请选择卡片" filterable>
-            <el-option
+          <SelectNative v-model="form.config.card_id" placeholder="请选择卡片" filterable>
+            <SelectOption
               v-for="card in cards"
               :key="card.id"
               :label="`${card.card_number_masked} (可用次数: ${card.max_uses - card.times_used})`"
               :value="card.id"
               :disabled="card.times_used >= card.max_uses || !card.is_active"
             />
-          </el-select>
-          <div class="form-tip">
+          </SelectNative>
+          <div class="mt-2 text-xs text-muted-foreground">
             选择要用于绑卡的信用卡
           </div>
-        </el-form-item>
+        </SimpleFormItem>
 
         <!-- 账号选择 -->
-        <el-divider content-position="left">选择账号</el-divider>
+        <Divider content-position="left">选择账号</Divider>
 
         <!-- 账号筛选 -->
-        <el-form-item label="账号筛选">
-          <el-radio-group v-model="accountFilter" @change="loadAccounts">
-            <el-radio-button label="all">全部账号</el-radio-button>
-            <el-radio-button label="pending">待验证</el-radio-button>
-            <el-radio-button label="verified">已验证未绑卡</el-radio-button>
-            <el-radio-button label="subscribed">已绑卡</el-radio-button>
-          </el-radio-group>
-        </el-form-item>
+        <SimpleFormItem label="账号筛选">
+          <RadioGroup v-model="accountFilter" @change="loadAccounts">
+            <RadioButton label="all">全部账号</RadioButton>
+            <RadioButton label="pending">待验证</RadioButton>
+            <RadioButton label="verified">已验证未绑卡</RadioButton>
+            <RadioButton label="subscribed">已绑卡</RadioButton>
+          </RadioGroup>
+        </SimpleFormItem>
 
-        <el-form-item label="账号列表" prop="account_ids">
-          <el-transfer
+        <SimpleFormItem label="账号列表" prop="account_ids">
+          <Transfer
             v-model="form.account_ids"
             :data="accounts"
             :titles="['可选账号', '已选账号']"
@@ -107,18 +112,18 @@
           >
             <template #default="{ option }">
               <span>{{ option.label }}</span>
-              <span style="margin-left: 10px; color: #909399; font-size: 12px;">
+              <span class="ml-2 text-xs text-muted-foreground">
                 ({{ option.status }})
               </span>
             </template>
-          </el-transfer>
-          <div class="form-tip">
+          </Transfer>
+          <div class="mt-2 text-xs text-muted-foreground">
             已选择 <strong>{{ form.account_ids.length }}</strong> 个账号
           </div>
-        </el-form-item>
+        </SimpleFormItem>
 
         <!-- 费用预估 -->
-        <el-alert
+        <InfoAlert
           :title="`预估费用: ${estimatedCost} 积分`"
           type="info"
           :closable="false"
@@ -131,37 +136,39 @@
             <div>
               选中账号数: {{ form.account_ids.length }}
             </div>
-            <div style="font-weight: bold; margin-top: 10px;">
+            <div class="mt-2 font-semibold">
               总费用: {{ estimatedCost }} 积分
             </div>
           </template>
-        </el-alert>
+        </InfoAlert>
 
         <!-- 提交按钮 -->
-        <el-form-item style="margin-top: 30px;">
-          <el-button type="primary" @click="handleSubmit" :loading="submitting">
-            <el-icon><Check /></el-icon>
+        <SimpleFormItem class="mt-8">
+          <Button  variant="default" type="button" @click="handleSubmit" :loading="submitting">
+            <Icon><Check /></Icon>
             创建任务
-          </el-button>
-          <el-button @click="handleReset">
-            <el-icon><RefreshLeft /></el-icon>
+          </Button>
+          <Button @click="handleReset">
+            <Icon><RefreshLeft /></Icon>
             重置
-          </el-button>
-          <el-button @click="$router.back()">
-            <el-icon><Close /></el-icon>
+          </Button>
+          <Button @click="$router.back()">
+            <Icon><Close /></Icon>
             取消
-          </el-button>
-        </el-form-item>
-      </el-form>
-    </el-card>
+          </Button>
+        </SimpleFormItem>
+        </SimpleForm>
+      </CardContent>
+    </Card>
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage } from '@/lib/element'
 import { useRouter } from 'vue-router'
-import type { FormInstance, FormRules } from 'element-plus'
+import type { ElFormRules } from '@/components/app/symbols'
+import { Card, CardContent } from '@/components/ui/card'
 import {
   getGoogleAccounts,
   getCards,
@@ -170,7 +177,12 @@ import {
 } from '@/api/google_business'
 
 const router = useRouter()
-const formRef = ref<FormInstance>()
+type ElFormExpose = {
+  validate: (cb?: (valid: boolean) => void | Promise<void>) => Promise<boolean>
+  resetFields?: () => void
+}
+
+const formRef = ref<ElFormExpose | null>(null)
 
 // 表单数据
 const form = ref({
@@ -183,7 +195,7 @@ const form = ref({
 })
 
 // 表单验证规则
-const rules: FormRules = {
+const rules: ElFormRules = {
   task_type: [
     { required: true, message: '请选择任务类型', trigger: 'change' }
   ],
@@ -362,7 +374,7 @@ const handleSubmit = async () => {
 // 重置表单
 const handleReset = () => {
   if (formRef.value) {
-    formRef.value.resetFields()
+    formRef.value.resetFields?.()
   }
   form.value = {
     task_type: 'login',
@@ -380,52 +392,13 @@ onMounted(async () => {
 })
 </script>
 
-<style scoped lang="scss">
-.google-business-task-create {
-  padding: 20px;
+<style scoped>
+:deep(.el-radio-button__inner) {
+  padding: 0;
+  height: auto;
+}
 
-  .el-page-header {
-    margin-bottom: 20px;
-  }
-
-  .radio-content {
-    padding: 10px;
-    text-align: left;
-
-    .radio-title {
-      font-weight: bold;
-      margin-bottom: 5px;
-    }
-
-    .radio-desc {
-      font-size: 12px;
-      color: #909399;
-    }
-  }
-
-  :deep(.el-radio-button__inner) {
-    padding: 0;
-    height: auto;
-  }
-
-  .form-tip {
-    font-size: 12px;
-    color: #909399;
-    margin-top: 5px;
-  }
-
-  :deep(.el-transfer) {
-    display: flex;
-    align-items: center;
-
-    .el-transfer-panel {
-      width: 400px;
-    }
-  }
-
-  .el-alert {
-    margin-top: 20px;
-  }
+:deep(.el-transfer .el-transfer-panel) {
+  width: 400px;
 }
 </style>
-

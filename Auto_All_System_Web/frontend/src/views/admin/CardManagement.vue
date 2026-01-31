@@ -1,366 +1,379 @@
 <template>
-  <div class="card-management">
-    <div class="page-header">
-      <h1>虚拟卡管理</h1>
-      <el-button-group>
-        <el-button type="primary" @click="showDialog = true">
-          <el-icon><Plus /></el-icon>
+  <div class="space-y-6">
+    <div class="flex items-end justify-between gap-4">
+      <div>
+        <h1 class="text-2xl font-semibold text-foreground">虚拟卡管理</h1>
+        <p class="mt-1 text-sm text-muted-foreground">卡池维护、批量导入、卡密激活与 API 配置管理。</p>
+      </div>
+      <ButtonGroup>
+        <Button  variant="default" type="button" @click="showDialog = true">
+          <Icon><Plus /></Icon>
           添加虚拟卡
-        </el-button>
-        <el-button type="success" @click="showImportDialog = true">
-          <el-icon><Upload /></el-icon>
+        </Button>
+        <Button  variant="default" type="button" @click="showImportDialog = true">
+          <Icon><Upload /></Icon>
           批量导入
-        </el-button>
-        <el-button type="warning" @click="showRedeemDialog = true">
-          <el-icon><Key /></el-icon>
+        </Button>
+        <Button  variant="secondary" type="button" @click="showRedeemDialog = true">
+          <Icon><Key /></Icon>
           卡密激活
-        </el-button>
-      </el-button-group>
+        </Button>
+      </ButtonGroup>
     </div>
 
-    <el-card shadow="hover">
-      <el-table :data="cards" v-loading="loading" stripe>
-        <el-table-column prop="id" label="ID" width="80" />
-        <el-table-column label="卡号" width="200">
+    <Panel shadow="hover" class="rounded-xl border border-border bg-card text-card-foreground shadow-sm">
+      <div class="overflow-hidden rounded-xl border border-border">
+        <DataTable :data="cards" v-loading="loading" stripe class="w-full">
+        <DataColumn prop="id" label="ID" width="80" />
+        <DataColumn label="卡号" width="200">
           <template #default="{ row }">
-            <span class="font-mono">
+            <span class="font-mono font-medium">
               {{ row.card_number || row.masked_card_number }}
             </span>
           </template>
-        </el-table-column>
-        <el-table-column prop="card_holder" label="持卡人" width="150">
+        </DataColumn>
+        <DataColumn prop="card_holder" label="持卡人" width="150">
           <template #default="{ row }">
             {{ row.card_holder || '-' }}
           </template>
-        </el-table-column>
-        <el-table-column label="有效期" width="100">
+        </DataColumn>
+        <DataColumn label="有效期" width="100">
           <template #default="{ row }">
             {{ String(row.expiry_month).padStart(2, '0') }}/{{ row.expiry_year }}
           </template>
-        </el-table-column>
-        <el-table-column label="卡类型/银行" width="180">
+        </DataColumn>
+        <DataColumn label="卡类型/银行" width="180">
           <template #default="{ row }">
             <div class="flex items-center gap-2">
-              <el-tag size="small" :type="row.card_type === 'visa' ? 'primary' : 'warning'">
+              <Tag size="small" :type="row.card_type === 'visa' ? 'primary' : 'warning'">
                 {{ row.card_type || 'Unknown' }}
-              </el-tag>
-              <span class="text-xs text-gray-500">{{ row.bank_name || '' }}</span>
+              </Tag>
+              <span class="text-xs text-muted-foreground">{{ row.bank_name || '' }}</span>
             </div>
           </template>
-        </el-table-column>
-        <el-table-column label="类型" width="100">
+        </DataColumn>
+        <DataColumn label="类型" width="100">
           <template #default="{ row }">
-            <el-tag :type="row.pool_type === 'public' ? 'primary' : 'success'">
+            <Tag :type="row.pool_type === 'public' ? 'primary' : 'success'">
               {{ row.pool_type_display || (row.pool_type === 'public' ? '公共' : '私有') }}
-            </el-tag>
+            </Tag>
           </template>
-        </el-table-column>
-        <el-table-column label="状态" width="100">
+        </DataColumn>
+        <DataColumn label="状态" width="100">
           <template #default="{ row }">
-            <el-tag :type="getStatusType(row.status)">{{ row.status_display || row.status }}</el-tag>
+            <Tag :type="getStatusType(row.status)">{{ row.status_display || row.status }}</Tag>
           </template>
-        </el-table-column>
-        <el-table-column label="剩余时间" width="120">
+        </DataColumn>
+        <DataColumn label="剩余时间" width="120">
           <template #default="{ row }">
             <template v-if="row.key_expire_time">
               <span v-if="isExpired(row.key_expire_time)" class="text-red-500">已过期</span>
               <span v-else class="text-green-600">{{ formatCountdown(row.key_expire_time) }}</span>
             </template>
-            <span v-else class="text-gray-400">-</span>
+            <span v-else class="text-muted-foreground">-</span>
           </template>
-        </el-table-column>
-        <el-table-column label="使用次数" width="120">
+        </DataColumn>
+        <DataColumn label="使用次数" width="120">
           <template #default="{ row }">
             <span>{{ row.use_count }}</span>
-            <span class="text-gray-400"> / {{ row.max_use_count || '∞' }}</span>
+            <span class="text-muted-foreground"> / {{ row.max_use_count || '∞' }}</span>
           </template>
-        </el-table-column>
-        <el-table-column label="账单地址" min-width="200">
+        </DataColumn>
+        <DataColumn label="账单地址" min-width="200">
           <template #default="{ row }">
             <div v-if="row.billing_address && Object.keys(row.billing_address).length > 0" class="text-xs">
               <div>{{ row.billing_address.address_line1 || '-' }}</div>
-              <div class="text-gray-500">
+              <div class="text-muted-foreground">
                 {{ [row.billing_address.city, row.billing_address.state, row.billing_address.postal_code].filter(Boolean).join(', ') }}
               </div>
-              <div class="text-gray-400">{{ row.billing_address.country || '' }}</div>
+              <div class="text-muted-foreground/80">{{ row.billing_address.country || '' }}</div>
             </div>
-            <span v-else class="text-gray">-</span>
+            <span v-else class="text-muted-foreground text-xs">-</span>
           </template>
-        </el-table-column>
-        <el-table-column v-if="showOwnerColumn" label="所属者" width="120">
+        </DataColumn>
+        <DataColumn v-if="showOwnerColumn" label="所属者" width="120">
           <template #default="{ row }">
             <span v-if="row.owner_user">
               {{ row.owner_user_name || `用户${row.owner_user}` }}
             </span>
-            <span v-else class="text-gray">公共卡池</span>
+            <span v-else class="text-muted-foreground text-xs">公共卡池</span>
           </template>
-        </el-table-column>
-        <el-table-column label="操作" width="150" fixed="right">
+        </DataColumn>
+        <DataColumn label="操作" width="150" fixed="right">
           <template #default="{ row }">
-            <div class="operation-buttons">
-              <el-button link type="primary" @click="editCard(row)">编辑</el-button>
-              <el-button link type="danger" @click="deleteCard(row)">删除</el-button>
+            <div class="flex items-center gap-2">
+              <Button link  variant="default" type="button" @click="editCard(row)">编辑</Button>
+              <Button link  variant="destructive" type="button" @click="deleteCard(row)">删除</Button>
             </div>
           </template>
-        </el-table-column>
-      </el-table>
+        </DataColumn>
+        </DataTable>
+      </div>
 
-      <el-pagination
+      <Paginator
         v-model:current-page="currentPage"
         v-model:page-size="pageSize"
         :total="total"
         layout="total, prev, pager, next"
+        class="mt-5 justify-center"
         @current-change="fetchCards"
       />
-    </el-card>
+    </Panel>
 
     <!-- 添加对话框 -->
-    <el-dialog v-model="showDialog" title="添加虚拟卡" width="500px">
-      <el-form :model="cardForm" label-width="100px">
-        <el-form-item label="卡号">
-          <el-input v-model="cardForm.card_number" placeholder="16位卡号" />
-        </el-form-item>
-        <el-form-item label="持卡人">
-          <el-input v-model="cardForm.card_holder" placeholder="持卡人姓名" />
-        </el-form-item>
-        <el-form-item label="过期月份">
-          <el-input-number v-model="cardForm.expiry_month" :min="1" :max="12" />
-        </el-form-item>
-        <el-form-item label="过期年份">
-          <el-input-number v-model="cardForm.expiry_year" :min="2024" :max="2099" />
-        </el-form-item>
-        <el-form-item label="CVV">
-          <el-input v-model="cardForm.cvv" placeholder="3-4位安全码" maxlength="4" />
-        </el-form-item>
-        <el-form-item label="卡池类型">
-          <el-radio-group v-model="cardForm.pool_type">
-            <el-radio label="public">公共卡池</el-radio>
-            <el-radio label="private">私有卡池</el-radio>
-          </el-radio-group>
-        </el-form-item>
-      </el-form>
+    <Modal v-model="showDialog" title="添加虚拟卡" width="500px">
+      <SimpleForm :model="cardForm" label-width="100px">
+        <SimpleFormItem label="卡号">
+          <TextInput v-model="cardForm.card_number" placeholder="16位卡号" />
+        </SimpleFormItem>
+        <SimpleFormItem label="持卡人">
+          <TextInput v-model="cardForm.card_holder" placeholder="持卡人姓名" />
+        </SimpleFormItem>
+        <SimpleFormItem label="过期月份">
+          <NumberInput v-model="cardForm.expiry_month" :min="1" :max="12" />
+        </SimpleFormItem>
+        <SimpleFormItem label="过期年份">
+          <NumberInput v-model="cardForm.expiry_year" :min="2024" :max="2099" />
+        </SimpleFormItem>
+        <SimpleFormItem label="CVV">
+          <TextInput v-model="cardForm.cvv" placeholder="3-4位安全码" maxlength="4" />
+        </SimpleFormItem>
+        <SimpleFormItem label="卡池类型">
+          <RadioGroup v-model="cardForm.pool_type">
+            <Radio label="public">公共卡池</Radio>
+            <Radio label="private">私有卡池</Radio>
+          </RadioGroup>
+        </SimpleFormItem>
+      </SimpleForm>
       <template #footer>
-        <el-button @click="showDialog = false">取消</el-button>
-        <el-button type="primary" @click="handleAddCard">保存</el-button>
+        <Button @click="showDialog = false">取消</Button>
+        <Button  variant="default" type="button" @click="handleAddCard">保存</Button>
       </template>
-    </el-dialog>
+    </Modal>
 
     <!-- 批量导入对话框 -->
-    <el-dialog v-model="showImportDialog" title="批量导入虚拟卡" width="700px">
-      <el-alert type="info" :closable="false" style="margin-bottom: 16px">
+    <Modal v-model="showImportDialog" title="批量导入虚拟卡" width="700px">
+      <InfoAlert type="info" :closable="false" class="mb-4">
         <template #title>
-          <div>格式说明：每行一张卡，格式为 <code>卡号 月份 年份 CVV</code>（空格分隔）</div>
-          <div style="margin-top: 8px">示例：<code>4466164106155628 07 28 694</code></div>
-          <div style="margin-top: 4px; font-size: 12px">💡 4开头自动识别为Visa，5开头自动识别为Master</div>
+          <div>
+            格式说明：每行一张卡，格式为
+            <code class="rounded bg-muted px-1.5 py-0.5 font-mono text-primary">卡号 月份 年份 CVV</code>
+            （空格分隔）
+          </div>
+          <div class="mt-2">
+            示例：
+            <code class="rounded bg-muted px-1.5 py-0.5 font-mono text-primary">4466164106155628 07 28 694</code>
+          </div>
+          <div class="mt-1 text-xs text-muted-foreground">💡 4开头自动识别为Visa，5开头自动识别为Master</div>
         </template>
-      </el-alert>
+      </InfoAlert>
       
-      <el-form :model="importForm" label-width="100px">
-        <el-form-item label="卡片数据">
-          <el-input
+      <SimpleForm :model="importForm" label-width="100px">
+        <SimpleFormItem label="卡片数据">
+          <TextInput
             v-model="importForm.cardsText"
             type="textarea"
             :rows="10"
             placeholder="粘贴卡片数据，每行一张卡&#10;4466164106155628 07 28 694&#10;5481087143137903 01 32 749"
           />
-        </el-form-item>
-        <el-form-item label="卡池类型">
-          <el-radio-group v-model="importForm.pool_type">
-            <el-radio label="public">公共卡池</el-radio>
-            <el-radio label="private">私有卡池</el-radio>
-          </el-radio-group>
-        </el-form-item>
-      </el-form>
+        </SimpleFormItem>
+        <SimpleFormItem label="卡池类型">
+          <RadioGroup v-model="importForm.pool_type">
+            <Radio label="public">公共卡池</Radio>
+            <Radio label="private">私有卡池</Radio>
+          </RadioGroup>
+        </SimpleFormItem>
+      </SimpleForm>
       
       <div v-if="importResult" class="import-result">
-        <el-alert :type="importResult.type" :closable="false">
+        <InfoAlert :type="importResult.type" :closable="false">
           <template #title>
             <div>{{ importResult.message }}</div>
-            <div v-if="importResult.data" style="margin-top: 8px; font-size: 14px">
+            <div v-if="importResult.data" class="mt-2 text-sm">
               总数：{{ importResult.data.total }} | 
               成功：{{ importResult.data.success }} | 
               失败：{{ importResult.data.failed }}
             </div>
           </template>
-        </el-alert>
-        <div v-if="importResult.data?.errors?.length" style="margin-top: 12px">
-          <el-collapse>
-            <el-collapse-item title="查看错误详情" name="errors">
-              <div v-for="(error, index) in importResult.data.errors" :key="index" class="error-item">
+        </InfoAlert>
+        <div v-if="importResult.data?.errors?.length" class="mt-3">
+          <Collapse>
+            <CollapseItem title="查看错误详情" name="errors">
+              <div v-for="(error, index) in importResult.data.errors" :key="index" class="py-2 border-b border-border flex justify-between text-xs">
                 <span>卡号: {{ error.card_number }}</span>
-                <span style="color: #f56c6c">错误: {{ error.error }}</span>
+                <span class="text-destructive">错误: {{ error.error }}</span>
               </div>
-            </el-collapse-item>
-          </el-collapse>
+            </CollapseItem>
+          </Collapse>
         </div>
       </div>
       
       <template #footer>
-        <el-button @click="showImportDialog = false">取消</el-button>
-        <el-button type="primary" @click="handleImport" :loading="importing">
+        <Button @click="showImportDialog = false">取消</Button>
+        <Button  variant="default" type="button" @click="handleImport" :loading="importing">
           {{ importing ? '导入中...' : '开始导入' }}
-        </el-button>
+        </Button>
       </template>
-    </el-dialog>
+    </Modal>
 
     <!-- 卡密激活对话框 -->
-    <el-dialog v-model="showRedeemDialog" title="卡密激活" width="500px" @open="loadApiConfigs">
-      <el-alert type="info" :closable="false" style="margin-bottom: 16px">
+    <Modal v-model="showRedeemDialog" title="卡密激活" width="500px" @open="loadApiConfigs">
+      <InfoAlert type="info" :closable="false" class="mb-4">
         <template #title>
           <div>输入卡密后将调用激活接口获取完整卡信息（包含账单地址）</div>
         </template>
-      </el-alert>
+      </InfoAlert>
       
-      <el-form :model="redeemForm" label-width="100px">
-        <el-form-item label="API 配置">
-          <el-select 
+      <SimpleForm :model="redeemForm" label-width="100px">
+        <SimpleFormItem label="API 配置">
+          <SelectNative 
             v-model="redeemForm.config_id" 
             placeholder="选择 API 配置（默认使用系统默认）"
             clearable
-            style="width: 100%"
+            class="w-full"
           >
-            <el-option 
+            <SelectOption 
               v-for="config in apiConfigs" 
               :key="config.id" 
               :label="config.name + (config.is_default ? ' (默认)' : '')" 
               :value="config.id"
             />
-          </el-select>
+          </SelectNative>
           <div class="text-xs text-gray-400 mt-1">
-            <el-link type="primary" @click="showApiConfigDialog = true">管理 API 配置</el-link>
+            <Link type="primary" @click="showApiConfigDialog = true">管理 API 配置</Link>
           </div>
-        </el-form-item>
-        <el-form-item label="卡密">
-          <el-input 
+        </SimpleFormItem>
+        <SimpleFormItem label="卡密">
+          <TextInput 
             v-model="redeemForm.key_id" 
             placeholder="输入卡密 key_id"
             clearable
           />
-        </el-form-item>
-        <el-form-item label="卡池类型">
-          <el-radio-group v-model="redeemForm.pool_type">
-            <el-radio label="public">公共卡池</el-radio>
-            <el-radio label="private">私有卡池</el-radio>
-          </el-radio-group>
-        </el-form-item>
-      </el-form>
+        </SimpleFormItem>
+        <SimpleFormItem label="卡池类型">
+          <RadioGroup v-model="redeemForm.pool_type">
+            <Radio label="public">公共卡池</Radio>
+            <Radio label="private">私有卡池</Radio>
+          </RadioGroup>
+        </SimpleFormItem>
+      </SimpleForm>
       
       <div v-if="redeemResult" class="redeem-result">
-        <el-alert :type="redeemResult.type" :closable="false">
+        <InfoAlert :type="redeemResult.type" :closable="false">
           <template #title>
             <div>{{ redeemResult.message }}</div>
           </template>
-        </el-alert>
+        </InfoAlert>
         <div v-if="redeemResult.data" class="card-info-preview">
-          <el-descriptions :column="2" border size="small" style="margin-top: 12px">
-            <el-descriptions-item label="卡号">{{ redeemResult.data.masked_card_number }}</el-descriptions-item>
-            <el-descriptions-item label="有效期">{{ String(redeemResult.data.expiry_month).padStart(2, '0') }}/{{ redeemResult.data.expiry_year }}</el-descriptions-item>
-            <el-descriptions-item label="持卡人">{{ redeemResult.data.card_holder || '-' }}</el-descriptions-item>
-            <el-descriptions-item label="卡类型">{{ redeemResult.data.card_type }}</el-descriptions-item>
-            <el-descriptions-item label="地址" :span="2">
+          <Descriptions :column="2" border size="small" class="mt-3">
+            <DescriptionsItem label="卡号">{{ redeemResult.data.masked_card_number }}</DescriptionsItem>
+            <DescriptionsItem label="有效期">{{ String(redeemResult.data.expiry_month).padStart(2, '0') }}/{{ redeemResult.data.expiry_year }}</DescriptionsItem>
+            <DescriptionsItem label="持卡人">{{ redeemResult.data.card_holder || '-' }}</DescriptionsItem>
+            <DescriptionsItem label="卡类型">{{ redeemResult.data.card_type }}</DescriptionsItem>
+            <DescriptionsItem label="地址" :span="2">
               {{ formatBillingAddress(redeemResult.data.billing_address) }}
-            </el-descriptions-item>
-          </el-descriptions>
+            </DescriptionsItem>
+          </Descriptions>
         </div>
       </div>
       
       <template #footer>
-        <el-button @click="showRedeemDialog = false">关闭</el-button>
-        <el-button type="primary" @click="handleRedeem" :loading="redeeming">
+        <Button @click="showRedeemDialog = false">关闭</Button>
+        <Button  variant="default" type="button" @click="handleRedeem" :loading="redeeming">
           {{ redeeming ? '激活中...' : '激活' }}
-        </el-button>
+        </Button>
       </template>
-    </el-dialog>
+    </Modal>
 
     <!-- API 配置管理对话框 -->
-    <el-dialog v-model="showApiConfigDialog" title="API 配置管理" width="800px">
+    <Modal v-model="showApiConfigDialog" title="API 配置管理" width="800px">
       <div class="mb-4">
-        <el-button type="primary" size="small" @click="resetConfigForm(); showAddConfigForm = true">
+        <Button  variant="default" type="button" size="small" @click="resetConfigForm(); showAddConfigForm = true">
           添加配置
-        </el-button>
+        </Button>
       </div>
       
-      <el-table :data="apiConfigs" v-loading="loadingConfigs" stripe size="small">
-        <el-table-column prop="name" label="名称" width="120">
+      <DataTable :data="apiConfigs" v-loading="loadingConfigs" stripe size="small">
+        <DataColumn prop="name" label="名称" width="120">
           <template #default="{ row }">
             {{ row.name }}
-            <el-tag v-if="row.is_default" size="small" type="success" class="ml-1">默认</el-tag>
+            <Tag v-if="row.is_default" size="small" type="success" class="ml-1">默认</Tag>
           </template>
-        </el-table-column>
-        <el-table-column prop="redeem_url" label="激活接口" min-width="200">
+        </DataColumn>
+        <DataColumn prop="redeem_url" label="激活接口" min-width="200">
           <template #default="{ row }">
             <span class="text-xs font-mono">{{ row.redeem_url }}</span>
           </template>
-        </el-table-column>
-        <el-table-column prop="is_active" label="状态" width="80">
+        </DataColumn>
+        <DataColumn prop="is_active" label="状态" width="80">
           <template #default="{ row }">
-            <el-tag :type="row.is_active ? 'success' : 'info'" size="small">
+            <Tag :type="row.is_active ? 'success' : 'info'" size="small">
               {{ row.is_active ? '启用' : '禁用' }}
-            </el-tag>
+            </Tag>
           </template>
-        </el-table-column>
-        <el-table-column label="操作" width="180">
+        </DataColumn>
+        <DataColumn label="操作" width="180">
           <template #default="{ row }">
-            <el-button link type="primary" size="small" @click="editApiConfig(row)">编辑</el-button>
-            <el-button link type="success" size="small" v-if="!row.is_default" @click="setDefaultConfig(row)">设为默认</el-button>
-            <el-button link type="danger" size="small" @click="deleteApiConfig(row)">删除</el-button>
+            <Button link  variant="default" type="button" size="small" @click="editApiConfig(row)">编辑</Button>
+            <Button link  variant="default" type="button" size="small" v-if="!row.is_default" @click="setDefaultConfig(row)">设为默认</Button>
+            <Button link  variant="destructive" type="button" size="small" @click="deleteApiConfig(row)">删除</Button>
           </template>
-        </el-table-column>
-      </el-table>
+        </DataColumn>
+      </DataTable>
       
       <!-- 添加/编辑配置表单 -->
-      <el-dialog v-model="showAddConfigForm" :title="editingConfig ? '编辑配置' : '添加配置'" width="600px" append-to-body>
-        <el-form :model="configForm" label-width="120px">
-          <el-form-item label="配置名称" required>
-            <el-input v-model="configForm.name" placeholder="如: ActCard" />
-          </el-form-item>
-          <el-form-item label="激活接口 URL" required>
-            <el-input v-model="configForm.redeem_url" placeholder="https://actcard.xyz/api/keys/redeem" />
-          </el-form-item>
-          <el-form-item label="查询接口 URL">
-            <el-input v-model="configForm.query_url" placeholder="https://actcard.xyz/api/keys/query" />
-          </el-form-item>
-          <el-form-item label="请求方法">
-            <el-select v-model="configForm.request_method" style="width: 120px">
-              <el-option label="POST" value="POST" />
-              <el-option label="GET" value="GET" />
-            </el-select>
-          </el-form-item>
-          <el-form-item label="超时时间(秒)">
-            <el-input-number v-model="configForm.timeout" :min="5" :max="120" />
-          </el-form-item>
-          <el-form-item label="请求头 (JSON)">
-            <el-input 
+      <Modal v-model="showAddConfigForm" :title="editingConfig ? '编辑配置' : '添加配置'" width="600px" append-to-body>
+        <SimpleForm :model="configForm" label-width="120px">
+          <SimpleFormItem label="配置名称" required>
+            <TextInput v-model="configForm.name" placeholder="如: ActCard" />
+          </SimpleFormItem>
+          <SimpleFormItem label="激活接口 URL" required>
+            <TextInput v-model="configForm.redeem_url" placeholder="https://actcard.xyz/api/keys/redeem" />
+          </SimpleFormItem>
+          <SimpleFormItem label="查询接口 URL">
+            <TextInput v-model="configForm.query_url" placeholder="https://actcard.xyz/api/keys/query" />
+          </SimpleFormItem>
+          <SimpleFormItem label="请求方法">
+            <SelectNative v-model="configForm.request_method" class="w-32">
+              <SelectOption label="POST" value="POST" />
+              <SelectOption label="GET" value="GET" />
+            </SelectNative>
+          </SimpleFormItem>
+          <SimpleFormItem label="超时时间(秒)">
+            <NumberInput v-model="configForm.timeout" :min="5" :max="120" />
+          </SimpleFormItem>
+          <SimpleFormItem label="请求头 (JSON)">
+            <TextInput 
               v-model="configForm.request_headers_str" 
               type="textarea" 
               :rows="2"
               placeholder='{"Authorization": "Bearer xxx"}'
             />
-          </el-form-item>
-          <el-form-item label="响应映射 (JSON)">
-            <el-input 
+          </SimpleFormItem>
+          <SimpleFormItem label="响应映射 (JSON)">
+            <TextInput 
               v-model="configForm.response_mapping_str" 
               type="textarea" 
               :rows="3"
               placeholder='{"data_path": "checkout", "fields": {"card_number": "card_number"}}'
             />
-            <div class="text-xs text-gray-400 mt-1">
+            <div class="text-xs text-muted-foreground mt-1">
               data_path: 响应中卡数据的路径；fields: 字段名映射
             </div>
-          </el-form-item>
-          <el-form-item label="启用">
-            <el-switch v-model="configForm.is_active" />
-          </el-form-item>
-          <el-form-item label="备注">
-            <el-input v-model="configForm.notes" type="textarea" :rows="2" />
-          </el-form-item>
-        </el-form>
+          </SimpleFormItem>
+          <SimpleFormItem label="启用">
+            <Toggle v-model="configForm.is_active" />
+          </SimpleFormItem>
+          <SimpleFormItem label="备注">
+            <TextInput v-model="configForm.notes" type="textarea" :rows="2" />
+          </SimpleFormItem>
+        </SimpleForm>
         <template #footer>
-          <el-button @click="showAddConfigForm = false">取消</el-button>
-          <el-button type="primary" @click="saveApiConfig" :loading="savingConfig">保存</el-button>
+          <Button @click="showAddConfigForm = false">取消</Button>
+          <Button  variant="default" type="button" @click="saveApiConfig" :loading="savingConfig">保存</Button>
         </template>
-      </el-dialog>
-    </el-dialog>
+      </Modal>
+    </Modal>
   </div>
 </template>
 
@@ -368,8 +381,8 @@
 import { ref, reactive, onMounted } from 'vue'
 import { cardsApi } from '@/api/cards'
 import type { CardApiConfig } from '@/api/cards'
-import { ElMessage } from 'element-plus'
-import { Plus, Upload, Key } from '@element-plus/icons-vue'
+import { ElMessage } from '@/lib/element'
+import { Plus, Upload, Key } from '@/icons'
 import { useUserStore } from '@/stores/user'
 import type { Card } from '@/types'
 
@@ -668,7 +681,7 @@ const handleRedeem = async () => {
     // axios 拦截器已解包，response 可能是 {code, data} 或直接是 data
     const cardData = response.data || response
     
-    if (cardData && cardData.id) {
+    if (cardData && typeof cardData === 'object' && 'id' in cardData) {
       redeemResult.value = {
         type: 'success',
         message: '导入成功！卡片已添加到卡池',
@@ -831,71 +844,3 @@ const deleteApiConfig = async (config: CardApiConfig) => {
   }
 }
 </script>
-
-<style scoped lang="scss">
-.card-management {
-  .page-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 24px;
-
-    h1 {
-      margin: 0;
-    }
-  }
-
-  .operation-buttons {
-    display: flex;
-    gap: 8px;
-    align-items: center;
-  }
-
-  .font-mono {
-    font-family: 'Courier New', Courier, monospace;
-    font-weight: 500;
-  }
-
-  .el-pagination {
-    margin-top: 20px;
-    justify-content: center;
-  }
-  
-  .import-result {
-    margin-top: 16px;
-    
-    .error-item {
-      padding: 8px;
-      border-bottom: 1px solid #ebeef5;
-      display: flex;
-      justify-content: space-between;
-      font-size: 13px;
-      
-      &:last-child {
-        border-bottom: none;
-      }
-    }
-  }
-  
-  code {
-    background: #f5f7fa;
-    padding: 2px 6px;
-    border-radius: 3px;
-    color: #409eff;
-    font-family: 'Courier New', monospace;
-  }
-  
-  .text-gray {
-    color: #909399;
-    font-size: 12px;
-  }
-  
-  .redeem-result {
-    margin-top: 16px;
-  }
-  
-  .card-info-preview {
-    margin-top: 12px;
-  }
-}
-</style>
