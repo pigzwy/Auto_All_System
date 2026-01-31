@@ -9,7 +9,8 @@ from django.contrib.auth import get_user_model
 from .models import UserBalance, BalanceLog
 from .serializers import (
     UserSerializer, UserRegisterSerializer, UserLoginSerializer,
-    UserBalanceSerializer, BalanceLogSerializer, RechargeSerializer
+    UserBalanceSerializer, BalanceLogSerializer, RechargeSerializer,
+    ChangePasswordSerializer
 )
 
 User = get_user_model()
@@ -141,6 +142,29 @@ class UserViewSet(viewsets.ModelViewSet):
         return Response({
             'code': 400,
             'message': '更新失败',
+            'errors': serializer.errors
+        }, status=status.HTTP_400_BAD_REQUEST)
+
+    @action(detail=False, methods=['post'])
+    def change_password(self, request):
+        """用户自助修改密码"""
+        serializer = ChangePasswordSerializer(
+            data=request.data,
+            context={'request': request}
+        )
+
+        if serializer.is_valid():
+            request.user.set_password(serializer.validated_data['new_password'])
+            request.user.save()
+            return Response({
+                'code': 200,
+                'message': '密码修改成功',
+                'data': None
+            })
+
+        return Response({
+            'code': 400,
+            'message': '密码修改失败',
             'errors': serializer.errors
         }, status=status.HTTP_400_BAD_REQUEST)
     

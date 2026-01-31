@@ -3,6 +3,8 @@
 """
 from rest_framework import serializers
 from django.contrib.auth import get_user_model, authenticate
+from django.contrib.auth.password_validation import validate_password
+from django.core.exceptions import ValidationError as DjangoValidationError
 from .models import UserBalance, BalanceLog
 
 User = get_user_model()
@@ -69,6 +71,29 @@ class UserLoginSerializer(serializers.Serializer):
             return attrs
         else:
             raise serializers.ValidationError('必须提供用户名和密码')
+
+
+class ChangePasswordSerializer(serializers.Serializer):
+    """用户自助修改密码"""
+
+    old_password = serializers.CharField(write_only=True)
+    new_password = serializers.CharField(write_only=True, min_length=6)
+
+    def validate_old_password(self, value):
+        request = self.context.get('request')
+        user = getattr(request, 'user', None)
+        if not user or not user.check_password(value):
+            raise serializers.ValidationError('旧密码不正确')
+        return value
+
+    def validate_new_password(self, value):
+        request = self.context.get('request')
+        user = getattr(request, 'user', None)
+        try:
+            validate_password(value, user=user)
+        except DjangoValidationError as e:
+            raise serializers.ValidationError(list(e.messages))
+        return value
 
 
 class UserBalanceSerializer(serializers.ModelSerializer):
