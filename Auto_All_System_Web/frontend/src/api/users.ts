@@ -7,6 +7,9 @@ export interface User {
   phone?: string
   is_staff: boolean
   is_active: boolean
+  // Some admin endpoints may include derived fields.
+  role?: 'super_admin' | 'admin' | 'user' | string
+  balance?: string
   created_at: string
   last_login?: string
 }
@@ -92,4 +95,3 @@ const usersApi = {
 }
 
 export default usersApi
-

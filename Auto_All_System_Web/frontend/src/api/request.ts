@@ -1,6 +1,6 @@
 import axios from 'axios'
 import type { AxiosInstance, AxiosRequestConfig, AxiosResponse } from 'axios'
-import { ElMessage } from 'element-plus'
+import { ElMessage } from '@/lib/element'
 import router from '@/router'
 
 type UnwrappedAxiosInstance = Omit<
