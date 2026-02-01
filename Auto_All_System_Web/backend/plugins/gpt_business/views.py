@@ -38,7 +38,7 @@ from .storage import (
     patch_task,
     update_settings,
 )
-from .tasks import auto_invite_task, invite_only_task, legacy_run_task, self_register_task, sub2api_sink_task
+from .tasks import auto_invite_task, invite_only_task, self_register_task, sub2api_sink_task
 
 
 def _mask_secret(value: str) -> str:
@@ -132,7 +132,6 @@ class SettingsViewSet(ViewSet):
 
             # 兼容 oai-team-auto-provisioner 的配置项
             for key in [
-                "legacy_repo_path",
                 "proxy_enabled",
                 "proxies",
                 "auth_provider",
@@ -203,12 +202,6 @@ class TaskViewSet(ViewSet):
                     {"detail": "invite_only requires team.auth_token"},
                     status=status.HTTP_400_BAD_REQUEST,
                 )
-        elif flow == "legacy_run":
-            if not str(team_cfg.get("owner_email") or "").strip() or not str(team_cfg.get("owner_password") or "").strip():
-                return Response(
-                    {"detail": "legacy_run requires team.owner_email and team.owner_password"},
-                    status=status.HTTP_400_BAD_REQUEST,
-                )
         else:
             return Response({"detail": "Unknown flow"}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -236,10 +229,7 @@ class TaskViewSet(ViewSet):
 
         update_settings(add_record)
 
-        if flow == "legacy_run":
-            celery_result = legacy_run_task.delay(record_id)
-        else:
-            celery_result = invite_only_task.delay(record_id)
+        celery_result = invite_only_task.delay(record_id)
         patched = patch_task(record_id, {"celery_task_id": celery_result.id})
         return Response(patched or record, status=status.HTTP_201_CREATED)
 

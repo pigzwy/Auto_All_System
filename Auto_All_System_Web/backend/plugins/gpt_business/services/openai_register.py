@@ -79,7 +79,7 @@ def wait_for_element(page, selector: str, timeout: int = 10, visible: bool = Tru
     return None
 
 
-def wait_for_url_change(page, old_url: str, timeout: int = 15, contains: str = None) -> bool:
+def wait_for_url_change(page, old_url: str, timeout: int = 15, contains: str | None = None) -> bool:
     """等待 URL 变化"""
     start_time = time.time()
     
@@ -126,7 +126,7 @@ def type_slowly(page, selector_or_element, text, base_delay=None):
         time.sleep(actual_delay)
 
 
-def human_delay(min_sec: float = None, max_sec: float = None):
+def human_delay(min_sec: float | None = None, max_sec: float | None = None):
     """模拟人类操作间隔"""
     if min_sec is None:
         min_sec = ACTION_DELAY[0]
@@ -200,9 +200,9 @@ def register_openai_account(
     page,
     email: str,
     password: str,
-    get_verification_code: Callable[[str], Optional[str]] = None,
-    log_callback: Callable[[str], None] = None,
-    screenshot_callback: Callable[[str], None] = None,
+    get_verification_code: Callable[[str], Optional[str]] | None = None,
+    log_callback: Callable[[str], None] | None = None,
+    screenshot_callback: Callable[[str], None] | None = None,
 ) -> bool:
     """使用浏览器注册 OpenAI 账号
     
@@ -225,6 +225,101 @@ def register_openai_account(
     def _shot(name):
         if screenshot_callback:
             screenshot_callback(name)
+
+    def _complete_about_you_page() -> bool:
+        """填写 about-you / 年龄确认页面。
+
+        页面可能是三段生日输入(year/month/day)，也可能是单个 Birthday 输入框。
+        """
+        _log("个人信息页面")
+        _shot("05_about_you.png")
+
+        random_name = f"{random.choice(['Tom', 'John', 'Mike', 'David', 'James'])} {random.choice(['Smith', 'Lee', 'Wang', 'Brown', 'Wilson'])}"
+        year = str(random.randint(1990, 2000))
+        month = f"{random.randint(1, 12):02d}"
+        day = f"{random.randint(1, 28):02d}"
+        birthday_mmddyyyy = f"{month}/{day}/{year}"
+
+        # Full name
+        name_input = wait_for_element(page, 'css:input[name="name"]', timeout=5)
+        if not name_input:
+            name_input = wait_for_element(page, 'css:input[autocomplete="name"]', timeout=3)
+        if not name_input:
+            name_input = wait_for_element(page, 'css:input[aria-label*="name"], input[aria-label*="Name"]', timeout=3)
+        if not name_input:
+            name_input = wait_for_element(page, 'css:input[placeholder*="name"], input[placeholder*="Name"], input[placeholder*="James"]', timeout=3)
+
+        if not name_input:
+            _log("无法找到姓名输入框")
+            _shot("about_you_name_missing.png")
+            return False
+
+        _log(f"输入姓名: {random_name}")
+        try:
+            type_slowly(page, name_input, random_name)
+        except Exception:
+            _shot("about_you_name_fill_failed.png")
+            return False
+
+        # Birthday
+        year_input = wait_for_element(page, 'css:[data-type="year"]', timeout=2)
+        month_input = wait_for_element(page, 'css:[data-type="month"]', timeout=2) if year_input else None
+        day_input = wait_for_element(page, 'css:[data-type="day"]', timeout=2) if year_input else None
+
+        if year_input and month_input and day_input:
+            _log(f"输入生日(分段): {year}/{month}/{day}")
+            try:
+                year_input.click()
+                time.sleep(0.15)
+                year_input.input(year, clear=True)
+                time.sleep(0.2)
+                month_input.click()
+                time.sleep(0.15)
+                month_input.input(month, clear=True)
+                time.sleep(0.2)
+                day_input.click()
+                time.sleep(0.15)
+                day_input.input(day, clear=True)
+            except Exception:
+                _shot("about_you_birthday_fill_failed.png")
+                return False
+        else:
+            bday_input = wait_for_element(
+                page,
+                'css:input[name*="birth"], input[autocomplete*="bday"], input[aria-label*="Birth"], input[aria-label*="birth"], input[placeholder*="/"]',
+                timeout=5,
+            )
+            if not bday_input:
+                _log("无法找到生日输入框")
+                _shot("about_you_birthday_missing.png")
+                return False
+            _log(f"输入生日(单框): {birthday_mmddyyyy}")
+            try:
+                type_slowly(page, bday_input, birthday_mmddyyyy)
+            except Exception:
+                _shot("about_you_birthday_fill_failed.png")
+                return False
+
+        _log("生日已输入")
+
+        time.sleep(0.5)
+        submit_btn = wait_for_element(page, 'css:button[type="submit"]', timeout=8)
+        if not submit_btn:
+            submit_btn = wait_for_element(page, 'text:Continue', timeout=3)
+        if not submit_btn:
+            _log("无法找到 Continue 按钮")
+            _shot("about_you_continue_missing.png")
+            return False
+
+        try:
+            submit_btn.click()
+        except Exception:
+            _shot("about_you_continue_click_failed.png")
+            return False
+
+        time.sleep(2)
+        _shot("about_you_after_submit.png")
+        return True
 
     _log(f"开始注册 OpenAI 账号: {email}")
 
@@ -251,7 +346,7 @@ def register_openai_account(
                     logout_current_account(page)
                     page.get(url)
                     wait_for_page_stable(page, timeout=8)
-                return True
+                    _log("已登出其他账号，继续注册流程")
         except Exception:
             pass
 
@@ -262,9 +357,30 @@ def register_openai_account(
             signup_btn = wait_for_element(page, 'text:免费注册', timeout=3)
         if not signup_btn:
             signup_btn = wait_for_element(page, 'text:Sign up', timeout=3)
+
+        # 新版可能需要先进入 /auth/login 才能看到注册入口
+        if not signup_btn:
+            try:
+                page.get("https://chatgpt.com/auth/login")
+                wait_for_page_stable(page, timeout=8)
+            except Exception:
+                pass
+            signup_btn = wait_for_element(page, 'css:button[data-testid="signup-button"]', timeout=5)
+            if not signup_btn:
+                signup_btn = wait_for_element(page, 'text:Sign up', timeout=3)
+            if not signup_btn:
+                signup_btn = wait_for_element(page, 'text:Create account', timeout=3)
+            if not signup_btn:
+                signup_btn = wait_for_element(page, 'text:注册', timeout=2)
         
+        if not signup_btn:
+            _log("无法找到注册按钮")
+            _shot("02_signup_button_not_found.png")
+            return False
+
         if signup_btn:
             old_url = page.url
+            _log("点击注册按钮 (signup-button)")
             signup_btn.click()
             # 等待 URL 变化或弹窗出现
             for _ in range(6):
@@ -272,7 +388,10 @@ def register_openai_account(
                 if page.url != old_url:
                     break
                 try:
-                    email_input = page.ele('css:input[type="email"], input[name="email"]', timeout=1)
+                    email_input = page.ele(
+                        'css:input[type="email"], input[name="email"], input[id="email"], input[name="username"], input[id="username"]',
+                        timeout=1,
+                    )
                     if email_input and email_input.states.is_displayed:
                         break
                 except Exception:
@@ -304,7 +423,8 @@ def register_openai_account(
         _shot("03_after_email.png")
 
         # 状态机循环处理注册流程
-        max_steps = 10
+        max_steps = 15
+        fallback_auth_login_done = False
         for step in range(max_steps):
             current_url = page.url
             _log(f"注册流程步骤 {step + 1}: {current_url}")
@@ -312,11 +432,36 @@ def register_openai_account(
             # 如果在 chatgpt.com 且已登录，注册成功
             if "chatgpt.com" in current_url and "auth.openai.com" not in current_url:
                 try:
-                    if is_logged_in(page):
-                        _log("检测到已登录，账号已注册成功")
+                    logged_in, current_email = is_logged_in(page)
+                    if logged_in and current_email and current_email.lower() == email.lower():
+                        _log(f"检测到已登录({current_email})，账号已注册成功")
                         return True
+                    if logged_in and current_email and current_email.lower() != email.lower():
+                        _log(f"检测到已登录其他账号({current_email})，登出后继续注册")
+                        logout_current_account(page)
+                        page.get(url)
+                        wait_for_page_stable(page, timeout=8)
+                        continue
                 except Exception:
                     pass
+
+                # 卡在 chatgpt.com（弹窗没弹出来/没跳转 auth0）时，兜底走 /auth/login 点击 signup-button
+                if not fallback_auth_login_done and step >= 2:
+                    fallback_auth_login_done = True
+                    try:
+                        _log("仍未进入 auth0，尝试打开 /auth/login 并点击 signup-button")
+                        old_url = page.url
+                        page.get("https://chatgpt.com/auth/login")
+                        wait_for_page_stable(page, timeout=8)
+                        _shot("fallback_auth_login.png")
+                        signup_btn = wait_for_element(page, 'css:button[data-testid="signup-button"]', timeout=6)
+                        if signup_btn:
+                            signup_btn.click()
+                            wait_for_url_change(page, old_url, timeout=15)
+                            _shot("fallback_after_signup_click.png")
+                            continue
+                    except Exception:
+                        pass
 
             # 步骤1: 输入邮箱
             if "auth.openai.com/log-in-or-create-account" in current_url:
@@ -361,12 +506,12 @@ def register_openai_account(
                     wait_for_url_change(page, old_url, timeout=10)
                 continue
 
-            # 步骤3: 验证码页面
-            if "auth.openai.com/email-verification" in current_url:
+            # 步骤3: 验证码页面（URL 可能是 /email-verification 或 /u/email-verification 等）
+            if "email-verification" in current_url and "auth.openai.com" in current_url:
                 break
 
             # 步骤4: 个人信息页面
-            if "auth.openai.com/about-you" in current_url:
+            if "about-you" in current_url and "auth.openai.com" in current_url:
                 break
 
             time.sleep(0.5)
@@ -378,66 +523,41 @@ def register_openai_account(
         # 如果已在 chatgpt.com 且已登录
         if "chatgpt.com" in current_url and "auth.openai.com" not in current_url:
             try:
-                if is_logged_in(page):
-                    _log("账号已注册成功")
+                logged_in, current_email = is_logged_in(page)
+                if logged_in and current_email and current_email.lower() == email.lower():
+                    _log(f"账号已注册成功({current_email})")
                     return True
+                if logged_in and current_email and current_email.lower() != email.lower():
+                    _log(f"检测到已登录其他账号({current_email})，登出后继续注册")
+                    logout_current_account(page)
+                    page.get(url)
+                    wait_for_page_stable(page, timeout=8)
             except Exception:
                 pass
 
         # 个人信息页面
-        if "auth.openai.com/about-you" in current_url:
-            _log("个人信息页面")
-            _shot("05_about_you.png")
-            
-            # 输入姓名
-            name_input = wait_for_element(page, 'css:input[name="name"]', timeout=5)
-            if not name_input:
-                name_input = wait_for_element(page, 'css:input[autocomplete="name"]', timeout=3)
-            
-            random_name = f"{random.choice(['Tom', 'John', 'Mike', 'David', 'James'])} {random.choice(['Smith', 'Lee', 'Wang', 'Brown', 'Wilson'])}"
-            _log(f"输入姓名: {random_name}")
-            type_slowly(page, 'css:input[name="name"], input[autocomplete="name"]', random_name)
+        if "about-you" in current_url and "auth.openai.com" in current_url:
+            ok = _complete_about_you_page()
+            if not ok:
+                _log("个人信息页面处理失败")
+                return False
 
-            # 输入生日
-            year = str(random.randint(1990, 2000))
-            month = f"{random.randint(1, 12):02d}"
-            day = f"{random.randint(1, 28):02d}"
-            _log(f"输入生日: {year}/{month}/{day}")
+            try:
+                page.get(url)
+                wait_for_page_stable(page, timeout=8)
+                logged_in, current_email = is_logged_in(page)
+                if logged_in and current_email and current_email.lower() == email.lower():
+                    _log(f"注册完成: {current_email}")
+                    return True
+            except Exception:
+                pass
 
-            year_input = wait_for_element(page, 'css:[data-type="year"]', timeout=10)
-            if year_input:
-                year_input.click()
-                time.sleep(0.15)
-                year_input.input(year, clear=True)
-                time.sleep(0.2)
-
-            month_input = wait_for_element(page, 'css:[data-type="month"]', timeout=5)
-            if month_input:
-                month_input.click()
-                time.sleep(0.15)
-                month_input.input(month, clear=True)
-                time.sleep(0.2)
-
-            day_input = wait_for_element(page, 'css:[data-type="day"]', timeout=5)
-            if day_input:
-                day_input.click()
-                time.sleep(0.15)
-                day_input.input(day, clear=True)
-
-            _log("生日已输入")
-
-            time.sleep(0.5)
-            submit_btn = wait_for_element(page, 'css:button[type="submit"]', timeout=5)
-            if submit_btn:
-                submit_btn.click()
-
-            time.sleep(2)
-            _shot("06_after_about_you.png")
-            _log(f"注册完成: {email}")
-            return True
+            _log("个人信息提交后仍未登录")
+            _shot("about_you_login_not_ready.png")
+            return False
 
         # 验证码页面
-        if "auth.openai.com/email-verification" in current_url:
+        if "email-verification" in current_url and "auth.openai.com" in current_url:
             _log("邮箱验证码页面")
             _shot("05_verification.png")
 
@@ -450,21 +570,46 @@ def register_openai_account(
                 _log("无法获取验证码")
                 return False
 
-            _log(f"输入验证码: {verification_code}")
-            code_input = wait_for_element(page, 'css:input[name="code"]', timeout=10)
-            if not code_input:
-                code_input = wait_for_element(page, 'css:input[placeholder*="代码"]', timeout=5)
+            _log(f"输入验证码: ****** (len={len(verification_code)})")
 
-            if not code_input:
+            # 兼容多种验证码输入形态：单输入框 / 多个分隔输入框 / one-time-code
+            code_inputs = page.eles(
+                'css:input[name="code"], input[autocomplete="one-time-code"], input[inputmode="numeric"], input[type="tel"], input[placeholder*="代码"], input[placeholder*="code"]'
+            )
+            code_inputs = [x for x in (code_inputs or []) if x]
+
+            if not code_inputs:
                 _log("无法找到验证码输入框")
                 return False
 
-            try:
-                code_input.clear()
-            except Exception:
-                pass
-            type_slowly(page, 'css:input[name="code"], input[placeholder*="代码"]', verification_code, base_delay=0.08)
-            time.sleep(0.5)
+            digits = [c for c in verification_code if c.isdigit()]
+            if len(code_inputs) >= 6 and len(digits) >= 6:
+                # 多输入框：逐个填入
+                for i in range(6):
+                    try:
+                        code_inputs[i].click()
+                        time.sleep(0.08)
+                        code_inputs[i].input(digits[i], clear=True)
+                        time.sleep(0.08)
+                    except Exception:
+                        pass
+            else:
+                # 单输入框：直接填入
+                try:
+                    try:
+                        code_inputs[0].clear()
+                    except Exception:
+                        pass
+                    type_slowly(
+                        page,
+                        'css:input[name="code"], input[autocomplete="one-time-code"], input[inputmode="numeric"], input[type="tel"], input[placeholder*="代码"], input[placeholder*="code"]',
+                        verification_code,
+                        base_delay=0.08,
+                    )
+                except Exception:
+                    pass
+
+            time.sleep(0.6)
 
             continue_btn = wait_for_element(page, 'css:button[type="submit"]', timeout=10)
             if continue_btn:
@@ -475,54 +620,27 @@ def register_openai_account(
 
             # 等待个人信息页面
             current_url = page.url
-            if "auth.openai.com/about-you" in current_url:
-                _log("个人信息页面")
-                
-                # 输入姓名
-                random_name = f"{random.choice(['Tom', 'John', 'Mike', 'David', 'James'])} {random.choice(['Smith', 'Lee', 'Wang', 'Brown', 'Wilson'])}"
-                _log(f"输入姓名: {random_name}")
-                name_input = wait_for_element(page, 'css:input[name="name"]', timeout=15)
-                if not name_input:
-                    name_input = wait_for_element(page, 'css:input[autocomplete="name"]', timeout=5)
-                type_slowly(page, 'css:input[name="name"], input[autocomplete="name"]', random_name)
+            if "about-you" in current_url and "auth.openai.com" in current_url:
+                ok = _complete_about_you_page()
+                if not ok:
+                    _log("个人信息页面处理失败")
+                    return False
 
-                # 输入生日
-                year = str(random.randint(1990, 2000))
-                month = f"{random.randint(1, 12):02d}"
-                day = f"{random.randint(1, 28):02d}"
-                _log(f"输入生日: {year}/{month}/{day}")
+            # 最终回到 chatgpt.com 校验是否真的登录成功
+            try:
+                page.get(url)
+                wait_for_page_stable(page, timeout=8)
+                logged_in, current_email = is_logged_in(page)
+                if logged_in and current_email and current_email.lower() == email.lower():
+                    _shot("07_registered.png")
+                    _log(f"注册完成: {current_email}")
+                    return True
+            except Exception:
+                pass
 
-                year_input = wait_for_element(page, 'css:[data-type="year"]', timeout=10)
-                if year_input:
-                    year_input.click()
-                    time.sleep(0.15)
-                    year_input.input(year, clear=True)
-                    time.sleep(0.2)
-
-                month_input = wait_for_element(page, 'css:[data-type="month"]', timeout=5)
-                if month_input:
-                    month_input.click()
-                    time.sleep(0.15)
-                    month_input.input(month, clear=True)
-                    time.sleep(0.2)
-
-                day_input = wait_for_element(page, 'css:[data-type="day"]', timeout=5)
-                if day_input:
-                    day_input.click()
-                    time.sleep(0.15)
-                    day_input.input(day, clear=True)
-
-                _log("生日已输入")
-
-                continue_btn = wait_for_element(page, 'css:button[type="submit"]', timeout=10)
-                if continue_btn:
-                    continue_btn.click()
-
-                time.sleep(2)
-                _shot("07_registered.png")
-
-            _log(f"注册完成: {email}")
-            return True
+            _log("验证码提交后仍未登录/注册未完成")
+            _shot("registration_incomplete.png")
+            return False
 
         _log(f"注册流程异常，当前页面: {current_url}")
         return False

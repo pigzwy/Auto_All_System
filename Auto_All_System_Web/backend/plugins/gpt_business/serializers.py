@@ -86,8 +86,7 @@ class SettingsUpdateSerializer(serializers.Serializer):
     gptmail = GptMailSettingsSerializer(required=False)
     teams = serializers.ListField(child=TeamSettingsSerializer(), required=False, allow_empty=True)
 
-    # legacy / full-run 配置（对应 oai-team-auto-provisioner 的 config.toml.example）
-    legacy_repo_path = serializers.CharField(required=False, allow_blank=True, trim_whitespace=True)
+    # full-run 配置（历史上对应 oai-team-auto-provisioner 的 config.toml.example；已内置，不支持 repo 挂载）
     proxy_enabled = serializers.BooleanField(required=False)
     proxies = serializers.ListField(child=ProxySerializer(), required=False, allow_empty=True)
     auth_provider = serializers.ChoiceField(choices=["crs", "cpa", "s2a"], required=False)
@@ -105,7 +104,7 @@ class SettingsUpdateSerializer(serializers.Serializer):
 
 
 class TaskCreateSerializer(serializers.Serializer):
-    flow = serializers.ChoiceField(choices=["invite_only", "legacy_run"], required=False)
+    flow = serializers.ChoiceField(choices=["invite_only"], required=False)
     team_name = serializers.CharField(required=True, trim_whitespace=True)
     count = serializers.IntegerField(required=False, min_value=1, max_value=50)
     password = serializers.CharField(required=False, trim_whitespace=False)

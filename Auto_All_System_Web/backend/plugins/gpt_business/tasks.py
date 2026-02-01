@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import random
+import time
 import csv
 import json
 import re
@@ -15,14 +16,7 @@ from celery import shared_task
 from django.conf import settings as django_settings
 from django.utils import timezone
 
-from .legacy_runner import (
-    DEFAULT_REPO_PATH,
-    build_config_toml,
-    build_team_json,
-    prepare_artifacts,
-    run_legacy,
-    run_repo_script,
-)
+from .legacy_runner import prepare_artifacts
 from .storage import find_account, get_settings, list_accounts, patch_account, patch_task
 
 
@@ -338,90 +332,16 @@ def legacy_run_task(self, record_id: str):
         },
     )
 
-    try:
-        settings = get_settings()
-        task_record = _get_task_record(settings, record_id)
-        if not task_record:
-            raise RuntimeError("Task record not found")
-
-        media_root = Path(str(getattr(django_settings, "MEDIA_ROOT", "")))
-        if not str(media_root):
-            raise RuntimeError("MEDIA_ROOT is not configured")
-
-        job_dir = media_root / "gpt_business" / "jobs" / record_id
-        artifacts = prepare_artifacts(job_dir)
-
-        config_toml = build_config_toml(plugin_settings=settings, task_record=task_record, artifacts=artifacts)
-        team_json = build_team_json(plugin_settings=settings, task_record=task_record)
-
-        repo_src = str(settings.get("legacy_repo_path") or DEFAULT_REPO_PATH)
-        args = task_record.get("legacy_args")
-        return_code = run_legacy(
-            repo_src,
-            artifacts,
-            config_toml=config_toml,
-            team_json=team_json,
-            args=list(args) if isinstance(args, list) and args else None,
-        )
-
-        artifacts_list: list[dict[str, Any]] = []
-        for p in [artifacts.csv_file, artifacts.tracker_file, artifacts.log_file, artifacts.team_json_file, artifacts.domain_blacklist_file]:
-            if p.exists():
-                artifacts_list.append(
-                    {
-                        "name": p.name,
-                        "path": str(p),
-                    }
-                )
-
-        accounts_count = 0
-        if artifacts.csv_file.exists():
-            try:
-                with artifacts.csv_file.open("r", encoding="utf-8", newline="") as f:
-                    reader = csv.reader(f)
-                    rows = list(reader)
-                    accounts_count = max(len(rows) - 1, 0)
-            except Exception:
-                accounts_count = 0
-
-        result: dict[str, Any] = {
-            "return_code": return_code,
-            "artifacts": artifacts_list,
-            "accounts_count": accounts_count,
-        }
-
-        if return_code != 0:
-            patch_task(
-                record_id,
-                {
-                    "status": "failed",
-                    "finished_at": timezone.now().isoformat(),
-                    "result": result,
-                    "error": f"legacy runner exited with code {return_code}",
-                },
-            )
-            return result
-
-        patch_task(
-            record_id,
-            {
-                "status": "completed",
-                "finished_at": timezone.now().isoformat(),
-                "result": result,
-            },
-        )
-        return result
-    except Exception as exc:
-        logger.exception("gpt_business legacy_run_task failed")
-        patch_task(
-            record_id,
-            {
-                "status": "failed",
-                "finished_at": timezone.now().isoformat(),
-                "error": str(exc),
-            },
-        )
-        raise
+    err = "legacy_run 已停用：不再支持外部仓库挂载/子进程执行，请使用母号维度的自动开通/自动邀请/自动入池"
+    patch_task(
+        record_id,
+        {
+            "status": "failed",
+            "finished_at": timezone.now().isoformat(),
+            "error": err,
+        },
+    )
+    raise RuntimeError(err)
 
 
 def _artifacts_list_from_job_dir(artifacts_dir: Path) -> list[dict[str, Any]]:
@@ -841,118 +761,223 @@ def auto_invite_task(self, record_id: str):
         job_dir = media_root / "gpt_business" / "jobs" / record_id
         artifacts = prepare_artifacts(job_dir)
 
-        email_cfg = _cloudmail_email_config_from_account(mother)
-        config_toml = build_config_toml(
-            plugin_settings=settings,
-            task_record=task_record,
-            artifacts=artifacts,
-            email_provider="cloudmail",
-            email_config=email_cfg,
-        )
+        def _append_log(msg: str):
+            try:
+                ts = timezone.now().isoformat()
+                artifacts.log_file.parent.mkdir(parents=True, exist_ok=True)
+                with artifacts.log_file.open("a", encoding="utf-8") as f:
+                    f.write(f"[{ts}] {msg}\n")
+            except Exception:
+                pass
 
-        script = """
-import json
-import sys
-from pathlib import Path
+        _append_log(f"auto_invite start mother_id={mother_id} email={email} children={len(child_emails)}")
 
-from browser_automation import init_browser, login_and_get_session
-from team_service import batch_invite_to_team
+        token = str(mother.get("auth_token") or "").strip()
+        account_id = str(mother.get("account_id") or "").strip()
 
+        # NOTE: 这里必须走浏览器内的 fetch（见 chatgpt_backend_api.py）
+        # 因为 Celery 容器内 requests 可能无法直连 chatgpt.com（例如 Errno 101 Network is unreachable）。
+        from .services.browser_service import BrowserService
+        from .services.chatgpt_backend_api import browser_fetch_account_id, browser_invite_emails
+        from .services.chatgpt_session import ensure_access_token
 
-def main() -> int:
-    input_path = Path(sys.argv[1]) if len(sys.argv) > 1 else Path('web_input.json')
-    output_path = Path(sys.argv[2]) if len(sys.argv) > 2 else Path('web_result.json')
+        def _safe_name(raw: str) -> str:
+            s = (raw or "").strip()
+            s = re.sub(r"[^a-zA-Z0-9_.-]+", "_", s)
+            return s[:80] if len(s) > 80 else s
 
-    payload = json.loads(input_path.read_text(encoding='utf-8')) if input_path.exists() else {}
-    mother = payload.get('mother') if isinstance(payload, dict) else None
-    invite_emails = payload.get('invite_emails') if isinstance(payload, dict) else None
+        def _make_shot(page, prefix: str):
+            def _shot(name: str):
+                try:
+                    p = job_dir / f"{prefix}{name}"
+                    page.get_screenshot(path=str(p), full_page=True)
+                except Exception:
+                    pass
 
-    if not isinstance(mother, dict):
-        mother = {}
-    if not isinstance(invite_emails, list):
-        invite_emails = []
+            return _shot
 
-    email = str(mother.get('email') or '').strip()
-    password = str(mother.get('password') or '').strip()
+        def _extract_urls(text: str) -> list[str]:
+            urls = re.findall(r"https?://[^\s\"<>]+", text or "")
+            cleaned: list[str] = []
+            for u in urls:
+                u2 = u.strip().strip("'\")\n\r\t")
+                u2 = u2.rstrip(").,;")
+                if u2:
+                    cleaned.append(u2)
+            return cleaned
 
-    page = None
-    token = ''
-    account_id = ''
-    invite_result = {}
-    err = ''
-    try:
-        page = init_browser()
-        session = login_and_get_session(page, email, password)
-        token = str(session.get('token') or '').strip() if isinstance(session, dict) else ''
-        account_id = str(session.get('account_id') or '').strip() if isinstance(session, dict) else ''
+        def _pick_invite_url(urls: list[str]) -> str:
+            # 尽量挑选 chatgpt/openai 的 join/invite 链接
+            for u in urls:
+                lu = u.lower()
+                if "chatgpt.com" in lu or "openai.com" in lu:
+                    if any(k in lu for k in ["invite", "invitation", "join", "workspace"]):
+                        return u
+            for u in urls:
+                lu = u.lower()
+                if "chatgpt.com" in lu or "openai.com" in lu:
+                    return u
+            return urls[0] if urls else ""
 
-        if token and account_id and invite_emails:
-            team = {'auth_token': token, 'account_id': account_id}
-            invite_result = batch_invite_to_team(invite_emails, team)
-    except Exception as e:
-        err = str(e)
-    finally:
+        def _wait_invite_link(mail_client, to_email: str, timeout_sec: int = 180) -> str:
+            start = timezone.now().timestamp()
+            _append_log(f"wait invite email start to={to_email} timeout={timeout_sec}s")
+            while timezone.now().timestamp() - start < timeout_sec:
+                try:
+                    emails = mail_client.list_emails(to_email=to_email, size=10, time_sort="desc")
+                    for em in emails:
+                        text = f"{em.subject or ''}\n{em.text or ''}\n{em.content or ''}"
+                        urls = _extract_urls(text)
+                        invite_url = _pick_invite_url(urls)
+                        if invite_url:
+                            _append_log(f"invite email found subject={em.subject!r} url={invite_url}")
+                            return invite_url
+                except Exception as e:
+                    _append_log(f"wait invite email poll error: {e}")
+                time.sleep(5)
+            _append_log("wait invite email timeout")
+            return ""
+
+        def _try_accept_invite_ui(page, *, log_prefix: str, shot_cb) -> bool:
+            # 只做轻量点击：优先按文案点击；避免误点 submit。
+            try:
+                from .services.openai_register import wait_for_page_stable, wait_for_element, human_delay
+            except Exception:
+                return False
+
+            def _log(msg: str):
+                _append_log(f"{log_prefix}{msg}")
+
+            try:
+                wait_for_page_stable(page, timeout=8)
+            except Exception:
+                pass
+
+            shot_cb("accept_01_before.png")
+
+            candidates = [
+                "text:Join workspace",
+                "text:Join team",
+                "text:Join",
+                "text:Accept invite",
+                "text:Accept invitation",
+                "text:Accept",
+                "text:加入工作区",
+                "text:加入团队",
+                "text:加入",
+                "text:接受邀请",
+                "text:接受",
+            ]
+
+            for sel in candidates:
+                try:
+                    btn = wait_for_element(page, sel, timeout=2)
+                    if btn:
+                        _log(f"click {sel}")
+                        btn.click()
+                        human_delay(0.8, 1.6)
+                        shot_cb("accept_02_after_click.png")
+                        return True
+                except Exception:
+                    continue
+
+            return False
+
+        with BrowserService(profile_name=f"gpt_{email}") as browser:
+            _append_log(f"browser launched profile={getattr(browser, '_launched_profile_id', None)}")
+            if not browser.page:
+                raise RuntimeError("Browser page is not available")
+
+            _shot = _make_shot(browser.page, prefix="mother_")
+
+            try:
+                browser.page.get("https://chatgpt.com/")
+            except Exception:
+                pass
+
+            if token:
+                _append_log("reuse existing auth_token")
+            else:
+                _append_log("auth_token missing, login via Geekez + /api/auth/session")
+                token, _session = ensure_access_token(
+                    browser.page,
+                    email=email,
+                    password=password,
+                    timeout=180,
+                    log_callback=_append_log,
+                    screenshot_callback=_shot,
+                )
+
+            if not token:
+                raise RuntimeError("Failed to get auth_token")
+
+            _append_log(f"auth_token ok len={len(token)}")
+
+            if not account_id:
+                _append_log("account_id missing, fetch via browser /backend-api/accounts/check")
+                try:
+                    account_id = browser_fetch_account_id(
+                        browser.page,
+                        auth_token=token,
+                        timeout_sec=20,
+                        log_callback=_append_log,
+                    )
+                except Exception as e:
+                    _append_log(f"fetch account_id failed: {e}; try relogin")
+                    token, _session = ensure_access_token(
+                        browser.page,
+                        email=email,
+                        password=password,
+                        timeout=180,
+                        log_callback=_append_log,
+                        screenshot_callback=_shot,
+                    )
+                    account_id = browser_fetch_account_id(
+                        browser.page,
+                        auth_token=token,
+                        timeout_sec=20,
+                        log_callback=_append_log,
+                    )
+
+            if account_id:
+                _append_log(f"account_id ok {account_id}")
+
+            if not account_id:
+                raise RuntimeError("Failed to get account_id")
+
+            _append_log(f"invite start count={len(child_emails)}")
+            invite_response = browser_invite_emails(
+                browser.page,
+                account_id=account_id,
+                auth_token=token,
+                emails=child_emails,
+                timeout_sec=40,
+                log_callback=_append_log,
+            )
+
+        success_list = invite_response.get("success") or []
+        failed_list = invite_response.get("failed") or []
+        has_failed = isinstance(failed_list, list) and len(failed_list) > 0
+
         try:
-            if page:
-                page.quit()
+            _append_log(f"invite done success={len(success_list) if isinstance(success_list, list) else 0} failed={len(failed_list) if isinstance(failed_list, list) else 0}")
+            if isinstance(failed_list, list) and failed_list:
+                # 失败邮箱可能含原因对象，这里只尽量提取 email 字段
+                failed_emails: list[str] = []
+                for x in failed_list:
+                    if isinstance(x, str):
+                        failed_emails.append(x)
+                    elif isinstance(x, dict) and x.get("email"):
+                        failed_emails.append(str(x.get("email")))
+                failed_emails = [e for e in failed_emails if e]
+                if failed_emails:
+                    _append_log("invite failed_emails=" + ",".join(failed_emails[:50]))
         except Exception:
             pass
 
-    output = {
-        'token': token,
-        'account_id': account_id,
-        'invite_result': invite_result,
-        'error': err,
-    }
-    output_path.write_text(json.dumps(output, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
-
-    if err:
-        return 1
-    if not token or not account_id:
-        return 2
-    # invite_result: { email: {success: bool, error: str} }
-    if invite_result and any(isinstance(v, dict) and v.get('success') is False for v in invite_result.values()):
-        return 3
-    return 0
-
-
-if __name__ == '__main__':
-    raise SystemExit(main())
-""".lstrip()
-
-        input_payload = {
-            "mother": {"email": email, "password": password},
-            "invite_emails": child_emails,
-        }
-
-        extra_files = {
-            "tools/web_auto_invite.py": script,
-            "web_input.json": json.dumps(input_payload, ensure_ascii=False, indent=2) + "\n",
-        }
-
-        repo_src = str(settings.get("legacy_repo_path") or DEFAULT_REPO_PATH)
-        return_code = run_repo_script(
-            repo_src,
-            artifacts,
-            config_toml=config_toml,
-            cmd=[sys.executable, "tools/web_auto_invite.py", "web_input.json", "web_result.json"],
-            extra_files=extra_files,
-        )
-
-        result_path = artifacts.repo_dir / "web_result.json"
-        parsed_result: dict[str, Any] = {}
-        if result_path.exists():
-            try:
-                parsed_result = json.loads(result_path.read_text(encoding="utf-8"))
-            except Exception:
-                parsed_result = {}
-
-        token = str(parsed_result.get("token") or "").strip()
-        account_id = str(parsed_result.get("account_id") or "").strip()
-
         now = timezone.now().isoformat()
         patch: dict[str, Any] = {
-            "invite_status": "success" if return_code == 0 else "failed",
+            "invite_status": "success" if not has_failed else "failed",
             "invite_last_task": record_id,
             "invite_updated_at": now,
         }
@@ -962,22 +987,250 @@ if __name__ == '__main__':
             patch["account_id"] = account_id
         patch_account(mother_id, patch)
 
+        # ==================== 子号：注册/登录 + 接受邀请 + 验证加入 Team ====================
+        from apps.integrations.email.services.client import CloudMailClient
+        from plugins.gpt_business.services.openai_register import register_openai_account
+
+        children_results: list[dict[str, Any]] = []
+        join_failed: list[str] = []
+        _append_log("children accept stage start")
+
+        for idx, child in enumerate(children, start=1):
+            child_email = str(child.get("email") or "").strip()
+            child_id = str(child.get("id") or "").strip()
+            child_pwd = str(child.get("account_password") or "").strip()
+
+            log_prefix = f"[child {idx}/{len(children)} {child_email}] "
+            if not child_email:
+                continue
+
+            _append_log(log_prefix + "start")
+            if not child_pwd:
+                children_results.append({"email": child_email, "joined": False, "error": "missing account_password"})
+                join_failed.append(child_email)
+                continue
+
+            email_cfg_child = _cloudmail_email_config_from_account(child)
+            mail_client_child = CloudMailClient(
+                api_base=str(email_cfg_child.get("api_base") or ""),
+                api_token=str(email_cfg_child.get("api_auth") or ""),
+                domains=list(email_cfg_child.get("domains") or []),
+                default_role=str(email_cfg_child.get("role") or "user"),
+            )
+
+            child_result: dict[str, Any] = {
+                "email": child_email,
+                "id": child_id,
+                "joined": False,
+                "invite_url": "",
+            }
+
+            try:
+                for attempt in range(2):
+                    try:
+                        with BrowserService(profile_name=f"gpt_{child_email}") as child_browser:
+                            if not child_browser.page:
+                                raise RuntimeError("child browser page is not available")
+
+                            safe = _safe_name(child_email)
+                            child_shot = _make_shot(child_browser.page, prefix=f"child_{safe}_")
+
+                            try:
+                                child_browser.page.get("https://chatgpt.com/")
+                            except Exception:
+                                pass
+
+                            # 1) 登录（若不存在则注册）
+                            try:
+                                _append_log(log_prefix + "login via /api/auth/session")
+                                child_token, _sess = ensure_access_token(
+                                    child_browser.page,
+                                    email=child_email,
+                                    password=child_pwd,
+                                    timeout=180,
+                                    log_callback=lambda m: _append_log(log_prefix + m),
+                                    screenshot_callback=child_shot,
+                                )
+                            except Exception as e:
+                                _append_log(log_prefix + f"login failed: {e}; try register")
+
+                                def _get_code(_email: str) -> str | None:
+                                    # 不强依赖 sender_contains，避免不同环境发件人字段差异导致拿不到验证码
+                                    _append_log(log_prefix + "wait verification code start")
+                                    code = mail_client_child.wait_for_verification_code(
+                                        to_email=child_email,
+                                        timeout=600,
+                                        poll_interval=5,
+                                        sender_contains=None,
+                                    )
+                                    _append_log(log_prefix + ("verification code received" if code else "verification code missing"))
+                                    return code
+
+                                register_ok = register_openai_account(
+                                    child_browser.page,
+                                    email=child_email,
+                                    password=child_pwd,
+                                    get_verification_code=_get_code,
+                                    log_callback=lambda m: _append_log(log_prefix + m),
+                                    screenshot_callback=child_shot,
+                                )
+                                _append_log(log_prefix + f"register result={register_ok}")
+                                if not register_ok:
+                                    raise RuntimeError("register_openai_account failed")
+
+                                # 注册流程结束后，尽量用轻量 session 读取 token（避免再次跑完整登录导致页面断连）
+                                from .services.chatgpt_session import fetch_auth_session
+
+                                try:
+                                    child_browser.page.get("https://chatgpt.com/")
+                                    time.sleep(2)
+                                except Exception:
+                                    pass
+
+                                sess_data = fetch_auth_session(child_browser.page, timeout=7)
+                                sess_user = sess_data.get("user") if isinstance(sess_data, dict) else None
+                                sess_email = str(sess_user.get("email") or "").strip() if isinstance(sess_user, dict) else ""
+                                sess_token = str(sess_data.get("accessToken") or "").strip() if isinstance(sess_data, dict) else ""
+                                if sess_token and sess_email and sess_email.lower() == child_email.lower():
+                                    child_token = sess_token
+                                else:
+                                    child_token, _sess = ensure_access_token(
+                                        child_browser.page,
+                                        email=child_email,
+                                        password=child_pwd,
+                                        timeout=180,
+                                        log_callback=lambda m: _append_log(log_prefix + m),
+                                        screenshot_callback=child_shot,
+                                    )
+
+                            child_result["auth"] = "ok"
+
+                            # 2) 检查是否已经加入 Team
+                            child_team_account_id = ""
+                            try:
+                                child_team_account_id = browser_fetch_account_id(
+                                    child_browser.page,
+                                    auth_token=child_token,
+                                    timeout_sec=20,
+                                    log_callback=lambda m: _append_log(log_prefix + m),
+                                )
+                            except Exception as e:
+                                _append_log(log_prefix + f"check team account failed: {e}")
+
+                            if child_team_account_id:
+                                _append_log(log_prefix + f"already in team account_id={child_team_account_id}")
+                                child_result["joined"] = True
+                                child_result["team_account_id"] = child_team_account_id
+                            else:
+                                _append_log(log_prefix + "not in team yet, try accept invite")
+
+                                invite_url = _wait_invite_link(mail_client_child, child_email, timeout_sec=180)
+                                if invite_url:
+                                    child_result["invite_url"] = invite_url
+                                    _append_log(log_prefix + "open invite url")
+                                    try:
+                                        child_browser.page.get(invite_url)
+                                    except Exception as e:
+                                        _append_log(log_prefix + f"open invite url failed: {e}")
+                                    _try_accept_invite_ui(child_browser.page, log_prefix=log_prefix, shot_cb=child_shot)
+                                else:
+                                    _append_log(log_prefix + "invite email not found, try in-app prompt")
+                                    try:
+                                        child_browser.page.get("https://chatgpt.com/")
+                                    except Exception:
+                                        pass
+                                    _try_accept_invite_ui(child_browser.page, log_prefix=log_prefix, shot_cb=child_shot)
+
+                                # 3) 再次校验
+                                try:
+                                    child_team_account_id = browser_fetch_account_id(
+                                        child_browser.page,
+                                        auth_token=child_token,
+                                        timeout_sec=20,
+                                        log_callback=lambda m: _append_log(log_prefix + m),
+                                    )
+                                except Exception as e:
+                                    _append_log(log_prefix + f"re-check team account failed: {e}")
+                                    child_team_account_id = ""
+
+                                if child_team_account_id:
+                                    _append_log(log_prefix + f"joined team ok account_id={child_team_account_id}")
+                                    child_result["joined"] = True
+                                    child_result["team_account_id"] = child_team_account_id
+                                else:
+                                    _append_log(log_prefix + "join team failed")
+                                    child_result["joined"] = False
+                                    join_failed.append(child_email)
+
+                            # 写回子号状态（不写 token/password）
+                            try:
+                                patch_account(
+                                    child_id,
+                                    {
+                                        "team_join_status": "success" if child_result.get("joined") else "failed",
+                                        "team_join_task": record_id,
+                                        "team_join_updated_at": timezone.now().isoformat(),
+                                        **(
+                                            {"team_account_id": child_result.get("team_account_id")}
+                                            if child_result.get("team_account_id")
+                                            else {}
+                                        ),
+                                    },
+                                )
+                            except Exception:
+                                pass
+
+                        break
+                    except Exception as e:
+                        _append_log(log_prefix + f"attempt {attempt + 1} exception: {e}")
+                        if attempt == 0 and "disconnected" in str(e).lower():
+                            _append_log(log_prefix + "retry due to disconnected page")
+                            time.sleep(2)
+                            continue
+                        raise
+
+            except Exception as e:
+                _append_log(log_prefix + f"child flow exception: {e}")
+                child_result["error"] = str(e)
+                join_failed.append(child_email)
+
+            children_results.append(child_result)
+
+        _append_log(f"children accept stage done failed={len(join_failed)}")
+
+        overall_ok = (not has_failed) and (len(join_failed) == 0)
+
         result: dict[str, Any] = {
-            "return_code": return_code,
+            "success": overall_ok,
             "mother_id": mother_id,
             "email": email,
             "invited_count": len(child_emails),
             "artifacts": _artifacts_list_from_job_dir(job_dir),
-            "details": parsed_result,
+            "details": {
+                "failed": invite_response.get("failed") or [],
+                "success": invite_response.get("success") or [],
+            },
+            "children": children_results,
+            "children_join_failed": join_failed,
         }
 
         patch_task(
             record_id,
             {
-                "status": "completed" if return_code == 0 else "failed",
+                "status": "completed" if overall_ok else "failed",
                 "finished_at": timezone.now().isoformat(),
                 "result": result,
-                **({} if return_code == 0 else {"error": f"auto_invite exited with code {return_code}"}),
+                **(
+                    {}
+                    if overall_ok
+                    else {
+                        "error": (
+                            "auto_invite has failed invites"
+                            if has_failed
+                            else f"auto_invite child join failed: {','.join(join_failed[:20])}"
+                        )
+                    }
+                ),
             },
         )
 
@@ -1066,46 +1319,43 @@ def sub2api_sink_task(self, record_id: str):
             for e in emails:
                 writer.writerow({"email": e, "status": "success"})
 
-        repo_src = str(settings.get("legacy_repo_path") or DEFAULT_REPO_PATH)
+        # 直接走内置逻辑（不再 subprocess 外部 repo）
+        from .services.sub2api_sink_service import CrsConfig, Sub2ApiConfig, sink_openai_oauth_from_crs_to_sub2api
 
-        # sub2api_sink_run 只吃 CLI 参数，这里不依赖 config.toml，但为了日志与一致性仍写入一个最小 config
-        email_cfg = _cloudmail_email_config_from_account(mother)
-        config_toml = build_config_toml(
-            plugin_settings=settings,
-            task_record=task_record,
-            artifacts=artifacts,
-            email_provider="cloudmail",
-            email_config=email_cfg,
+        group_ids: list[int] = []
+        for x in (s2a.get("group_ids") or []):
+            try:
+                group_ids.append(int(x))
+            except Exception:
+                continue
+
+        crs_cfg = CrsConfig(api_base=crs_api_base, admin_token=crs_admin_token)
+        sub2_cfg = Sub2ApiConfig(
+            api_base=sub2api_api_base,
+            admin_api_key=sub2api_admin_api_key,
+            admin_jwt=sub2api_admin_jwt,
+            group_ids=group_ids,
+            concurrency=max(1, int(concurrency)),
+            priority=max(1, min(int(priority), 100)),
         )
 
-        cmd = [
-            sys.executable,
-            "tools/sub2api_sink_run.py",
-            "--crs-api-base",
-            crs_api_base,
-            "--crs-admin-token",
-            crs_admin_token,
-            "--sub2api-api-base",
-            sub2api_api_base,
-        ]
-
-        if sub2api_admin_api_key:
-            cmd.extend(["--sub2api-admin-api-key", sub2api_admin_api_key])
-        else:
-            cmd.extend(["--sub2api-admin-jwt", sub2api_admin_jwt])
-
-        if group_ids_str:
-            cmd.extend(["--group-ids", group_ids_str])
-
-        cmd.extend(["--concurrency", str(concurrency), "--priority", str(priority)])
-        cmd.extend(["--input-csv", str(artifacts.csv_file)])
-
-        return_code = run_repo_script(
-            repo_src,
-            artifacts,
-            config_toml=config_toml,
-            cmd=cmd,
+        sink_result = sink_openai_oauth_from_crs_to_sub2api(
+            emails=emails,
+            crs_cfg=crs_cfg,
+            sub2_cfg=sub2_cfg,
+            timeout=int((settings.get("request") or {}).get("timeout") or 30),
+            dry_run=False,
         )
+
+        return_code = 0 if int(sink_result.get("fail") or 0) == 0 else 1
+
+        try:
+            (artifacts.job_dir / "sub2api_sink_result.json").write_text(
+                json.dumps(sink_result, ensure_ascii=False, indent=2) + "\n",
+                encoding="utf-8",
+            )
+        except Exception:
+            pass
 
         now = timezone.now().isoformat()
         patch_account(
@@ -1122,6 +1372,7 @@ def sub2api_sink_task(self, record_id: str):
             "mother_id": mother_id,
             "emails_count": len(emails),
             "artifacts": _artifacts_list_from_job_dir(job_dir),
+            "details": sink_result,
         }
 
         patch_task(

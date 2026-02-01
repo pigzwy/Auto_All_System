@@ -7,7 +7,7 @@ export interface GptBusinessStatistics {
 }
 
 export interface GptBusinessInviteTaskCreate {
-  flow?: 'invite_only' | 'legacy_run'
+  flow?: 'invite_only'
   team_name: string
   count?: number
   password?: string

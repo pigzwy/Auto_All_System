@@ -113,6 +113,9 @@
 
 将已注册的账号邀请加入指定的 Team 工作区。
 
+更详细的实现细节、日志/截图说明、常见故障排查见：
+- `docs/AUTO_INVITE_MAINTENANCE.md`
+
 ### 2.2 流程步骤
 
 ```
@@ -120,10 +123,11 @@
 │                        自动邀请流程                               │
 ├─────────────────────────────────────────────────────────────────┤
 │                                                                 │
-│  1. 获取 Team 信息                                               │
-│     ├── 使用 Team 管理员的 auth_token                            │
-│     ├── 调用 /backend-api/accounts/check 获取 account_id         │
-│     └── 检查可用席位数                                            │
+│  1. 获取管理员 Token / Account ID                                │
+│     ├── 优先复用母号已保存的 auth_token / account_id              │
+│     ├── 若缺失：使用 Geekez + DrissionPage 登录 chatgpt.com       │
+│     │   └── 调用 /api/auth/session 拿到 accessToken              │
+│     └── 调用 /backend-api/accounts/check 获取 account_id         │
 │                                                                 │
 │  2. 发送邀请                                                     │
 │     ├── API: POST /backend-api/accounts/{account_id}/invites     │
@@ -149,6 +153,12 @@
 GET https://chatgpt.com/backend-api/accounts/check/v4-2023-04-27
 Headers:
   Authorization: Bearer {auth_token}
+
+#### 获取 accessToken（登录态）
+
+```
+GET https://chatgpt.com/api/auth/session
+```
 ```
 
 #### 发送邀请

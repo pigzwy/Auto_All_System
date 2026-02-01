@@ -32,19 +32,15 @@ class BrowserService:
     def start(self) -> "BrowserService":
         """启动浏览器 - 通过 Geekez API"""
         from apps.integrations.geekez.api import GeekezBrowserAPI
-        from apps.integrations.geekez.models import GeekezConfig
-        
-        config = GeekezConfig.objects.filter(is_active=True).first()
-        if not config:
-            raise RuntimeError("未配置 Geekez 浏览器，请在 /admin/geekez 中配置")
-        
-        self._geekez_api = GeekezBrowserAPI(
-            api_base=config.api_base,
-            api_key=config.api_key or "",
-        )
+
+        # GeekezBrowserAPI 内部会自动读取 DB 配置（GeekezIntegrationConfig.get_solo）
+        # 并兼容历史环境变量；这里不再依赖旧的 GeekezConfig 模型。
+        self._geekez_api = GeekezBrowserAPI()
         
         if not self._geekez_api.health_check():
-            raise RuntimeError(f"Geekez 浏览器服务不可用: {config.api_base}")
+            raise RuntimeError(
+                "Geekez 浏览器服务不可用，请先在 /api/v1/geekez/config/ 配置并通过 /api/v1/geekez/config/test/ 测试连通"
+            )
 
         if self.profile_id:
             profile_id = self.profile_id
@@ -53,13 +49,13 @@ class BrowserService:
                 name=self.profile_name,
                 proxy=self.proxy,
             )
-            profile_id = profile_info.profile_id
+            profile_id = profile_info.id
         else:
             profile_info = self._geekez_api.create_or_update_profile(
                 name=f"gpt_auto_{int(time.time())}",
                 proxy=self.proxy,
             )
-            profile_id = profile_info.profile_id
+            profile_id = profile_info.id
         
         launch_info = self._geekez_api.launch_profile(profile_id)
         if not launch_info or not launch_info.debug_port:
