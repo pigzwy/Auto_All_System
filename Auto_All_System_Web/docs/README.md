@@ -127,7 +127,7 @@
 
 ## 🔌 插件系统
 
-### [07-插件化架构设计.md](./07-插件化架构设计.md)
+### [05-插件化架构设计.md](./05-插件化架构设计.md)
 
 **适合人群**: 插件开发者  
 **阅读时间**: 40分钟
@@ -143,28 +143,31 @@
 
 ---
 
-### [谷歌插件设计说明.md](./谷歌插件设计说明.md)
+### [06-Google插件设计说明.md](./06-Google插件设计说明.md)
 
 **适合人群**: Google插件使用者、开发者  
 **阅读时间**: 45分钟
 
-**内容包括**:
-- 📋 功能概述
-  - 账号管理
-  - 自动化工作流
-  - 卡信息管理
-  - 任务管理
-- 🏗️ 系统架构
-- 🔧 核心功能详解
-  - Google登录服务
-  - SheerID链接提取
-  - SheerID验证
-  - 自动绑卡
-  - 浏览器资源池
-- 💻 技术实现
-- 📖 使用指南
-- 🔌 API接口
-- 🐛 故障排查
+维护主文档（请以此为准）：
+- `../backend/plugins/google_business/docs/AUTOMATION_MAINTENANCE.md`
+
+---
+
+## 🧭 专区/插件自动化维护（主入口）
+
+后续所有“专区自动化”的维护文档建议统一放在各插件目录的 `docs/` 下，避免 `docs/` 目录重复堆积。
+
+当前已整理的维护主文档：
+
+- GPT专区（`/gpt-zone`）
+  - `../backend/plugins/gpt_business/docs/AUTO_INVITE_MAINTENANCE.md`
+
+- Google专区（`/google-zone`）
+  - `../backend/plugins/google_business/docs/AUTOMATION_MAINTENANCE.md`
+
+约定：
+- `Auto_All_System_Web/docs/` 只保留系统级、跨插件的文档，以及少量入口/索引（stub）。
+- 旧文档如内容重复，保留文件名但改成“stub + 链接到维护主文档”，避免多人维护多个版本。
 
 ---
 
