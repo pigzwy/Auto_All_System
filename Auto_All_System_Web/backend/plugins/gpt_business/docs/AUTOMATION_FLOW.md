@@ -7,6 +7,9 @@
 2. **自动邀请** - 将账号邀请加入 Team 工作区
 3. **自动入池** - 将账号授权并添加到 Sub2API 账号池
 
+实现细节、维护要点、日志/截图排查入口见：
+- `docs/AUTO_INVITE_MAINTENANCE.md`
+
 ---
 
 ## 一、自动开通 (Self Register + Team Onboarding)
@@ -14,6 +17,9 @@
 ### 1.1 功能说明
 
 自动完成新账号的注册和 Team 订阅开通全流程。
+
+维护/实现细节见：
+- `docs/AUTO_INVITE_MAINTENANCE.md`
 
 ### 1.2 流程步骤
 
@@ -200,6 +206,9 @@ GET https://chatgpt.com/backend-api/subscriptions?account_id={account_id}
 ### 3.1 功能说明
 
 将 ChatGPT 账号授权并添加到 Sub2API 账号池，供 API 网关使用。
+
+维护/实现细节见：
+- `docs/AUTO_INVITE_MAINTENANCE.md`
 
 ### 3.2 流程步骤
 

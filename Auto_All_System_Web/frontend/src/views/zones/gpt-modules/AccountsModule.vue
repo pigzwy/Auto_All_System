@@ -219,19 +219,32 @@
                   </TableCell>
                   <TableCell class="text-muted-foreground text-xs truncate max-w-[120px]">{{ mother.note }}</TableCell>
                   <TableCell>
-                    <div class="flex items-center gap-2">
-                      <Badge 
-                        :class="mother.geekez_profile_exists 
-                          ? 'bg-emerald-100 text-emerald-700 border-emerald-200 dark:bg-emerald-900/30 dark:text-emerald-400 dark:border-emerald-800' 
-                          : 'bg-slate-100 text-slate-500 border-slate-200 dark:bg-slate-800 dark:text-slate-400 dark:border-slate-700'"
-                        variant="outline" 
-                        class="text-xs"
-                      >
-                        {{ mother.geekez_profile_exists ? '✓ 已创建' : '○ 未创建' }}
-                      </Badge>
-                      <Badge v-if="mother.geekez_env" class="bg-sky-100 text-sky-700 border-sky-200 dark:bg-sky-900/30 dark:text-sky-400 dark:border-sky-800 text-xs font-mono" variant="outline">
-                        :{{ mother.geekez_env.debug_port || '' }}
-                      </Badge>
+                    <div class="flex flex-col gap-1">
+                      <div class="flex items-center gap-2">
+                        <Badge 
+                          :class="mother.geekez_profile_exists 
+                            ? 'bg-emerald-100 text-emerald-700 border-emerald-200 dark:bg-emerald-900/30 dark:text-emerald-400 dark:border-emerald-800' 
+                            : 'bg-slate-100 text-slate-500 border-slate-200 dark:bg-slate-800 dark:text-slate-400 dark:border-slate-700'"
+                          variant="outline" 
+                          class="text-xs"
+                        >
+                          {{ mother.geekez_profile_exists ? '✓ 已创建' : '○ 未创建' }}
+                        </Badge>
+                        <Badge v-if="mother.geekez_env" class="bg-sky-100 text-sky-700 border-sky-200 dark:bg-sky-900/30 dark:text-sky-400 dark:border-sky-800 text-xs font-mono" variant="outline">
+                          :{{ mother.geekez_env.debug_port || '' }}
+                        </Badge>
+                      </div>
+                      <div class="flex flex-wrap gap-1">
+                        <Badge
+                          v-for="b in getAccountStatusBadges(mother)"
+                          :key="b.key"
+                          variant="outline"
+                          class="text-[11px] leading-4"
+                          :class="b.class"
+                        >
+                          {{ b.text }}
+                        </Badge>
+                      </div>
                     </div>
                   </TableCell>
                   <TableCell class="text-muted-foreground text-xs">{{ formatDate(mother.created_at) }}</TableCell>
@@ -276,19 +289,32 @@
                               </TableCell>
                               <TableCell class="text-muted-foreground text-xs">{{ child.note }}</TableCell>
                               <TableCell>
-                                <div class="flex items-center gap-1">
-                                  <Badge 
-                                    :class="child.geekez_profile_exists 
-                                      ? 'bg-emerald-100 text-emerald-700 border-emerald-200 dark:bg-emerald-900/30 dark:text-emerald-400 dark:border-emerald-800' 
-                                      : 'bg-slate-100 text-slate-500 border-slate-200 dark:bg-slate-800 dark:text-slate-400 dark:border-slate-700'"
-                                    variant="outline"
-                                    class="text-xs"
-                                  >
-                                    {{ child.geekez_profile_exists ? '✓ 已创建' : '○ 未创建' }}
-                                  </Badge>
-                                  <Badge v-if="child.geekez_env" class="bg-sky-100 text-sky-700 border-sky-200 dark:bg-sky-900/30 dark:text-sky-400 dark:border-sky-800 text-xs font-mono" variant="outline">
-                                    :{{ child.geekez_env.debug_port || '' }}
-                                  </Badge>
+                                <div class="flex flex-col gap-1">
+                                  <div class="flex items-center gap-1">
+                                    <Badge 
+                                      :class="child.geekez_profile_exists 
+                                        ? 'bg-emerald-100 text-emerald-700 border-emerald-200 dark:bg-emerald-900/30 dark:text-emerald-400 dark:border-emerald-800' 
+                                        : 'bg-slate-100 text-slate-500 border-slate-200 dark:bg-slate-800 dark:text-slate-400 dark:border-slate-700'"
+                                      variant="outline"
+                                      class="text-xs"
+                                    >
+                                      {{ child.geekez_profile_exists ? '✓ 已创建' : '○ 未创建' }}
+                                    </Badge>
+                                    <Badge v-if="child.geekez_env" class="bg-sky-100 text-sky-700 border-sky-200 dark:bg-sky-900/30 dark:text-sky-400 dark:border-sky-800 text-xs font-mono" variant="outline">
+                                      :{{ child.geekez_env.debug_port || '' }}
+                                    </Badge>
+                                  </div>
+                                  <div class="flex flex-wrap gap-1">
+                                    <Badge
+                                      v-for="b in getAccountStatusBadges(child)"
+                                      :key="b.key"
+                                      variant="outline"
+                                      class="text-[11px] leading-4"
+                                      :class="b.class"
+                                    >
+                                      {{ b.text }}
+                                    </Badge>
+                                  </div>
                                 </div>
                               </TableCell>
                               <TableCell class="text-muted-foreground text-xs">{{ formatDate(child.created_at) }}</TableCell>
@@ -927,6 +953,72 @@ const removeAccount = async (accountId: string) => {
 
 const getGeekezActionLabel = (account: GptBusinessAccount) => {
   return account.geekez_profile_exists ? '打开环境' : '创建环境'
+}
+
+type StatusBadge = { key: string; text: string; class: string }
+
+const getAccountStatusBadges = (account: any): StatusBadge[] => {
+  const badges: StatusBadge[] = []
+
+  const accountType = String(account?.type || '')
+  const isMother = accountType === 'mother'
+  const isChild = accountType === 'child'
+
+  const registerStatus = String(account?.register_status || 'not_started')
+  const loginStatus = String(account?.login_status || 'not_started')
+  const poolStatus = String(account?.pool_status || '')
+  const teamJoinStatus = String(account?.team_join_status || '')
+
+  const push = (key: string, text: string, cls: string) => {
+    badges.push({ key, text, class: cls })
+  }
+
+  const mapCommon = (prefix: string, status: string, labels: Record<string, string>) => {
+    const text = labels[status] || labels.not_started
+    const clsMap: Record<string, string> = {
+      success: 'bg-emerald-100 text-emerald-700 border-emerald-200 dark:bg-emerald-900/30 dark:text-emerald-400 dark:border-emerald-800',
+      running: 'bg-sky-100 text-sky-700 border-sky-200 dark:bg-sky-900/30 dark:text-sky-400 dark:border-sky-800',
+      failed: 'bg-rose-100 text-rose-700 border-rose-200 dark:bg-rose-900/30 dark:text-rose-400 dark:border-rose-800',
+      not_started: 'bg-slate-100 text-slate-600 border-slate-200 dark:bg-slate-800 dark:text-slate-400 dark:border-slate-700'
+    }
+    push(prefix, text, clsMap[status] || clsMap.not_started)
+  }
+
+  mapCommon('register', registerStatus, {
+    success: '已注册',
+    running: '注册中',
+    failed: '注册失败',
+    not_started: '未注册'
+  })
+
+  mapCommon('login', loginStatus, {
+    success: '已登录',
+    running: '登录中',
+    failed: '登录失败',
+    not_started: '未登录'
+  })
+
+  // 母号：入池状态
+  if (isMother && poolStatus) {
+    mapCommon('pool', poolStatus, {
+      success: '已入池',
+      running: '入池中',
+      failed: '入池失败',
+      not_started: '未入池'
+    })
+  }
+
+  // 子号：入队状态
+  if (isChild && teamJoinStatus) {
+    mapCommon('join', teamJoinStatus, {
+      success: '已入队',
+      running: '入队中',
+      failed: '入队失败',
+      not_started: '未入队'
+    })
+  }
+
+  return badges
 }
 
 const launchGeekez = async (account: GptBusinessAccount) => {

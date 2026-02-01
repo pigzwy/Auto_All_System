@@ -1,6 +1,9 @@
-# GPT专区 - 自动邀请(auto_invite)执行流程与维护指南
+# GPT专区 - 自动化执行流程与维护指南
 
-本文档聚焦 GPT专区的“自动邀请”按钮（母号邀请子号加入 Team，并让子号自动完成入队/接受邀请/登录）。
+本文档覆盖 GPT专区三类自动化能力（母号维度）：
+- 自动开通：注册/登录并尝试完成 Team 开通（`self_register_task`）
+- 自动邀请：母号邀请子号加入 Team，并让子号自动入队（`auto_invite_task`）
+- 自动入池：将账号的 OAuth 凭据同步到 Sub2API 账号池（`sub2api_sink_task`）
 
 目标：
 - 让维护者能快速理解端到端执行链路
@@ -13,18 +16,22 @@
 
 ### 1.1 前端触发
 
-GPT专区页面点击“自动邀请”按钮后，调用后端 API：
+GPT专区页面的三个按钮分别调用后端 API：
 
+- `POST /api/v1/plugins/gpt-business/accounts/{mother_id}/self_register/`
 - `POST /api/v1/plugins/gpt-business/accounts/{mother_id}/auto_invite/`
+- `POST /api/v1/plugins/gpt-business/accounts/{mother_id}/sub2api_sink/`
 
-前端封装：`Auto_All_System_Web/frontend/src/api/gpt_business.ts`（`autoInvite(id)`）
+前端封装：`Auto_All_System_Web/frontend/src/api/gpt_business.ts`
 
 ### 1.2 后端接口
 
 后端入口：
 
 - `Auto_All_System_Web/backend/plugins/gpt_business/views.py`
+  - `AccountsViewSet.self_register`
   - `AccountsViewSet.auto_invite`
+  - `AccountsViewSet.sub2api_sink`
 
 职责：
 - 创建 task record（写入 PluginState.settings）
@@ -35,7 +42,9 @@ GPT专区页面点击“自动邀请”按钮后，调用后端 API：
 任务实现：
 
 - `Auto_All_System_Web/backend/plugins/gpt_business/tasks.py`
+  - `self_register_task(record_id: str)`
   - `auto_invite_task(record_id: str)`
+  - `sub2api_sink_task(record_id: str)`
 
 执行产物目录：
 - `MEDIA_ROOT/gpt_business/jobs/<record_id>/`
@@ -58,6 +67,15 @@ GPT专区所有状态都存储在 `PluginState.settings` 的 JSON 中。
 - `account_id`：Team 的 account_id（来自 `/backend-api/accounts/check/...`）
 - `invite_status` / `invite_last_task` / `invite_updated_at`
 
+状态字段（用于前端展示/任务跳过策略，建议二次开发沿用这些 key）：
+- `register_status` / `register_updated_at`：注册状态
+- `login_status` / `login_updated_at`：登录状态
+- `pool_status` / `pool_last_task` / `pool_updated_at`：入池状态（主要母号）
+- `invite_status` / `invite_last_task` / `invite_updated_at`：邀请状态（主要母号）
+
+状态值约定（string）：
+- `not_started` | `running` | `success` | `failed`
+
 子号（type=child）常用字段：
 - `id`
 - `email`
@@ -66,7 +84,15 @@ GPT专区所有状态都存储在 `PluginState.settings` 的 JSON 中。
 - `team_join_status` / `team_join_task` / `team_join_updated_at`
 - `team_account_id`（如果已入队）
 
+状态字段（子号侧）：
+- `register_status` / `register_updated_at`
+- `login_status` / `login_updated_at`
+- `team_join_status` / `team_join_task` / `team_join_updated_at`
+
 写入/更新都通过 `Auto_All_System_Web/backend/plugins/gpt_business/storage.py` 中的 `patch_account` 等函数完成。
+
+兼容性说明：
+- 旧数据可能缺少上述状态字段，`AccountsViewSet.list` 会兜底补默认值（避免前端 undefined）。
 
 ### 2.2 tasks（任务记录）关键字段
 
@@ -78,6 +104,27 @@ task record 关键字段：
 - `celery_task_id`
 - `result`：包含 invited 列表、child join 结果、artifacts 列表
 - `error`
+
+### 2.3 状态字段写回点（维护入口）
+
+初始化（创建账号时写默认状态）：
+- `Auto_All_System_Web/backend/plugins/gpt_business/views.py`
+  - `AccountsViewSet.create_mother`
+  - `AccountsViewSet.create_child`
+
+自动开通（母号注册/登录状态）：
+- `Auto_All_System_Web/backend/plugins/gpt_business/tasks.py:self_register_task`
+  - 任务开始：`register_status=running` / `login_status=running`
+  - 任务结束：按结果写 `success/failed`
+
+自动邀请（母号邀请状态 + 子号入队状态 + 子号登录/注册状态）：
+- `Auto_All_System_Web/backend/plugins/gpt_business/tasks.py:auto_invite_task`
+  - 母号：`invite_status` 从 `running` -> `success/failed`；拿到 token 时会写 `login_status=success`
+  - 子号：`team_join_status` 从 `running` -> `success/failed`；登录成功写 `login_status=success`；进入注册分支写 `register_status=running/success/failed`
+
+自动入池（母号入池状态）：
+- `Auto_All_System_Web/backend/plugins/gpt_business/tasks.py:sub2api_sink_task`
+  - `pool_status` 从 `running` -> `success/failed`
 
 ---
 
@@ -147,6 +194,10 @@ task record 关键字段：
 
 对每个子号循环执行：
 
+跳过策略（避免重复跑，提升稳定性）：
+- 若子号已入队（`team_join_status=success` 或已有 `team_account_id`），直接 skip（不再登录/不再点邀请）
+- 若子号标记为已登录（`login_status=success`），会优先尝试直接读取 `/api/auth/session` 复用 session，拿不到才走完整登录流程
+
 1) 启动子号 Geekez profile
    - profile_name 使用 `gpt_<child_email>`，便于复用 cookies
 
@@ -181,8 +232,8 @@ task record 关键字段：
    - 再次 `browser_fetch_account_id` 校验是否入队
 
 6) 写回子号状态
-   - `team_join_status=success/failed`
-   - `team_account_id`（如成功）
+    - `team_join_status=success/failed`
+    - `team_account_id`（如成功）
 
 ---
 
@@ -248,3 +299,73 @@ task record 关键字段：
 - 浏览器内调用 backend-api（绕过容器网络）：`Auto_All_System_Web/backend/plugins/gpt_business/services/chatgpt_backend_api.py`
 - 子号注册：`Auto_All_System_Web/backend/plugins/gpt_business/services/openai_register.py:register_openai_account`
 - 邮箱验证码/收信：`Auto_All_System_Web/backend/apps/integrations/email/services/client.py:CloudMailClient`
+
+---
+
+## 8. 自动开通（self_register）执行流程与维护点
+
+自动开通的目标是：
+- 确保母号完成注册（必要时走邮箱验证码）
+- 在配置允许的情况下尝试完成 Team/订阅开通（涉及绑卡/支付）
+
+入口：
+- API：`POST /api/v1/plugins/gpt-business/accounts/{mother_id}/self_register/`
+- Celery：`Auto_All_System_Web/backend/plugins/gpt_business/tasks.py:self_register_task`
+
+关键步骤（高层）：
+1) 启动 Geekez 浏览器 profile
+2) 注册/登录：`services/openai_register.py:register_openai_account`
+   - 处理 chatgpt.com 弹窗/跳转到 auth.openai.com
+   - `email-verification`：通过 CloudMail 拉验证码并输入
+   - `about-you / Let's confirm your age`：填写 Full name + Birthday 并 Continue
+3) 开通/入会（如果配置了支付能力）：`services/onboarding_flow.py:run_onboarding_flow`
+4) 写回状态并落产物
+
+状态写回（维护要点）：
+- `register_status` / `login_status`：在任务开始写 `running`，结束写 `success/failed`
+- `open_status`：历史字段（activated/registered/failed），仍会写回；建议前端展示以 `register_status/login_status` 为准
+
+常见故障排查：
+- 卡在 `/auth/login`：通常需要点击 `data-testid=signup-button` 进入注册
+- 卡在 `email-verification`：确认 CloudMail 配置、邮件是否到达，日志是否出现 `wait verification code start`
+- 卡在 `about-you`：Continue disabled，多半是生日输入形态变化，优先调整 `openai_register.py:_complete_about_you_page()`
+
+关键代码索引：
+- `Auto_All_System_Web/backend/plugins/gpt_business/tasks.py:self_register_task`
+- `Auto_All_System_Web/backend/plugins/gpt_business/services/openai_register.py:register_openai_account`
+- `Auto_All_System_Web/backend/plugins/gpt_business/services/onboarding_flow.py:run_onboarding_flow`
+
+---
+
+## 9. 自动入池（sub2api_sink）执行流程与维护点
+
+自动入池目标：把 CRS 中已存在的 OpenAI OAuth 凭据（access/refresh token）同步到 Sub2API 后台，形成可用账号池。
+
+入口：
+- API：`POST /api/v1/plugins/gpt-business/accounts/{mother_id}/sub2api_sink/`
+- Celery：`Auto_All_System_Web/backend/plugins/gpt_business/tasks.py:sub2api_sink_task`
+
+实现方式（当前为纯接口内置，不再依赖外部 repo/subprocess）：
+- `Auto_All_System_Web/backend/plugins/gpt_business/services/sub2api_sink_service.py`
+  - 从 CRS 拉取账号列表（`/admin/openai-accounts`）
+  - 找到与邮箱匹配的账号，读取 `openaiOauth.accessToken/refreshToken/expires_in`
+  - 调用 Sub2API 管理接口创建 oauth account（`/api/v1/admin/accounts`）
+
+必要配置（Plugin settings）：
+- CRS：`crs.api_base`、`crs.admin_token`
+- Sub2API：`s2a.api_base`，二选一认证：
+  - `s2a.admin_api_key`（推荐） 或 `s2a.admin_jwt`
+- 账号参数：`s2a.group_ids`、`s2a.concurrency`、`s2a.priority`
+
+状态写回（维护要点）：
+- `pool_status`：任务开始写 `running`，结束写 `success/failed`
+- 产物：会在 job_dir 写 `sub2api_sink_result.json`（ok/skip/fail + 逐邮箱细节）
+
+常见故障排查：
+- CRS list 为空：检查 `crs.api_base`/`crs.admin_token` 是否正确、服务是否可达
+- Sub2API 创建失败：检查认证方式（x-api-key vs Bearer jwt）、group_ids 是否有效
+- 账号已存在：会被标记为 skipped（属于正常行为）
+
+关键代码索引：
+- `Auto_All_System_Web/backend/plugins/gpt_business/tasks.py:sub2api_sink_task`
+- `Auto_All_System_Web/backend/plugins/gpt_business/services/sub2api_sink_service.py:sink_openai_oauth_from_crs_to_sub2api`

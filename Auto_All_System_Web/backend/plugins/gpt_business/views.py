@@ -502,9 +502,48 @@ class AccountsViewSet(ViewSet):
             has_profile = bool(
                 isinstance(geekez_profile, dict) and geekez_profile.get("profile_id")
             ) or bool(profile_name_new and profile_name_new in geekez_names) or bool(email and email in geekez_names)
+
+            # 状态字段兜底（兼容旧数据）
+            open_status = str(acc.get("open_status") or "").strip()
+            register_status = str(acc.get("register_status") or "").strip()
+            login_status = str(acc.get("login_status") or "").strip()
+            pool_status = str(acc.get("pool_status") or "").strip()
+            invite_status = str(acc.get("invite_status") or "").strip()
+            team_join_status = str(acc.get("team_join_status") or "").strip()
+
+            if not register_status:
+                if open_status in {"registered", "activated"}:
+                    register_status = "success"
+                else:
+                    register_status = "not_started"
+
+            if not login_status:
+                # mother 可能会缓存 auth_token（child 不缓存）
+                if str(acc.get("auth_token") or "").strip():
+                    login_status = "success"
+                else:
+                    login_status = "not_started"
+
+            if not pool_status:
+                pool_status = "not_started"
+
+            if not invite_status:
+                invite_status = "not_started"
+
+            if not team_join_status:
+                if str(acc.get("team_account_id") or "").strip():
+                    team_join_status = "success"
+                else:
+                    team_join_status = "not_started"
             return {
                 **acc,
                 "geekez_profile_exists": has_profile,
+                "open_status": open_status or ("not_started" if str(acc.get("type")) == "mother" else open_status),
+                "register_status": register_status,
+                "login_status": login_status,
+                "pool_status": pool_status,
+                "invite_status": invite_status,
+                "team_join_status": team_join_status,
                 **({"geekez_env": geekez_env} if isinstance(geekez_env, dict) else {}),
             }
 
@@ -580,6 +619,16 @@ class AccountsViewSet(ViewSet):
                     "account_password": account_password,
                     "seat_total": seat_total,
                     "note": note,
+                    # 状态字段（便于前端展示/任务跳过策略）
+                    "open_status": "not_started",
+                    "register_status": "not_started",
+                    "register_updated_at": "",
+                    "login_status": "not_started",
+                    "login_updated_at": "",
+                    "pool_status": "not_started",
+                    "pool_updated_at": "",
+                    "invite_status": "not_started",
+                    "invite_updated_at": "",
                     "created_at": now,
                     "updated_at": now,
                 }
@@ -658,6 +707,13 @@ class AccountsViewSet(ViewSet):
                     "email_password": email_password,
                     "account_password": account_password,
                     "note": note,
+                    # 状态字段
+                    "register_status": "not_started",
+                    "register_updated_at": "",
+                    "login_status": "not_started",
+                    "login_updated_at": "",
+                    "team_join_status": "not_started",
+                    "team_join_updated_at": "",
                     "created_at": now,
                     "updated_at": now,
                 }

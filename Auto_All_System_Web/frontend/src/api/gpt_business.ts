@@ -31,6 +31,20 @@ export interface GptBusinessAccount {
   geekez_profile_exists?: boolean
   geekez_env?: any
 
+  // 状态字段（后端 tasks 会写回；用于前端展示/跳过策略）
+  open_status?: string
+  register_status?: string
+  register_updated_at?: string
+  login_status?: string
+  login_updated_at?: string
+  pool_status?: string
+  pool_updated_at?: string
+  invite_status?: string
+  invite_updated_at?: string
+  team_join_status?: string
+  team_join_updated_at?: string
+  team_account_id?: string
+
   seat_total?: number
   seat_used?: number
   note?: string

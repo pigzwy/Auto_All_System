@@ -441,6 +441,19 @@ def self_register_task(self, record_id: str):
         job_dir = media_root / "gpt_business" / "jobs" / record_id
         artifacts = prepare_artifacts(job_dir)
 
+        # 状态：入池中
+        try:
+            patch_account(
+                mother_id,
+                {
+                    "pool_status": "running",
+                    "pool_last_task": record_id,
+                    "pool_updated_at": timezone.now().isoformat(),
+                },
+            )
+        except Exception:
+            pass
+
         def _log(line: str) -> None:
             ts = timezone.now().isoformat()
             artifacts.log_file.parent.mkdir(parents=True, exist_ok=True)
@@ -448,6 +461,20 @@ def self_register_task(self, record_id: str):
                 fp.write(f"[{ts}] {line}\n")
 
         _log(f"self_register start mother_id={mother_id} email={email}")
+
+        # 账号状态：注册中/登录中
+        try:
+            patch_account(
+                mother_id,
+                {
+                    "register_status": "running",
+                    "register_updated_at": timezone.now().isoformat(),
+                    "login_status": "running",
+                    "login_updated_at": timezone.now().isoformat(),
+                },
+            )
+        except Exception:
+            pass
 
         card_info = _get_available_card_for_checkout()
         if not card_info:
@@ -650,6 +677,10 @@ def self_register_task(self, record_id: str):
                 "open_status": open_status,
                 "open_last_task": record_id,
                 "open_updated_at": now,
+                "register_status": "success" if register_ok else "failed",
+                "register_updated_at": now,
+                "login_status": "success" if register_ok else "failed",
+                "login_updated_at": now,
             },
         )
 
@@ -685,6 +716,10 @@ def self_register_task(self, record_id: str):
                         "open_status": "failed",
                         "open_last_task": record_id,
                         "open_updated_at": timezone.now().isoformat(),
+                        "register_status": "failed",
+                        "register_updated_at": timezone.now().isoformat(),
+                        "login_status": "failed",
+                        "login_updated_at": timezone.now().isoformat(),
                     },
                 )
         except Exception:
@@ -749,10 +784,19 @@ def auto_invite_task(self, record_id: str):
             for a in list_accounts(settings)
             if isinstance(a, dict) and str(a.get("type")) == "child" and str(a.get("parent_id")) == mother_id
         ]
-        child_emails = [str(a.get("email") or "").strip() for a in children]
-        child_emails = [e for e in child_emails if e]
-        if not child_emails:
+        if not children:
             raise RuntimeError("No child accounts")
+
+        # 仅对“未入队”的子号发送邀请；已入队子号会在子号阶段直接 skip。
+        child_emails_to_invite: list[str] = []
+        for c in children:
+            join_status = str(c.get("team_join_status") or "").strip()
+            team_account_id_saved = str(c.get("team_account_id") or "").strip()
+            if join_status == "success" or team_account_id_saved:
+                continue
+            ce = str(c.get("email") or "").strip()
+            if ce:
+                child_emails_to_invite.append(ce)
 
         media_root = Path(str(getattr(django_settings, "MEDIA_ROOT", "")))
         if not str(media_root):
@@ -770,7 +814,22 @@ def auto_invite_task(self, record_id: str):
             except Exception:
                 pass
 
-        _append_log(f"auto_invite start mother_id={mother_id} email={email} children={len(child_emails)}")
+        _append_log(
+            f"auto_invite start mother_id={mother_id} email={email} children_total={len(children)} invite_targets={len(child_emails_to_invite)}"
+        )
+
+        # 状态：邀请中
+        try:
+            patch_account(
+                mother_id,
+                {
+                    "invite_status": "running",
+                    "invite_last_task": record_id,
+                    "invite_updated_at": timezone.now().isoformat(),
+                },
+            )
+        except Exception:
+            pass
 
         token = str(mother.get("auth_token") or "").strip()
         account_id = str(mother.get("account_id") or "").strip()
@@ -883,47 +942,27 @@ def auto_invite_task(self, record_id: str):
 
             return False
 
-        with BrowserService(profile_name=f"gpt_{email}") as browser:
-            _append_log(f"browser launched profile={getattr(browser, '_launched_profile_id', None)}")
-            if not browser.page:
-                raise RuntimeError("Browser page is not available")
+        invite_response: dict[str, Any] = {"success": [], "failed": [], "raw": {}}
 
-            _shot = _make_shot(browser.page, prefix="mother_")
+        if not child_emails_to_invite:
+            _append_log("no pending children to invite; skip mother invite stage")
+        else:
+            with BrowserService(profile_name=f"gpt_{email}") as browser:
+                _append_log(f"browser launched profile={getattr(browser, '_launched_profile_id', None)}")
+                if not browser.page:
+                    raise RuntimeError("Browser page is not available")
 
-            try:
-                browser.page.get("https://chatgpt.com/")
-            except Exception:
-                pass
+                _shot = _make_shot(browser.page, prefix="mother_")
 
-            if token:
-                _append_log("reuse existing auth_token")
-            else:
-                _append_log("auth_token missing, login via Geekez + /api/auth/session")
-                token, _session = ensure_access_token(
-                    browser.page,
-                    email=email,
-                    password=password,
-                    timeout=180,
-                    log_callback=_append_log,
-                    screenshot_callback=_shot,
-                )
-
-            if not token:
-                raise RuntimeError("Failed to get auth_token")
-
-            _append_log(f"auth_token ok len={len(token)}")
-
-            if not account_id:
-                _append_log("account_id missing, fetch via browser /backend-api/accounts/check")
                 try:
-                    account_id = browser_fetch_account_id(
-                        browser.page,
-                        auth_token=token,
-                        timeout_sec=20,
-                        log_callback=_append_log,
-                    )
-                except Exception as e:
-                    _append_log(f"fetch account_id failed: {e}; try relogin")
+                    browser.page.get("https://chatgpt.com/")
+                except Exception:
+                    pass
+
+                if token:
+                    _append_log("reuse existing auth_token")
+                else:
+                    _append_log("auth_token missing, login via Geekez + /api/auth/session")
                     token, _session = ensure_access_token(
                         browser.page,
                         email=email,
@@ -932,28 +971,53 @@ def auto_invite_task(self, record_id: str):
                         log_callback=_append_log,
                         screenshot_callback=_shot,
                     )
-                    account_id = browser_fetch_account_id(
-                        browser.page,
-                        auth_token=token,
-                        timeout_sec=20,
-                        log_callback=_append_log,
-                    )
 
-            if account_id:
-                _append_log(f"account_id ok {account_id}")
+                if not token:
+                    raise RuntimeError("Failed to get auth_token")
 
-            if not account_id:
-                raise RuntimeError("Failed to get account_id")
+                _append_log(f"auth_token ok len={len(token)}")
 
-            _append_log(f"invite start count={len(child_emails)}")
-            invite_response = browser_invite_emails(
-                browser.page,
-                account_id=account_id,
-                auth_token=token,
-                emails=child_emails,
-                timeout_sec=40,
-                log_callback=_append_log,
-            )
+                if not account_id:
+                    _append_log("account_id missing, fetch via browser /backend-api/accounts/check")
+                    try:
+                        account_id = browser_fetch_account_id(
+                            browser.page,
+                            auth_token=token,
+                            timeout_sec=20,
+                            log_callback=_append_log,
+                        )
+                    except Exception as e:
+                        _append_log(f"fetch account_id failed: {e}; try relogin")
+                        token, _session = ensure_access_token(
+                            browser.page,
+                            email=email,
+                            password=password,
+                            timeout=180,
+                            log_callback=_append_log,
+                            screenshot_callback=_shot,
+                        )
+                        account_id = browser_fetch_account_id(
+                            browser.page,
+                            auth_token=token,
+                            timeout_sec=20,
+                            log_callback=_append_log,
+                        )
+
+                if account_id:
+                    _append_log(f"account_id ok {account_id}")
+
+                if not account_id:
+                    raise RuntimeError("Failed to get account_id")
+
+                _append_log(f"invite start count={len(child_emails_to_invite)}")
+                invite_response = browser_invite_emails(
+                    browser.page,
+                    account_id=account_id,
+                    auth_token=token,
+                    emails=child_emails_to_invite,
+                    timeout_sec=40,
+                    log_callback=_append_log,
+                )
 
         success_list = invite_response.get("success") or []
         failed_list = invite_response.get("failed") or []
@@ -980,6 +1044,8 @@ def auto_invite_task(self, record_id: str):
             "invite_status": "success" if not has_failed else "failed",
             "invite_last_task": record_id,
             "invite_updated_at": now,
+            # 母号 token 属于“已登录”的强信号
+            **({"login_status": "success", "login_updated_at": now} if token else {}),
         }
         if token:
             patch["auth_token"] = token
@@ -999,16 +1065,47 @@ def auto_invite_task(self, record_id: str):
             child_email = str(child.get("email") or "").strip()
             child_id = str(child.get("id") or "").strip()
             child_pwd = str(child.get("account_password") or "").strip()
+            child_join_status = str(child.get("team_join_status") or "").strip()
+            child_team_account_id_saved = str(child.get("team_account_id") or "").strip()
+            child_login_status = str(child.get("login_status") or "").strip()
 
             log_prefix = f"[child {idx}/{len(children)} {child_email}] "
             if not child_email:
                 continue
 
             _append_log(log_prefix + "start")
+
+            # 已入队的子号：直接跳过（避免重复登录/重复点邀请）
+            if child_join_status == "success" or child_team_account_id_saved:
+                children_results.append(
+                    {
+                        "email": child_email,
+                        "id": child_id,
+                        "joined": True,
+                        "team_account_id": child_team_account_id_saved,
+                        "skipped": True,
+                        "reason": "already_joined",
+                    }
+                )
+                _append_log(log_prefix + "skip: already joined")
+                continue
             if not child_pwd:
                 children_results.append({"email": child_email, "joined": False, "error": "missing account_password"})
                 join_failed.append(child_email)
                 continue
+
+            # 状态：子号入队中
+            try:
+                patch_account(
+                    child_id,
+                    {
+                        "team_join_status": "running",
+                        "team_join_task": record_id,
+                        "team_join_updated_at": timezone.now().isoformat(),
+                    },
+                )
+            except Exception:
+                pass
 
             email_cfg_child = _cloudmail_email_config_from_account(child)
             mail_client_child = CloudMailClient(
@@ -1042,17 +1139,75 @@ def auto_invite_task(self, record_id: str):
 
                             # 1) 登录（若不存在则注册）
                             try:
-                                _append_log(log_prefix + "login via /api/auth/session")
-                                child_token, _sess = ensure_access_token(
-                                    child_browser.page,
-                                    email=child_email,
-                                    password=child_pwd,
-                                    timeout=180,
-                                    log_callback=lambda m: _append_log(log_prefix + m),
-                                    screenshot_callback=child_shot,
-                                )
+                                try:
+                                    patch_account(
+                                        child_id,
+                                        {
+                                            "login_status": "running",
+                                            "login_updated_at": timezone.now().isoformat(),
+                                        },
+                                    )
+                                except Exception:
+                                    pass
+
+                                child_token = ""
+                                # 如果标记为已登录，则先尝试直接复用 session（避免重复跑完整登录流程）
+                                if child_login_status == "success":
+                                    _append_log(log_prefix + "skip login: login_status=success, try session")
+                                    try:
+                                        from .services.chatgpt_session import fetch_auth_session
+
+                                        sess_data = fetch_auth_session(child_browser.page, timeout=7)
+                                        sess_user = sess_data.get("user") if isinstance(sess_data, dict) else None
+                                        sess_email = (
+                                            str(sess_user.get("email") or "").strip()
+                                            if isinstance(sess_user, dict)
+                                            else ""
+                                        )
+                                        sess_token = (
+                                            str(sess_data.get("accessToken") or "").strip()
+                                            if isinstance(sess_data, dict)
+                                            else ""
+                                        )
+                                        if sess_token and sess_email and sess_email.lower() == child_email.lower():
+                                            child_token = sess_token
+                                    except Exception:
+                                        child_token = ""
+
+                                if not child_token:
+                                    _append_log(log_prefix + "login via /api/auth/session")
+                                    child_token, _sess = ensure_access_token(
+                                        child_browser.page,
+                                        email=child_email,
+                                        password=child_pwd,
+                                        timeout=180,
+                                        log_callback=lambda m: _append_log(log_prefix + m),
+                                        screenshot_callback=child_shot,
+                                    )
+
+                                try:
+                                    patch_account(
+                                        child_id,
+                                        {
+                                            "login_status": "success",
+                                            "login_updated_at": timezone.now().isoformat(),
+                                        },
+                                    )
+                                except Exception:
+                                    pass
                             except Exception as e:
                                 _append_log(log_prefix + f"login failed: {e}; try register")
+
+                                try:
+                                    patch_account(
+                                        child_id,
+                                        {
+                                            "register_status": "running",
+                                            "register_updated_at": timezone.now().isoformat(),
+                                        },
+                                    )
+                                except Exception:
+                                    pass
 
                                 def _get_code(_email: str) -> str | None:
                                     # 不强依赖 sender_contains，避免不同环境发件人字段差异导致拿不到验证码
@@ -1076,7 +1231,28 @@ def auto_invite_task(self, record_id: str):
                                 )
                                 _append_log(log_prefix + f"register result={register_ok}")
                                 if not register_ok:
+                                    try:
+                                        patch_account(
+                                            child_id,
+                                            {
+                                                "register_status": "failed",
+                                                "register_updated_at": timezone.now().isoformat(),
+                                            },
+                                        )
+                                    except Exception:
+                                        pass
                                     raise RuntimeError("register_openai_account failed")
+
+                                try:
+                                    patch_account(
+                                        child_id,
+                                        {
+                                            "register_status": "success",
+                                            "register_updated_at": timezone.now().isoformat(),
+                                        },
+                                    )
+                                except Exception:
+                                    pass
 
                                 # 注册流程结束后，尽量用轻量 session 读取 token（避免再次跑完整登录导致页面断连）
                                 from .services.chatgpt_session import fetch_auth_session
@@ -1102,6 +1278,17 @@ def auto_invite_task(self, record_id: str):
                                         log_callback=lambda m: _append_log(log_prefix + m),
                                         screenshot_callback=child_shot,
                                     )
+
+                                try:
+                                    patch_account(
+                                        child_id,
+                                        {
+                                            "login_status": "success",
+                                            "login_updated_at": timezone.now().isoformat(),
+                                        },
+                                    )
+                                except Exception:
+                                    pass
 
                             child_result["auth"] = "ok"
 
@@ -1194,6 +1381,21 @@ def auto_invite_task(self, record_id: str):
                 child_result["error"] = str(e)
                 join_failed.append(child_email)
 
+                # 兜底标记失败（避免长时间卡在 running）
+                try:
+                    patch_account(
+                        child_id,
+                        {
+                            "team_join_status": "failed",
+                            "team_join_task": record_id,
+                            "team_join_updated_at": timezone.now().isoformat(),
+                            "login_status": "failed",
+                            "login_updated_at": timezone.now().isoformat(),
+                        },
+                    )
+                except Exception:
+                    pass
+
             children_results.append(child_result)
 
         _append_log(f"children accept stage done failed={len(join_failed)}")
@@ -1204,7 +1406,7 @@ def auto_invite_task(self, record_id: str):
             "success": overall_ok,
             "mother_id": mother_id,
             "email": email,
-            "invited_count": len(child_emails),
+            "invited_count": len(child_emails_to_invite),
             "artifacts": _artifacts_list_from_job_dir(job_dir),
             "details": {
                 "failed": invite_response.get("failed") or [],

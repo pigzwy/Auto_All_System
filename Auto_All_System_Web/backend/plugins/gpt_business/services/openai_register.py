@@ -262,47 +262,54 @@ def register_openai_account(
             return False
 
         # Birthday
-        year_input = wait_for_element(page, 'css:[data-type="year"]', timeout=2)
-        month_input = wait_for_element(page, 'css:[data-type="month"]', timeout=2) if year_input else None
-        day_input = wait_for_element(page, 'css:[data-type="day"]', timeout=2) if year_input else None
-
-        if year_input and month_input and day_input:
-            _log(f"输入生日(分段): {year}/{month}/{day}")
-            try:
-                year_input.click()
-                time.sleep(0.15)
-                year_input.input(year, clear=True)
-                time.sleep(0.2)
-                month_input.click()
-                time.sleep(0.15)
-                month_input.input(month, clear=True)
-                time.sleep(0.2)
-                day_input.click()
-                time.sleep(0.15)
-                day_input.input(day, clear=True)
-            except Exception:
-                _shot("about_you_birthday_fill_failed.png")
-                return False
-        else:
-            bday_input = wait_for_element(
-                page,
-                'css:input[name*="birth"], input[autocomplete*="bday"], input[aria-label*="Birth"], input[aria-label*="birth"], input[placeholder*="/"]',
-                timeout=5,
-            )
-            if not bday_input:
-                _log("无法找到生日输入框")
-                _shot("about_you_birthday_missing.png")
-                return False
+        # 优先按页面真实可见的单输入框（截图显示 aria-label="Birthday"）填写；分段输入仅作为兜底。
+        bday_input = wait_for_element(
+            page,
+            'css:input[aria-label="Birthday"], input[name*="birth"], input[autocomplete*="bday"], input[aria-label*="Birth"], input[aria-label*="birth"], input[placeholder*="/"]',
+            timeout=6,
+        )
+        if bday_input:
             _log(f"输入生日(单框): {birthday_mmddyyyy}")
             try:
-                type_slowly(page, bday_input, birthday_mmddyyyy)
+                bday_input.click()
+                time.sleep(0.12)
+                bday_input.input(birthday_mmddyyyy, clear=True)
             except Exception:
-                _shot("about_you_birthday_fill_failed.png")
+                try:
+                    type_slowly(page, bday_input, birthday_mmddyyyy)
+                except Exception:
+                    _shot("about_you_birthday_fill_failed.png")
+                    return False
+        else:
+            # 分段输入
+            year_input = wait_for_element(page, 'css:[data-type="year"]', timeout=3)
+            month_input = wait_for_element(page, 'css:[data-type="month"]', timeout=3) if year_input else None
+            day_input = wait_for_element(page, 'css:[data-type="day"]', timeout=3) if year_input else None
+            if year_input and month_input and day_input:
+                _log(f"输入生日(分段): {year}/{month}/{day}")
+                try:
+                    year_input.click()
+                    time.sleep(0.15)
+                    year_input.input(year, clear=True)
+                    time.sleep(0.2)
+                    month_input.click()
+                    time.sleep(0.15)
+                    month_input.input(month, clear=True)
+                    time.sleep(0.2)
+                    day_input.click()
+                    time.sleep(0.15)
+                    day_input.input(day, clear=True)
+                except Exception:
+                    _shot("about_you_birthday_fill_failed.png")
+                    return False
+            else:
+                _log("无法找到生日输入框")
+                _shot("about_you_birthday_missing.png")
                 return False
 
         _log("生日已输入")
 
-        time.sleep(0.5)
+        time.sleep(0.6)
         submit_btn = wait_for_element(page, 'css:button[type="submit"]', timeout=8)
         if not submit_btn:
             submit_btn = wait_for_element(page, 'text:Continue', timeout=3)
@@ -311,14 +318,41 @@ def register_openai_account(
             _shot("about_you_continue_missing.png")
             return False
 
+        # 按钮可能处于 disabled（未真正填入/未触发校验），这种情况下不要误点并跳走。
+        try:
+            disabled = page.run_js(
+                """
+                const btn = document.querySelector('button[type="submit"]');
+                return btn ? !!btn.disabled : null;
+                """.strip(),
+                timeout=2,
+            )
+            if disabled is True:
+                _log("Continue 按钮为 disabled，说明表单未生效")
+                _shot("about_you_continue_disabled.png")
+                return False
+        except Exception:
+            pass
+
+        old_url = page.url
         try:
             submit_btn.click()
         except Exception:
             _shot("about_you_continue_click_failed.png")
             return False
 
-        time.sleep(2)
+        # 等待跳转离开 about-you（成功时一般会重定向回 chatgpt.com 或进入后续 step）
+        for _ in range(20):
+            time.sleep(0.5)
+            if page.url != old_url and "about-you" not in (page.url or ""):
+                break
         _shot("about_you_after_submit.png")
+
+        # 如果仍停留在 about-you，说明提交未生效
+        if "about-you" in (page.url or ""):
+            _log("提交后仍停留在 about-you，可能未通过校验")
+            return False
+
         return True
 
     _log(f"开始注册 OpenAI 账号: {email}")

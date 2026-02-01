@@ -12,6 +12,11 @@ Key points:
 
 - invite_only: only create emails (GPTMail) + invite to OpenAI Team
 
+## Docs
+
+- Overview: `docs/AUTOMATION_FLOW.md`
+- Maintenance guide (self_register / auto_invite / sub2api_sink): `docs/AUTO_INVITE_MAINTENANCE.md`
+
 ## Requirements
 
 - drissionpage (browser automation)
