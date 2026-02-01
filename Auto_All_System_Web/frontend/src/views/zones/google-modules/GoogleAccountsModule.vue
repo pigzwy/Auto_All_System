@@ -1,140 +1,89 @@
 <template>
-  <div class="space-y-6">
-    <div class="flex items-end justify-between gap-4">
-      <div>
-        <h2 class="text-2xl font-semibold text-foreground">谷歌账号管理</h2>
-        <p class="mt-1 text-sm text-muted-foreground">批量导入、分组筛选、任务派发与日志查看</p>
+  <div class="space-y-4">
+    <!-- 统计卡片 -->
+    <div class="grid grid-cols-2 gap-4 sm:grid-cols-4">
+      <div class="rounded-xl border border-border bg-gradient-to-br from-blue-50 to-blue-100/50 dark:from-blue-950/30 dark:to-blue-900/20 p-4">
+        <div class="flex items-center gap-3">
+          <div class="flex h-10 w-10 items-center justify-center rounded-lg bg-blue-500/10">
+            <Users class="h-5 w-5 text-blue-600 dark:text-blue-400" />
+          </div>
+          <div>
+            <div class="text-2xl font-bold text-blue-700 dark:text-blue-300">{{ total }}</div>
+            <div class="text-xs text-blue-600/70 dark:text-blue-400/70">账号总数</div>
+          </div>
+        </div>
       </div>
-      <div class="flex items-center gap-2">
-        <Button size="sm" class="gap-2" @click="showDialog = true">
-          <PlusIcon class="h-4 w-4" />
-          添加账号
-        </Button>
-        <Button variant="secondary" size="sm" class="gap-2" @click="showImportDialog = true">
-          <UploadIcon class="h-4 w-4" />
-          批量导入
-        </Button>
-        <DropdownMenu>
-          <DropdownMenuTrigger as-child>
-            <Button variant="outline" size="sm" class="gap-2">
-              <DownloadIcon class="h-4 w-4" />
-              导出
-              <ChevronDownIcon class="h-4 w-4 opacity-70" />
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" class="w-36">
-            <DropdownMenuItem @select="handleExportCommand('csv')">导出 CSV</DropdownMenuItem>
-            <DropdownMenuItem @select="handleExportCommand('txt')">导出 TXT</DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
+      <div class="rounded-xl border border-border bg-gradient-to-br from-emerald-50 to-emerald-100/50 dark:from-emerald-950/30 dark:to-emerald-900/20 p-4">
+        <div class="flex items-center gap-3">
+          <div class="flex h-10 w-10 items-center justify-center rounded-lg bg-emerald-500/10">
+            <CheckCircle2 class="h-5 w-5 text-emerald-600 dark:text-emerald-400" />
+          </div>
+          <div>
+            <div class="text-2xl font-bold text-emerald-700 dark:text-emerald-300">{{ stats.verified }}</div>
+            <div class="text-xs text-emerald-600/70 dark:text-emerald-400/70">已验证</div>
+          </div>
+        </div>
+      </div>
+      <div class="rounded-xl border border-border bg-gradient-to-br from-violet-50 to-violet-100/50 dark:from-violet-950/30 dark:to-violet-900/20 p-4">
+        <div class="flex items-center gap-3">
+          <div class="flex h-10 w-10 items-center justify-center rounded-lg bg-violet-500/10">
+            <CreditCardIcon class="h-5 w-5 text-violet-600 dark:text-violet-400" />
+          </div>
+          <div>
+            <div class="text-2xl font-bold text-violet-700 dark:text-violet-300">{{ stats.cardBound }}</div>
+            <div class="text-xs text-violet-600/70 dark:text-violet-400/70">已绑卡</div>
+          </div>
+        </div>
+      </div>
+      <div class="rounded-xl border border-border bg-gradient-to-br from-amber-50 to-amber-100/50 dark:from-amber-950/30 dark:to-amber-900/20 p-4">
+        <div class="flex items-center gap-3">
+          <div class="flex h-10 w-10 items-center justify-center rounded-lg bg-amber-500/10">
+            <MonitorIcon class="h-5 w-5 text-amber-600 dark:text-amber-400" />
+          </div>
+          <div>
+            <div class="text-2xl font-bold text-amber-700 dark:text-amber-300">{{ stats.envCreated }}</div>
+            <div class="text-xs text-amber-600/70 dark:text-amber-400/70">已创建环境</div>
+          </div>
+        </div>
       </div>
     </div>
 
-    <!-- 筛选和批量操作栏 -->
+    <!-- 筛选栏 -->
     <Card class="bg-card text-card-foreground">
       <CardContent class="p-4">
-        <div class="flex flex-wrap items-end justify-between gap-3">
-          <div class="flex flex-wrap items-end gap-3">
-            <Select :model-value="filterType" @update:modelValue="(v) => onFilterTypeChange(v)">
-              <SelectTrigger class="h-9 w-40">
-                <SelectValue placeholder="账号状态筛选" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">全部状态</SelectItem>
-                <SelectItem value="ineligible">无资格</SelectItem>
-                <SelectItem value="unbound_card">未绑卡</SelectItem>
-                <SelectItem value="success">成功</SelectItem>
-                <SelectItem value="other">其他</SelectItem>
-              </SelectContent>
-            </Select>
+        <div class="flex flex-wrap items-center gap-3">
+          <Select :model-value="filterType" @update:modelValue="(v) => onFilterTypeChange(v)">
+            <SelectTrigger class="h-9 w-40">
+              <SelectValue placeholder="账号状态筛选" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">全部状态</SelectItem>
+              <SelectItem value="ineligible">无资格</SelectItem>
+              <SelectItem value="unbound_card">未绑卡</SelectItem>
+              <SelectItem value="success">成功</SelectItem>
+              <SelectItem value="other">其他</SelectItem>
+            </SelectContent>
+          </Select>
 
-            <Select :model-value="filterGroup" @update:modelValue="(v) => onFilterGroupChange(v)">
-              <SelectTrigger class="h-9 w-44">
-                <SelectValue placeholder="分组筛选" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">全部分组</SelectItem>
-                <SelectItem value="ungrouped">未分组</SelectItem>
-                <SelectItem
-                  v-for="group in groupList"
-                  :key="String(group.id)"
-                  :value="String(group.id)"
-                >
-                  {{ `${group.name} (${group.account_count})` }}
-                </SelectItem>
-              </SelectContent>
-            </Select>
+          <Select :model-value="filterGroup" @update:modelValue="(v) => onFilterGroupChange(v)">
+            <SelectTrigger class="h-9 w-44">
+              <SelectValue placeholder="分组筛选" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">全部分组</SelectItem>
+              <SelectItem value="ungrouped">未分组</SelectItem>
+              <SelectItem
+                v-for="group in groupList"
+                :key="String(group.id)"
+                :value="String(group.id)"
+              >
+                {{ `${group.name} (${group.account_count})` }}
+              </SelectItem>
+            </SelectContent>
+          </Select>
 
-            <Button variant="outline" size="sm" class="gap-2" @click="fetchAccounts">
-              <RefreshCwIcon class="h-4 w-4" />
-              刷新
-            </Button>
-          </div>
-        
-          <div v-if="selectedAccounts.length > 0" class="flex flex-wrap items-center gap-2">
-            <span class="inline-flex items-center rounded-full border border-border bg-muted/30 px-3 py-1 text-xs text-muted-foreground">
-              已选 <span class="ml-1 font-semibold text-foreground">{{ selectedAccounts.length }}</span> 项
-            </span>
-          
-           <Button
-             size="sm"
-             class="gap-2"
-             :title="'一键全自动 (登录-检测-验证-订阅)，可选增项安全设置'"
-             @click="openOneClickDialog"
-           >
-             <Wand2Icon class="h-4 w-4" />
-             一键全自动
-           </Button>
-
-          <DropdownMenu>
-            <DropdownMenuTrigger as-child>
-              <Button variant="outline" size="sm" class="gap-2">
-                <CreditCardIcon class="h-4 w-4" />
-                验证/绑卡
-                <ChevronDownIcon class="h-4 w-4 opacity-70" />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" class="w-44">
-              <DropdownMenuItem @select="handleBatchCommand('sheerid')">SheerID 验证</DropdownMenuItem>
-              <DropdownMenuItem @select="handleBatchCommand('bind_card')">自动绑卡</DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-
-          <DropdownMenu>
-            <DropdownMenuTrigger as-child>
-              <Button variant="outline" size="sm" class="gap-2">
-                <ShieldIcon class="h-4 w-4" />
-                安全设置
-                <ChevronDownIcon class="h-4 w-4 opacity-70" />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" class="w-44">
-              <DropdownMenuItem @select="handleSecurityCommand('change_2fa')">修改 2FA</DropdownMenuItem>
-              <DropdownMenuItem @select="handleSecurityCommand('change_recovery')">修改辅助邮箱</DropdownMenuItem>
-              <DropdownMenuItem @select="handleSecurityCommand('get_backup_codes')">获取备份码</DropdownMenuItem>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem @select="handleSecurityCommand('one_click_update')">一键安全更新</DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-
-          <DropdownMenu>
-            <DropdownMenuTrigger as-child>
-              <Button variant="outline" size="sm" class="gap-2">
-                <MonitorIcon class="h-4 w-4" />
-                订阅管理
-                <ChevronDownIcon class="h-4 w-4 opacity-70" />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" class="w-44">
-              <DropdownMenuItem @select="handleSubscriptionCommand('verify_status')">验证订阅状态</DropdownMenuItem>
-              <DropdownMenuItem @select="handleSubscriptionCommand('click_subscribe')">点击订阅按钮</DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-
-          <Button variant="destructive" size="sm" class="gap-2" @click="handleBulkDelete">
-            <Trash2Icon class="h-4 w-4" />
-            批量删除
-          </Button>
+          <div class="ml-auto text-sm text-muted-foreground">
+            共 <span class="font-medium text-foreground">{{ total }}</span> 条
           </div>
         </div>
       </CardContent>
@@ -159,13 +108,12 @@
                 <TableHead class="w-40">Geek</TableHead>
                 <TableHead class="w-20 text-center">绑卡</TableHead>
                 <TableHead class="w-44">创建时间</TableHead>
-                <TableHead class="w-[260px] text-right">操作</TableHead>
               </TableRow>
             </TableHeader>
 
             <TableBody>
               <TableRow v-if="loading">
-                <TableCell colspan="9" class="py-10">
+                <TableCell colspan="8" class="py-10">
                   <div class="flex items-center justify-center gap-2 text-sm text-muted-foreground">
                     <Loader2Icon class="h-4 w-4 animate-spin" />
                     加载中...
@@ -174,13 +122,20 @@
               </TableRow>
 
               <TableRow v-else-if="accounts.length === 0">
-                <TableCell colspan="9" class="py-10 text-center text-sm text-muted-foreground">
+                <TableCell colspan="8" class="py-10 text-center text-sm text-muted-foreground">
                   暂无数据
                 </TableCell>
               </TableRow>
 
-              <TableRow v-else v-for="row in accounts" :key="row.id" class="hover:bg-muted/20">
-                <TableCell>
+              <TableRow 
+                v-else 
+                v-for="row in accounts" 
+                :key="row.id" 
+                class="cursor-pointer transition-colors"
+                :class="isRowSelected(row) ? 'bg-primary/10 hover:bg-primary/15' : 'hover:bg-muted/30'"
+                @click="onToggleRow(row, !isRowSelected(row))"
+              >
+                <TableCell @click.stop>
                   <Checkbox
                     :checked="isRowSelected(row)"
                     @update:checked="(v: boolean) => onToggleRow(row, v)"
@@ -237,26 +192,6 @@
 
                 <TableCell class="text-muted-foreground">
                   {{ formatDate(row.created_at) }}
-                </TableCell>
-
-                <TableCell class="text-right">
-                  <div class="inline-flex flex-wrap justify-end gap-x-3 gap-y-1">
-                    <Button variant="link" size="xs" class="h-auto p-0" @click="handleLaunchGeekez(row)">
-                      {{ getGeekezActionLabel(row) }}
-                    </Button>
-                    <Button variant="link" size="xs" class="h-auto p-0 text-warning hover:text-warning" @click="openEditDialog(row)">编辑</Button>
-                    <Button variant="link" size="xs" class="h-auto p-0 text-amber-600 hover:text-amber-600" @click="viewTasks(row)">
-                      任务日志
-                    </Button>
-                    <Button
-                      variant="link"
-                      size="xs"
-                      class="h-auto p-0 text-destructive hover:text-destructive"
-                      @click="deleteAccount(row)"
-                    >
-                      删除
-                    </Button>
-                  </div>
                 </TableCell>
               </TableRow>
             </TableBody>
@@ -1032,6 +967,7 @@ import {
   Shield as ShieldIcon,
   Trash2 as Trash2Icon,
   Upload as UploadIcon,
+  Users,
   Wand2 as Wand2Icon,
   XCircle,
 } from 'lucide-vue-next'
@@ -1110,6 +1046,31 @@ const totalPages = computed(() => {
 })
 
 const selectedIds = computed(() => new Set(selectedAccounts.value.map(a => a.id)))
+
+// 统计信息
+const stats = computed(() => {
+  let verified = 0
+  let cardBound = 0
+  let envCreated = 0
+  
+  accounts.value.forEach((a: GoogleAccount) => {
+    if (a.sheerid_verified) verified++
+    if (a.card_bound) cardBound++
+    if (a.geekez_profile_exists) envCreated++
+  })
+  
+  return { verified, cardBound, envCreated }
+})
+
+// 通知父组件选中数量变化
+watch(selectedAccounts, (newVal) => {
+  window.dispatchEvent(new CustomEvent('google-selection-changed', { 
+    detail: { 
+      count: newVal.length,
+      account: newVal.length === 1 ? newVal[0] : null
+    }
+  }))
+}, { deep: true, immediate: true })
 
 const isRowSelected = (row: GoogleAccount) => {
   return selectedIds.value.has(row.id)
@@ -2064,8 +2025,71 @@ const format2fa = (val?: string | null) => {
   return String(val || '').replace(/\s+/g, '')
 }
 
+// 单账号操作事件处理
+const handleLaunchGeekezEvent = () => {
+  if (selectedAccounts.value.length === 1) {
+    handleLaunchGeekez(selectedAccounts.value[0])
+  }
+}
+const handleEditAccountEvent = () => {
+  if (selectedAccounts.value.length === 1) {
+    openEditDialog(selectedAccounts.value[0])
+  }
+}
+const handleViewTasksEvent = () => {
+  if (selectedAccounts.value.length === 1) {
+    viewTasks(selectedAccounts.value[0])
+  }
+}
+
+// 事件处理函数
+const handleRefreshEvent = () => fetchAccounts()
+const handleAddDialogEvent = () => { showDialog.value = true }
+const handleImportDialogEvent = () => { showImportDialog.value = true }
+const handleOneClickDialogEvent = () => { openOneClickDialog() }
+const handleClearSelectionEvent = () => { selectedAccounts.value = [] }
+const handleExportEvent = (e: Event) => { handleExportCommand((e as CustomEvent).detail) }
+const handleBatchCommandEvent = (e: Event) => { handleBatchCommand((e as CustomEvent).detail) }
+const handleSecurityCommandEvent = (e: Event) => { handleSecurityCommand((e as CustomEvent).detail) }
+const handleSubscriptionCommandEvent = (e: Event) => { handleSubscriptionCommand((e as CustomEvent).detail) }
+const handleBulkDeleteEvent = () => { handleBulkDelete() }
+
 onMounted(() => {
   fetchAccounts()
   fetchGroups()
+
+  // 监听父组件事件
+  window.addEventListener('google-accounts-refresh', handleRefreshEvent)
+  window.addEventListener('google-open-add-dialog', handleAddDialogEvent)
+  window.addEventListener('google-open-import-dialog', handleImportDialogEvent)
+  window.addEventListener('google-open-oneclick-dialog', handleOneClickDialogEvent)
+  window.addEventListener('google-clear-selection', handleClearSelectionEvent)
+  window.addEventListener('google-export', handleExportEvent as EventListener)
+  window.addEventListener('google-batch-command', handleBatchCommandEvent as EventListener)
+  window.addEventListener('google-security-command', handleSecurityCommandEvent as EventListener)
+  window.addEventListener('google-subscription-command', handleSubscriptionCommandEvent as EventListener)
+  window.addEventListener('google-bulk-delete', handleBulkDeleteEvent)
+  // 单账号操作
+  window.addEventListener('google-launch-geekez', handleLaunchGeekezEvent)
+  window.addEventListener('google-edit-account', handleEditAccountEvent)
+  window.addEventListener('google-view-tasks', handleViewTasksEvent)
+})
+
+onBeforeUnmount(() => {
+  // 清理事件监听
+  window.removeEventListener('google-accounts-refresh', handleRefreshEvent)
+  window.removeEventListener('google-open-add-dialog', handleAddDialogEvent)
+  window.removeEventListener('google-open-import-dialog', handleImportDialogEvent)
+  window.removeEventListener('google-open-oneclick-dialog', handleOneClickDialogEvent)
+  window.removeEventListener('google-clear-selection', handleClearSelectionEvent)
+  window.removeEventListener('google-export', handleExportEvent as EventListener)
+  window.removeEventListener('google-batch-command', handleBatchCommandEvent as EventListener)
+  window.removeEventListener('google-security-command', handleSecurityCommandEvent as EventListener)
+  window.removeEventListener('google-subscription-command', handleSubscriptionCommandEvent as EventListener)
+  window.removeEventListener('google-bulk-delete', handleBulkDeleteEvent)
+  // 单账号操作
+  window.removeEventListener('google-launch-geekez', handleLaunchGeekezEvent)
+  window.removeEventListener('google-edit-account', handleEditAccountEvent)
+  window.removeEventListener('google-view-tasks', handleViewTasksEvent)
 })
 </script>

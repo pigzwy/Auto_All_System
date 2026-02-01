@@ -135,8 +135,12 @@ def human_delay(min_sec: float = None, max_sec: float = None):
     time.sleep(random.uniform(min_sec, max_sec))
 
 
-def is_logged_in(page, timeout: int = 5) -> bool:
-    """检测是否已登录 ChatGPT"""
+def is_logged_in(page, timeout: int = 5) -> tuple[bool, str]:
+    """检测是否已登录 ChatGPT
+    
+    Returns:
+        tuple: (是否登录, 登录邮箱)
+    """
     try:
         result = page.run_js(f'''
             return Promise.race([
@@ -155,11 +159,40 @@ def is_logged_in(page, timeout: int = 5) -> bool:
             import json
             data = json.loads(result)
             if data.get('user') and data.get('accessToken'):
-                logger.info(f"已登录: {data['user'].get('email', 'unknown')}")
-                return True
-        return False
+                user_email = data['user'].get('email', '')
+                logger.info(f"已登录: {user_email}")
+                return True, user_email
+        return False, ""
     except Exception as e:
         logger.warning(f"登录检测异常: {e}")
+        return False, ""
+
+
+def logout_current_account(page) -> bool:
+    """登出当前账号"""
+    try:
+        logger.info("登出当前账号...")
+        
+        profile_btn = page.ele('[data-testid="profile-button"], [aria-label*="profile"]', timeout=5)
+        if profile_btn:
+            profile_btn.click()
+            time.sleep(1)
+            
+            logout_btn = page.ele('text:Log out', timeout=3)
+            if not logout_btn:
+                logout_btn = page.ele('text:退出登录', timeout=2)
+            
+            if logout_btn:
+                logout_btn.click()
+                time.sleep(2)
+                logger.info("已登出")
+                return True
+        
+        page.get("https://chatgpt.com/auth/logout")
+        time.sleep(2)
+        return True
+    except Exception as e:
+        logger.warning(f"登出失败: {e}")
         return False
 
 
@@ -208,8 +241,16 @@ def register_openai_account(
 
         # 检查是否已登录
         try:
-            if is_logged_in(page):
-                _log("检测到已登录，跳过注册步骤")
+            logged_in, current_email = is_logged_in(page)
+            if logged_in:
+                if current_email.lower() == email.lower():
+                    _log(f"已登录目标账号: {email}")
+                    return True
+                else:
+                    _log(f"已登录其他账号 ({current_email})，需要登出...")
+                    logout_current_account(page)
+                    page.get(url)
+                    wait_for_page_stable(page, timeout=8)
                 return True
         except Exception:
             pass
