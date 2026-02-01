@@ -504,9 +504,17 @@ class AccountsViewSet(ViewSet):
         def _annotate_account(acc: dict[str, Any]) -> dict[str, Any]:
             email = str(acc.get("email") or "").strip()
             geekez_env = acc.get("geekez_env")
+            # 优先使用本地记录的 geekez_profile 判断环境是否存在
+            # geekez_profile 是在 launch_geekez 成功后保存的，比调用远程 API 更可靠
+            geekez_profile = acc.get("geekez_profile")
+            # 兼容新旧两种 profile name 格式：gpt_{email} 和 {email}
+            profile_name_new = f"gpt_{email}" if email else ""
+            has_profile = bool(
+                isinstance(geekez_profile, dict) and geekez_profile.get("profile_id")
+            ) or bool(profile_name_new and profile_name_new in geekez_names) or bool(email and email in geekez_names)
             return {
                 **acc,
-                "geekez_profile_exists": bool(email and email in geekez_names),
+                "geekez_profile_exists": has_profile,
                 **({"geekez_env": geekez_env} if isinstance(geekez_env, dict) else {}),
             }
 
@@ -719,13 +727,20 @@ class AccountsViewSet(ViewSet):
         if not api.health_check():
             return Response({"detail": "GeekezBrowser 服务不在线"}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
 
+        # 统一使用 gpt_ 前缀作为 profile name（新格式）
+        profile_name_new = f"gpt_{email}"
+
         # 优先复用已有 profile（避免重复创建环境）
+        # 先尝试新格式 gpt_{email}，再尝试旧格式 {email}
         created_profile = False
-        profile = api.get_profile_by_name(email)
+        profile = api.get_profile_by_name(profile_name_new)
+        if not profile:
+            # 兼容旧格式：直接用邮箱作为 profile name
+            profile = api.get_profile_by_name(email)
         if not profile:
             created_profile = True
             profile = api.create_or_update_profile(
-                name=email,
+                name=profile_name_new,
                 proxy=None,
                 metadata={"account": {"email": email}},
             )

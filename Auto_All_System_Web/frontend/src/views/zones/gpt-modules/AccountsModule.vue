@@ -1,9 +1,98 @@
 <template>
   <div class="space-y-4">
-    <!-- 简单标题 -->
-    <div>
-      <h2 class="text-lg font-semibold text-foreground">账号列表</h2>
-      <p class="text-sm text-muted-foreground">母号可展开查看子账号；邮箱由域名邮箱系统随机创建（来源：admin/email）</p>
+    <!-- 统计卡片 -->
+    <div class="grid grid-cols-2 gap-4 sm:grid-cols-4">
+      <div class="rounded-xl border border-border bg-gradient-to-br from-blue-50 to-blue-100/50 dark:from-blue-950/30 dark:to-blue-900/20 p-4">
+        <div class="flex items-center gap-3">
+          <div class="flex h-10 w-10 items-center justify-center rounded-lg bg-blue-500/10">
+            <Users class="h-5 w-5 text-blue-600 dark:text-blue-400" />
+          </div>
+          <div>
+            <div class="text-2xl font-bold text-blue-700 dark:text-blue-300">{{ stats.motherCount }}</div>
+            <div class="text-xs text-blue-600/70 dark:text-blue-400/70">母号总数</div>
+          </div>
+        </div>
+      </div>
+      <div class="rounded-xl border border-border bg-gradient-to-br from-violet-50 to-violet-100/50 dark:from-violet-950/30 dark:to-violet-900/20 p-4">
+        <div class="flex items-center gap-3">
+          <div class="flex h-10 w-10 items-center justify-center rounded-lg bg-violet-500/10">
+            <UserPlus class="h-5 w-5 text-violet-600 dark:text-violet-400" />
+          </div>
+          <div>
+            <div class="text-2xl font-bold text-violet-700 dark:text-violet-300">{{ stats.childCount }}</div>
+            <div class="text-xs text-violet-600/70 dark:text-violet-400/70">子号总数</div>
+          </div>
+        </div>
+      </div>
+      <div class="rounded-xl border border-border bg-gradient-to-br from-emerald-50 to-emerald-100/50 dark:from-emerald-950/30 dark:to-emerald-900/20 p-4">
+        <div class="flex items-center gap-3">
+          <div class="flex h-10 w-10 items-center justify-center rounded-lg bg-emerald-500/10">
+            <Monitor class="h-5 w-5 text-emerald-600 dark:text-emerald-400" />
+          </div>
+          <div>
+            <div class="text-2xl font-bold text-emerald-700 dark:text-emerald-300">{{ stats.envCount }}</div>
+            <div class="text-xs text-emerald-600/70 dark:text-emerald-400/70">已创建环境</div>
+          </div>
+        </div>
+      </div>
+      <div class="rounded-xl border border-border bg-gradient-to-br from-amber-50 to-amber-100/50 dark:from-amber-950/30 dark:to-amber-900/20 p-4">
+        <div class="flex items-center gap-3">
+          <div class="flex h-10 w-10 items-center justify-center rounded-lg bg-amber-500/10">
+            <Armchair class="h-5 w-5 text-amber-600 dark:text-amber-400" />
+          </div>
+          <div>
+            <div class="text-2xl font-bold text-amber-700 dark:text-amber-300">{{ stats.seatUsed }}/{{ stats.seatTotal }}</div>
+            <div class="text-xs text-amber-600/70 dark:text-amber-400/70">座位使用</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 搜索和筛选 -->
+    <div class="flex flex-wrap items-center gap-3">
+      <div class="relative flex-1 min-w-[200px] max-w-sm">
+        <Search class="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+        <Input 
+          v-model="searchQuery" 
+          placeholder="搜索邮箱..." 
+          class="pl-9 h-9"
+        />
+        <button v-if="searchQuery" class="absolute right-3 top-1/2 -translate-y-1/2" @click="searchQuery = ''">
+          <X class="h-4 w-4 text-muted-foreground hover:text-foreground" />
+        </button>
+      </div>
+      <Select v-model="envFilter">
+        <SelectTrigger class="w-[140px] h-9">
+          <SelectValue placeholder="环境状态" />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="all">全部状态</SelectItem>
+          <SelectItem value="created">已创建环境</SelectItem>
+          <SelectItem value="not_created">未创建环境</SelectItem>
+        </SelectContent>
+      </Select>
+
+      <!-- 批量操作 -->
+      <div v-if="hasSelection" class="flex items-center gap-2 rounded-lg border border-primary/30 bg-primary/5 px-3 py-1.5">
+        <span class="text-sm font-medium text-primary">已选 {{ selectedIds.size }} 项</span>
+        <div class="h-4 w-px bg-primary/30" />
+        <Button size="xs" class="gap-1 bg-emerald-600 hover:bg-emerald-700 text-white" @click="batchRunSelfRegister">
+          <UserPlus class="h-3.5 w-3.5" /> 批量开通
+        </Button>
+        <Button size="xs" class="gap-1 bg-blue-600 hover:bg-blue-700 text-white" @click="batchRunAutoInvite">
+          <ArrowRightToLine class="h-3.5 w-3.5" /> 批量邀请
+        </Button>
+        <Button size="xs" class="gap-1 bg-violet-600 hover:bg-violet-700 text-white" @click="batchRunSub2apiSink">
+          <LayoutList class="h-3.5 w-3.5" /> 批量入池
+        </Button>
+        <button class="ml-1 rounded p-1 hover:bg-primary/20" @click="selectedIds.clear(); selectedIds = new Set(selectedIds)">
+          <X class="h-3.5 w-3.5 text-primary/70" />
+        </button>
+      </div>
+
+      <div class="text-sm text-muted-foreground ml-auto">
+        共 <span class="font-medium text-foreground">{{ filteredMothers.length }}</span> 条结果
+      </div>
     </div>
 
     <Card class="bg-card text-card-foreground">
@@ -12,30 +101,95 @@
           <Table>
             <TableHeader>
               <TableRow>
+                <TableHead class="w-10">
+                  <Checkbox 
+                    :checked="isAllSelected" 
+                    :indeterminate="hasSelection && !isAllSelected"
+                    @update:checked="toggleSelectAll" 
+                  />
+                </TableHead>
                 <TableHead class="w-10"></TableHead>
                 <TableHead class="min-w-[220px]">母号邮箱</TableHead>
                 <TableHead class="min-w-[180px]">账号密码</TableHead>
                 <TableHead class="min-w-[180px]">邮箱密码</TableHead>
                 <TableHead class="w-24">座位</TableHead>
                 <TableHead class="min-w-[120px]">备注</TableHead>
+                <TableHead class="w-28">环境</TableHead>
                 <TableHead class="w-40">创建时间</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
+              <!-- 加载中 -->
               <TableRow v-if="loading && mothers.length === 0">
-                <TableCell colspan="7" class="py-10 text-center">
+                <TableCell colspan="9" class="py-10 text-center">
                   <div class="flex items-center justify-center gap-2 text-sm text-muted-foreground">
                     <Loader2 class="h-4 w-4 animate-spin" />
                     加载中...
                   </div>
                 </TableCell>
               </TableRow>
-              <template v-else v-for="mother in mothers" :key="mother.id">
+
+              <!-- 空状态 -->
+              <TableRow v-else-if="!loading && mothers.length === 0">
+                <TableCell colspan="9" class="py-16">
+                  <div class="flex flex-col items-center justify-center gap-4 text-center">
+                    <div class="flex h-16 w-16 items-center justify-center rounded-full bg-muted">
+                      <Users class="h-8 w-8 text-muted-foreground" />
+                    </div>
+                    <div>
+                      <h3 class="text-lg font-medium text-foreground">还没有账号</h3>
+                      <p class="mt-1 text-sm text-muted-foreground">点击上方「生成母号」按钮创建你的第一个 GPT 母号</p>
+                    </div>
+                    <Button class="gap-2" @click="openCreateMother">
+                      <Plus class="h-4 w-4" />
+                      生成母号
+                    </Button>
+                    <div class="mt-4 rounded-lg border border-dashed border-border bg-muted/30 p-4 text-left text-sm">
+                      <p class="font-medium text-foreground mb-2">💡 快捷操作提示</p>
+                      <ul class="space-y-1 text-muted-foreground">
+                        <li><kbd class="px-1.5 py-0.5 rounded bg-muted text-xs">↑</kbd> <kbd class="px-1.5 py-0.5 rounded bg-muted text-xs">↓</kbd> 上下切换选中行</li>
+                        <li><kbd class="px-1.5 py-0.5 rounded bg-muted text-xs">Enter</kbd> 打开/创建环境</li>
+                        <li><kbd class="px-1.5 py-0.5 rounded bg-muted text-xs">⌘</kbd> + <kbd class="px-1.5 py-0.5 rounded bg-muted text-xs">Delete</kbd> 删除选中项</li>
+                        <li><kbd class="px-1.5 py-0.5 rounded bg-muted text-xs">Esc</kbd> 取消选择</li>
+                      </ul>
+                    </div>
+                  </div>
+                </TableCell>
+              </TableRow>
+
+              <!-- 搜索无结果 -->
+              <TableRow v-else-if="filteredMothers.length === 0">
+                <TableCell colspan="9" class="py-12">
+                  <div class="flex flex-col items-center justify-center gap-3 text-center">
+                    <Search class="h-10 w-10 text-muted-foreground/50" />
+                    <div>
+                      <h3 class="font-medium text-foreground">没有找到匹配的账号</h3>
+                      <p class="mt-1 text-sm text-muted-foreground">尝试调整搜索条件或筛选器</p>
+                    </div>
+                    <Button variant="outline" size="sm" @click="searchQuery = ''; envFilter = 'all'">
+                      清除筛选
+                    </Button>
+                  </div>
+                </TableCell>
+              </TableRow>
+
+              <!-- 数据列表 -->
+              <template v-else v-for="(mother, index) in filteredMothers" :key="mother.id">
                 <TableRow
-                  class="cursor-pointer hover:bg-muted/50"
-                  :class="{ 'bg-muted/50': selectedMotherId === mother.id }"
+                  class="cursor-pointer transition-colors"
+                  :class="[
+                    selectedMotherId === mother.id 
+                      ? 'bg-primary/10 hover:bg-primary/15 border-l-2 border-l-primary' 
+                      : index % 2 === 0 ? 'bg-background hover:bg-muted/50' : 'bg-muted/20 hover:bg-muted/50'
+                  ]"
                   @click="onCurrentChange(mother)"
                 >
+                  <TableCell @click.stop>
+                    <Checkbox 
+                      :checked="selectedIds.has(mother.id)" 
+                      @update:checked="toggleSelect(mother.id)" 
+                    />
+                  </TableCell>
                   <TableCell>
                     <Button variant="ghost" size="xs" class="h-6 w-6 p-0" @click.stop="toggleExpand(mother.id)">
                       <LayoutList class="h-4 w-4 transition-transform" :class="{ 'rotate-90': expandedRows.has(mother.id) }" />
@@ -64,12 +218,28 @@
                     </Badge>
                   </TableCell>
                   <TableCell class="text-muted-foreground text-xs truncate max-w-[120px]">{{ mother.note }}</TableCell>
+                  <TableCell>
+                    <div class="flex items-center gap-2">
+                      <Badge 
+                        :class="mother.geekez_profile_exists 
+                          ? 'bg-emerald-100 text-emerald-700 border-emerald-200 dark:bg-emerald-900/30 dark:text-emerald-400 dark:border-emerald-800' 
+                          : 'bg-slate-100 text-slate-500 border-slate-200 dark:bg-slate-800 dark:text-slate-400 dark:border-slate-700'"
+                        variant="outline" 
+                        class="text-xs"
+                      >
+                        {{ mother.geekez_profile_exists ? '✓ 已创建' : '○ 未创建' }}
+                      </Badge>
+                      <Badge v-if="mother.geekez_env" class="bg-sky-100 text-sky-700 border-sky-200 dark:bg-sky-900/30 dark:text-sky-400 dark:border-sky-800 text-xs font-mono" variant="outline">
+                        :{{ mother.geekez_env.debug_port || '' }}
+                      </Badge>
+                    </div>
+                  </TableCell>
                   <TableCell class="text-muted-foreground text-xs">{{ formatDate(mother.created_at) }}</TableCell>
                 </TableRow>
 
                 <!-- Expanded Child Rows -->
                 <TableRow v-if="expandedRows.has(mother.id)">
-                  <TableCell colspan="8" class="p-0 bg-muted/10">
+                  <TableCell colspan="9" class="p-0 bg-muted/10">
                     <div class="p-4 pl-12 border-b border-border">
                       <div class="mb-2 text-xs font-semibold text-muted-foreground">子账号列表 ({{ mother.children?.length || 0 }})</div>
                       <div class="rounded-lg border border-border overflow-hidden bg-background">
@@ -80,6 +250,7 @@
                               <TableHead>账号密码</TableHead>
                               <TableHead>邮箱密码</TableHead>
                               <TableHead>备注</TableHead>
+                              <TableHead>环境</TableHead>
                               <TableHead>创建时间</TableHead>
                               <TableHead class="text-right">操作</TableHead>
                             </TableRow>
@@ -104,17 +275,35 @@
                                 </div>
                               </TableCell>
                               <TableCell class="text-muted-foreground text-xs">{{ child.note }}</TableCell>
+                              <TableCell>
+                                <div class="flex items-center gap-1">
+                                  <Badge 
+                                    :class="child.geekez_profile_exists 
+                                      ? 'bg-emerald-100 text-emerald-700 border-emerald-200 dark:bg-emerald-900/30 dark:text-emerald-400 dark:border-emerald-800' 
+                                      : 'bg-slate-100 text-slate-500 border-slate-200 dark:bg-slate-800 dark:text-slate-400 dark:border-slate-700'"
+                                    variant="outline"
+                                    class="text-xs"
+                                  >
+                                    {{ child.geekez_profile_exists ? '✓ 已创建' : '○ 未创建' }}
+                                  </Badge>
+                                  <Badge v-if="child.geekez_env" class="bg-sky-100 text-sky-700 border-sky-200 dark:bg-sky-900/30 dark:text-sky-400 dark:border-sky-800 text-xs font-mono" variant="outline">
+                                    :{{ child.geekez_env.debug_port || '' }}
+                                  </Badge>
+                                </div>
+                              </TableCell>
                               <TableCell class="text-muted-foreground text-xs">{{ formatDate(child.created_at) }}</TableCell>
                               <TableCell class="text-right">
                                 <div class="flex items-center justify-end gap-1">
-                                  <Button variant="ghost" size="xs" @click.stop="launchGeekez(child.id)">Geekez</Button>
+                                  <Button variant="ghost" size="xs" @click.stop="launchGeekez(child)">
+                                    {{ getGeekezActionLabel(child) }}
+                                  </Button>
                                   <Button variant="ghost" size="xs" @click.stop="copyFull(child)">复制</Button>
                                   <Button variant="ghost" size="xs" class="text-destructive hover:text-destructive" @click.stop="removeAccount(child.id)">删除</Button>
                                 </div>
                               </TableCell>
                             </TableRow>
                             <TableRow v-if="!mother.children?.length">
-                              <TableCell colspan="6" class="text-center text-xs text-muted-foreground py-4">无子账号</TableCell>
+                              <TableCell colspan="7" class="text-center text-xs text-muted-foreground py-4">无子账号</TableCell>
                             </TableRow>
                           </TableBody>
                         </Table>
@@ -353,18 +542,28 @@
 </template>
 
 <script setup lang="ts">
-import { computed, inject, onMounted, onUnmounted, reactive, ref, type Ref } from 'vue'
+import { computed, inject, onMounted, onUnmounted, provide, reactive, ref, type Ref } from 'vue'
 import { ElMessage, ElMessageBox } from '@/lib/element'
 import {
+  Armchair,
   Copy,
   Loader2,
+  Monitor,
+  Plus,
+  RefreshCcw,
+  Search,
+  UserPlus,
+  Users,
+  ArrowRightToLine,
   LayoutList,
-  FileDown
+  FileDown,
+  X
 } from 'lucide-vue-next'
 
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
+import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
 import {
   Dialog,
@@ -413,6 +612,125 @@ const cloudMailConfigs = ref<CloudMailConfig[]>([])
 
 const mothers = ref<any[]>([])
 const selectedMotherId = computed(() => selectedMother.value?.id)
+
+// 搜索和筛选
+const searchQuery = ref('')
+const envFilter = ref('all')
+
+// 批量选择
+const selectedIds = ref<Set<string>>(new Set())
+const isAllSelected = computed(() => 
+  filteredMothers.value.length > 0 && 
+  filteredMothers.value.every((m: any) => selectedIds.value.has(m.id))
+)
+const hasSelection = computed(() => selectedIds.value.size > 0)
+
+const toggleSelectAll = () => {
+  if (isAllSelected.value) {
+    selectedIds.value.clear()
+  } else {
+    filteredMothers.value.forEach((m: any) => selectedIds.value.add(m.id))
+  }
+  selectedIds.value = new Set(selectedIds.value) // 触发响应式
+}
+
+const toggleSelect = (id: string) => {
+  if (selectedIds.value.has(id)) {
+    selectedIds.value.delete(id)
+  } else {
+    selectedIds.value.add(id)
+  }
+  selectedIds.value = new Set(selectedIds.value) // 触发响应式
+}
+
+// 批量操作
+const batchRunSelfRegister = async () => {
+  if (selectedIds.value.size === 0) return
+  const ids = Array.from(selectedIds.value)
+  try {
+    await Promise.all(ids.map(id => gptBusinessApi.selfRegister(id)))
+    ElMessage.success(`已启动 ${ids.length} 个母号的自动开通`)
+    selectedIds.value.clear()
+    refresh()
+  } catch (e: any) {
+    ElMessage.error(e?.response?.data?.detail || e?.message || '批量操作失败')
+  }
+}
+
+const batchRunAutoInvite = async () => {
+  if (selectedIds.value.size === 0) return
+  const ids = Array.from(selectedIds.value)
+  try {
+    await Promise.all(ids.map(id => gptBusinessApi.autoInvite(id)))
+    ElMessage.success(`已启动 ${ids.length} 个母号的自动邀请`)
+    selectedIds.value.clear()
+  } catch (e: any) {
+    ElMessage.error(e?.response?.data?.detail || e?.message || '批量操作失败')
+  }
+}
+
+const batchRunSub2apiSink = async () => {
+  if (selectedIds.value.size === 0) return
+  const ids = Array.from(selectedIds.value)
+  try {
+    await Promise.all(ids.map(id => gptBusinessApi.sub2apiSink(id)))
+    ElMessage.success(`已启动 ${ids.length} 个母号的自动入池`)
+    selectedIds.value.clear()
+  } catch (e: any) {
+    ElMessage.error(e?.response?.data?.detail || e?.message || '批量操作失败')
+  }
+}
+
+// 提供给父组件
+provide('selectedIds', selectedIds)
+provide('batchRunSelfRegister', batchRunSelfRegister)
+provide('batchRunAutoInvite', batchRunAutoInvite)
+provide('batchRunSub2apiSink', batchRunSub2apiSink)
+
+// 统计信息
+const stats = computed(() => {
+  let motherCount = mothers.value.length
+  let childCount = 0
+  let envCount = 0
+  let seatUsed = 0
+  let seatTotal = 0
+
+  mothers.value.forEach((m: any) => {
+    childCount += m.children?.length || 0
+    seatUsed += m.seat_used || 0
+    seatTotal += m.seat_total || 0
+    if (m.geekez_profile_exists) envCount++
+    m.children?.forEach((c: any) => {
+      if (c.geekez_profile_exists) envCount++
+    })
+  })
+
+  return { motherCount, childCount, envCount, seatUsed, seatTotal }
+})
+
+// 过滤后的母号列表
+const filteredMothers = computed(() => {
+  let result = mothers.value
+
+  // 搜索过滤
+  if (searchQuery.value.trim()) {
+    const query = searchQuery.value.toLowerCase()
+    result = result.filter((m: any) => 
+      m.email?.toLowerCase().includes(query) ||
+      m.note?.toLowerCase().includes(query) ||
+      m.children?.some((c: any) => c.email?.toLowerCase().includes(query))
+    )
+  }
+
+  // 环境状态过滤
+  if (envFilter.value === 'created') {
+    result = result.filter((m: any) => m.geekez_profile_exists)
+  } else if (envFilter.value === 'not_created') {
+    result = result.filter((m: any) => !m.geekez_profile_exists)
+  }
+
+  return result
+})
 
 const formatDate = (date: string | undefined) => {
   if (!date) return '-'
@@ -607,11 +925,17 @@ const removeAccount = async (accountId: string) => {
   }
 }
 
-const launchGeekez = async (accountId: string) => {
+const getGeekezActionLabel = (account: GptBusinessAccount) => {
+  return account.geekez_profile_exists ? '打开环境' : '创建环境'
+}
+
+const launchGeekez = async (account: GptBusinessAccount) => {
   try {
-    const res = await gptBusinessApi.launchGeekez(accountId)
+    const res = await gptBusinessApi.launchGeekez(account.id)
     if (res?.success) {
-      ElMessage.success('已启动 Geekez 环境')
+      const msg = res.created_profile ? '环境创建并打开成功' : '环境打开成功'
+      ElMessage.success(msg)
+      await refresh()
     } else {
       ElMessage.warning('启动失败')
     }
@@ -745,6 +1069,53 @@ const handleViewTasks = (e: Event) => {
   if (mother) viewTasks(mother)
 }
 
+// 快捷键支持
+const handleKeydown = (e: KeyboardEvent) => {
+  // 忽略输入框内的按键
+  if ((e.target as HTMLElement).tagName === 'INPUT' || (e.target as HTMLElement).tagName === 'TEXTAREA') {
+    return
+  }
+
+  const currentIndex = filteredMothers.value.findIndex((m: any) => m.id === selectedMother.value?.id)
+  
+  switch (e.key) {
+    case 'ArrowUp':
+      e.preventDefault()
+      if (currentIndex > 0) {
+        onCurrentChange(filteredMothers.value[currentIndex - 1])
+      } else if (currentIndex === -1 && filteredMothers.value.length > 0) {
+        onCurrentChange(filteredMothers.value[0])
+      }
+      break
+    case 'ArrowDown':
+      e.preventDefault()
+      if (currentIndex < filteredMothers.value.length - 1) {
+        onCurrentChange(filteredMothers.value[currentIndex + 1])
+      } else if (currentIndex === -1 && filteredMothers.value.length > 0) {
+        onCurrentChange(filteredMothers.value[0])
+      }
+      break
+    case 'Enter':
+      if (selectedMother.value) {
+        e.preventDefault()
+        launchGeekez(selectedMother.value)
+      }
+      break
+    case 'Delete':
+    case 'Backspace':
+      if (selectedMother.value && e.metaKey) {
+        e.preventDefault()
+        removeAccount(selectedMother.value.id)
+      }
+      break
+    case 'Escape':
+      selectedMother.value = null
+      selectedIds.value.clear()
+      selectedIds.value = new Set(selectedIds.value)
+      break
+  }
+}
+
 onMounted(() => {
   refresh()
   
@@ -753,6 +1124,9 @@ onMounted(() => {
   window.addEventListener('gpt-open-create-mother', handleOpenCreateMother)
   window.addEventListener('gpt-open-create-child', handleOpenCreateChild)
   window.addEventListener('gpt-view-tasks', handleViewTasks)
+  
+  // 快捷键支持
+  window.addEventListener('keydown', handleKeydown)
 })
 
 onUnmounted(() => {
@@ -761,5 +1135,6 @@ onUnmounted(() => {
   window.removeEventListener('gpt-open-create-mother', handleOpenCreateMother)
   window.removeEventListener('gpt-open-create-child', handleOpenCreateChild)
   window.removeEventListener('gpt-view-tasks', handleViewTasks)
+  window.removeEventListener('keydown', handleKeydown)
 })
 </script>
