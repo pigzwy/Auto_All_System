@@ -143,13 +143,10 @@
 
 ---
 
-### [06-Google插件设计说明.md](./06-Google插件设计说明.md)
+### [Google专区自动化维护（主文档）](../backend/plugins/google_business/docs/AUTOMATION_MAINTENANCE.md)
 
-**适合人群**: Google插件使用者、开发者  
-**阅读时间**: 45分钟
-
-维护主文档（请以此为准）：
-- `../backend/plugins/google_business/docs/AUTOMATION_MAINTENANCE.md`
+**适合人群**: Google专区使用者、开发者（维护/二开必读）  
+**阅读时间**: 30-60分钟
 
 ---
 
@@ -248,7 +245,7 @@
 ├── 03-前端页面功能.md                   # 前端页面说明
 ├── 04-API接口文档.md                   # API接口文档（含标准化方案）
 ├── 05-插件化架构设计.md                 # 插件系统设计
-├── 06-Google插件设计说明.md             # Google插件说明
+├── (external) ../backend/plugins/google_business/docs/AUTOMATION_MAINTENANCE.md  # Google专区自动化维护主文档
 ├── 07-比特浏览器API开发指南.md          # BitBrowser集成
 ├── 08-新增专区开发指南.md               # 专区开发指南（新增/扩展功能）
 └── 11-GeekezBrowser_API_变更适配说明.md  # GeekezBrowser 上游 API 变更适配
@@ -261,7 +258,7 @@
 ### 👨‍💼 产品经理/项目经理
 1. [00-快速开始](./00-快速开始.md) - 了解系统功能
 2. [03-前端页面功能](./03-前端页面功能.md) - 了解用户界面
-3. [06-Google插件设计说明](./06-Google插件设计说明.md) - 了解核心业务
+3. [Google专区自动化维护](../backend/plugins/google_business/docs/AUTOMATION_MAINTENANCE.md) - 了解核心业务
 
 ### 👨‍💻 前端开发者
 1. [00-快速开始](./00-快速开始.md) - 环境搭建
@@ -281,7 +278,7 @@
 
 ### 👨‍💻 插件开发者
 1. [05-插件化架构设计](./05-插件化架构设计.md) - 插件系统
-2. [06-Google插件设计说明](./06-Google插件设计说明.md) - 参考示例
+2. [Google专区自动化维护](../backend/plugins/google_business/docs/AUTOMATION_MAINTENANCE.md) - 参考示例
 3. ⭐ [04-API接口文档](./04-API接口文档.md) - API规范和接口
 4. [07-比特浏览器API开发指南](./07-比特浏览器API开发指南.md) - 浏览器自动化
 
@@ -294,7 +291,7 @@
 
 ### 👥 最终用户
 1. [00-快速开始](./00-快速开始.md) - 系统使用
-2. [06-Google插件设计说明](./06-Google插件设计说明.md) - 功能使用指南
+2. [Google专区自动化维护](../backend/plugins/google_business/docs/AUTOMATION_MAINTENANCE.md) - 功能使用指南
 
 ---
 
