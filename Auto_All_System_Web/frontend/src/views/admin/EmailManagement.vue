@@ -49,7 +49,20 @@
         </DataColumn>
         <DataColumn label="状态" width="80">
           <template #default="{ row }">
-            <Toggle v-model="row.is_active" @change="toggleActive(row)" />
+            <!-- Table slot event binding can be flaky; trigger save on wrapper click -->
+            <div
+              class="inline-flex cursor-pointer"
+              role="switch"
+              :aria-checked="Boolean(row.is_active)"
+              @click.stop="toggleActive(row, !row.is_active)"
+            >
+              <!-- Force remount so visual state always reflects row.is_active -->
+              <Toggle
+                :key="`${row.id}-${String(row.is_active)}`"
+                :model-value="row.is_active"
+                class="pointer-events-none"
+              />
+            </div>
           </template>
         </DataColumn>
         <DataColumn label="操作" width="280" fixed="right">
@@ -234,6 +247,14 @@ const fetchConfigs = async () => {
   }
 }
 
+const patchConfigRow = (id: number, patch: Partial<CloudMailConfig>) => {
+  const idx = configs.value.findIndex((c) => c.id === id)
+  if (idx < 0) return
+  configs.value[idx] = { ...configs.value[idx], ...patch }
+  // ensure table re-renders even if row objects are non-reactive
+  configs.value = [...configs.value]
+}
+
 const openAddDialog = () => {
   editingConfig.value = null
   Object.assign(formData, {
@@ -324,13 +345,23 @@ const testCreateEmail = async (row: CloudMailConfig) => {
   }
 }
 
-const toggleActive = async (row: CloudMailConfig) => {
+const toggleActive = async (row: CloudMailConfig, nextVal: boolean) => {
+  const prevVal = Boolean(row.is_active)
+  // optimistic UI
+  // Update both the slot row object and the table datasource to avoid non-reactive row copies.
+  row.is_active = nextVal
+  patchConfigRow(row.id, { is_active: nextVal })
   try {
-    await updateCloudMailConfig(row.id, { is_active: row.is_active })
-    ElMessage.success(`已${row.is_active ? '启用' : '禁用'}配置`)
-  } catch {
-    ElMessage.error('操作失败')
-    row.is_active = !row.is_active
+    const updated = await updateCloudMailConfig(row.id, { is_active: nextVal })
+    if (updated && typeof updated.is_active === 'boolean') {
+      row.is_active = updated.is_active
+      patchConfigRow(row.id, { is_active: updated.is_active })
+    }
+    ElMessage.success(`已${nextVal ? '启用' : '禁用'}配置`)
+  } catch (err: any) {
+    row.is_active = prevVal
+    patchConfigRow(row.id, { is_active: prevVal })
+    ElMessage.error(err?.response?.data?.detail || err?.response?.data?.message || err?.message || '操作失败')
   }
 }
 

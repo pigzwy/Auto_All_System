@@ -5,6 +5,7 @@ Cloud Mail API 客户端
 API 文档: https://doc.skymail.ink/api/api-doc.html
 """
 
+import json
 import re
 import time
 import secrets
@@ -73,7 +74,7 @@ class CloudMailClient:
         """
         self.api_base = api_base.rstrip("/")
         self.api_token = api_token
-        self.domains = [d for d in (self._normalize_domain(x) for x in (domains or [])) if d]
+        self.domains = self._normalize_domains_input(domains)
         if not self.domains:
             raise ValueError("CloudMail domains is empty or invalid")
         self.default_role = default_role
@@ -118,9 +119,84 @@ class CloudMailClient:
         # very small validation (ASCII only)
         if not re.fullmatch(r"[a-z0-9.-]+", raw):
             return ""
-        if "." not in raw:
+
+        # must contain at least one alphanumeric
+        if not re.search(r"[a-z0-9]", raw):
             return ""
+
+        # disallow leading/trailing dot/dash
+        if raw[0] in ".-" or raw[-1] in ".-":
+            return ""
+
+        # Allow both FQDN-like (a.com) and single-label (localhost/180711)
         return raw
+
+    @classmethod
+    def _normalize_domains_input(cls, domains: Any) -> List[str]:
+        """Best-effort normalize domains input.
+
+        Tolerates historical bad DB values like:
+          ['["a.com", "b.com", ]']  (nested JSON string + trailing comma)
+        """
+
+        def _dedupe_keep_order(items: list[str]) -> list[str]:
+            seen: set[str] = set()
+            out: list[str] = []
+            for x in items:
+                if x in seen:
+                    continue
+                seen.add(x)
+                out.append(x)
+            return out
+
+        def _extract_domains_loose(text: str) -> list[str]:
+            raw = (text or "").lower()
+            matches = re.findall(r"[a-z0-9.-]+\.[a-z]{2,}", raw)
+            return _dedupe_keep_order([m.strip(". ") for m in matches if m])
+
+        def _try_parse_json_list(text: str) -> list[Any] | None:
+            t = (text or "").strip()
+            if not t.startswith("["):
+                return None
+            try:
+                parsed = json.loads(t)
+                return parsed if isinstance(parsed, list) else None
+            except json.JSONDecodeError:
+                repaired = re.sub(r",\s*\]", "]", t)
+                repaired = re.sub(r",\s*\}", "}", repaired)
+                try:
+                    parsed = json.loads(repaired)
+                    return parsed if isinstance(parsed, list) else None
+                except json.JSONDecodeError:
+                    return None
+
+        def _flatten(value: Any) -> list[str]:
+            if value is None:
+                return []
+            if isinstance(value, str):
+                s = value.strip()
+                if not s:
+                    return []
+                if s.startswith("["):
+                    parsed = _try_parse_json_list(s)
+                    if isinstance(parsed, list):
+                        out: list[str] = []
+                        for it in parsed:
+                            out.extend(_flatten(it))
+                        return out
+                    # broken JSON string
+                    return _extract_domains_loose(s)
+                return [s]
+            if isinstance(value, list):
+                out: list[str] = []
+                for it in value:
+                    out.extend(_flatten(it))
+                return out
+            return [str(value).strip()]
+
+        candidates = _flatten(domains)
+        normalized = [d for d in (cls._normalize_domain(x) for x in candidates) if d]
+        return _dedupe_keep_order(normalized)
 
     def _request(self, endpoint: str, data: dict[str, Any] | None = None) -> Any:
         """发送 POST 请求"""

@@ -44,10 +44,11 @@ class CloudMailConfigViewSet(viewsets.ModelViewSet):
         config = self.get_object()
 
         try:
+            domains = CloudMailConfigSerializer._normalize_domains(config.domains)
             client = CloudMailClient(
                 api_base=config.api_base,
                 api_token=config.api_token,
-                domains=config.domains or [],
+                domains=domains,
                 default_role=config.default_role,
             )
 
@@ -83,10 +84,11 @@ class CloudMailConfigViewSet(viewsets.ModelViewSet):
             )
 
         try:
+            domains = CloudMailConfigSerializer._normalize_domains(config.domains)
             client = CloudMailClient(
                 api_base=config.api_base,
                 api_token=config.api_token,
-                domains=config.domains or [],
+                domains=domains,
                 default_role=config.default_role,
             )
 

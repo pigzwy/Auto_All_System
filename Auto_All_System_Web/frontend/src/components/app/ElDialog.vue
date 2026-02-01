@@ -15,7 +15,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, toRefs } from 'vue'
 import {
   Dialog,
   DialogContent,
@@ -49,5 +49,6 @@ const contentStyle = computed(() => {
   return { maxWidth: props.width }
 })
 
-const { modelValue, title } = props
+// Keep template bindings reactive.
+const { modelValue, title } = toRefs(props)
 </script>

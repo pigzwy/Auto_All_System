@@ -18,10 +18,10 @@
         </thead>
         <tbody>
           <tr
-            v-for="(row, idx) in data"
+            v-for="(row, idx) in props.data"
             :key="getRowKey(row, idx)"
             class="border-b border-border"
-            :class="stripe && idx % 2 === 1 ? 'bg-muted/10' : ''"
+            :class="props.stripe && idx % 2 === 1 ? 'bg-muted/10' : ''"
           >
             <td v-for="col in columns" :key="col.id" class="px-3 py-2" :style="colStyle(col)">
               <template v-if="col.type === 'selection'">
@@ -55,7 +55,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, provide, reactive, ref } from 'vue'
+import { computed, defineComponent, provide, reactive, ref } from 'vue'
 import type { ElTableColumnDef } from './symbols'
 import { elTableKey } from './symbols'
 
@@ -124,9 +124,18 @@ const colStyle = (col: ElTableColumnDef) => {
   return style
 }
 
-const SlotRenderer = (props: { slotFn: any; row: any; index: number }) => {
-  return props.slotFn?.({ row: props.row, $index: props.index })
-}
+const SlotRenderer = defineComponent({
+  name: 'ElTableSlotRenderer',
+  props: {
+    slotFn: { type: Function, required: false },
+    row: { type: Object, required: true },
+    index: { type: Number, required: true },
+  },
+  setup(p) {
+    return () => (p.slotFn as any)?.({ row: p.row, $index: p.index })
+  },
+})
 
-const { data, stripe } = props
+// NOTE: do not destructure props into local variables,
+// otherwise template will lose reactivity when parent updates `data`.
 </script>

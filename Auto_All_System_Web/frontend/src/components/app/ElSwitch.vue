@@ -1,8 +1,8 @@
 <template>
   <Switch
-    :checked="Boolean(modelValue)"
-    :disabled="disabled"
-    @update:checked="onUpdate"
+    :model-value="Boolean(props.modelValue)"
+    :disabled="props.disabled"
+    @update:modelValue="onUpdate"
   />
 </template>
 
@@ -16,13 +16,14 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   (e: 'update:modelValue', payload: boolean): void
+  (e: 'update:model-value', payload: boolean): void
   (e: 'change', payload: boolean): void
 }>()
 
 const onUpdate = (val: boolean) => {
   emit('update:modelValue', val)
+  // Some callers listen in kebab-case (DOM-attr compatible)
+  emit('update:model-value', val)
   emit('change', val)
 }
-
-const { modelValue, disabled } = props
 </script>
