@@ -167,7 +167,8 @@ const routes: RouteRecordRaw[] = [
       {
         path: 'cards',
         name: 'Cards',
-        component: () => import('@/views/cards/CardListView.vue')
+        component: () => import('@/views/admin/CardManagement.vue'),
+        meta: { requiresAdmin: true }
       },
       {
         path: 'balance',

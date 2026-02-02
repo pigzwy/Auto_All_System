@@ -61,7 +61,7 @@
         </DataColumn>
         <DataColumn label="状态" width="100">
           <template #default="{ row }">
-            <Tag :type="getStatusType(row.status)">{{ row.status_display || row.status }}</Tag>
+            <Tag :type="getDisplayStatusType(row)">{{ getDisplayStatus(row) }}</Tag>
           </template>
         </DataColumn>
         <DataColumn label="剩余时间" width="120">
@@ -148,6 +148,73 @@
       <template #footer>
         <Button @click="showDialog = false">取消</Button>
         <Button  variant="default" type="button" @click="handleAddCard">保存</Button>
+      </template>
+    </Modal>
+
+    <!-- 编辑对话框 -->
+    <Modal v-model="showEditDialog" title="编辑虚拟卡" width="600px">
+      <SimpleForm :model="editForm" label-width="100px">
+        <SimpleFormItem label="卡号">
+          <TextInput v-model="editForm.card_number" placeholder="16位卡号" />
+        </SimpleFormItem>
+        <SimpleFormItem label="持卡人">
+          <TextInput v-model="editForm.card_holder" placeholder="持卡人姓名" />
+        </SimpleFormItem>
+        <SimpleFormItem label="过期月份">
+          <NumberInput v-model="editForm.expiry_month" :min="1" :max="12" />
+        </SimpleFormItem>
+        <SimpleFormItem label="过期年份">
+          <NumberInput v-model="editForm.expiry_year" :min="2024" :max="2099" />
+        </SimpleFormItem>
+        <SimpleFormItem label="CVV">
+          <TextInput v-model="editForm.cvv" placeholder="3-4位安全码" maxlength="4" />
+        </SimpleFormItem>
+        <SimpleFormItem label="卡类型">
+          <SelectNative v-model="editForm.card_type" class="w-40">
+            <SelectOption label="Visa" value="Visa" />
+            <SelectOption label="Master" value="Master" />
+            <SelectOption label="American Express" value="American Express" />
+            <SelectOption label="Discover" value="Discover" />
+            <SelectOption label="Unknown" value="Unknown" />
+          </SelectNative>
+        </SimpleFormItem>
+        <SimpleFormItem label="银行名称">
+          <TextInput v-model="editForm.bank_name" placeholder="银行名称（可选）" />
+        </SimpleFormItem>
+        <SimpleFormItem label="卡池类型">
+          <RadioGroup v-model="editForm.pool_type">
+            <Radio label="public">公共卡池</Radio>
+            <Radio label="private">私有卡池</Radio>
+          </RadioGroup>
+        </SimpleFormItem>
+        <SimpleFormItem label="状态">
+          <SelectNative v-model="editForm.status" class="w-40">
+            <SelectOption label="可用" value="available" />
+            <SelectOption label="使用中" value="in_use" />
+            <SelectOption label="已用完" value="used" />
+            <SelectOption label="无效" value="invalid" />
+            <SelectOption label="已过期" value="expired" />
+          </SelectNative>
+        </SimpleFormItem>
+        <SimpleFormItem label="最大使用次数">
+          <NumberInput v-model="editForm.max_use_count" :min="1" :max="9999" />
+        </SimpleFormItem>
+        <SimpleFormItem label="卡密过期时间">
+          <TextInput 
+            v-model="editForm.key_expire_time" 
+            placeholder="格式: 2026-01-28T15:39:20+00:00（留空表示永不过期）" 
+          />
+          <div class="text-xs text-muted-foreground mt-1">
+            临时卡的过期时间，留空表示永不过期
+          </div>
+        </SimpleFormItem>
+        <SimpleFormItem label="备注">
+          <TextInput v-model="editForm.notes" type="textarea" :rows="2" placeholder="备注信息（可选）" />
+        </SimpleFormItem>
+      </SimpleForm>
+      <template #footer>
+        <Button @click="showEditDialog = false">取消</Button>
+        <Button variant="default" type="button" @click="handleUpdateCard" :loading="updating">保存</Button>
       </template>
     </Modal>
 
@@ -394,7 +461,10 @@ const pageSize = ref(20)
 const showDialog = ref(false)
 const showImportDialog = ref(false)
 const showRedeemDialog = ref(false)
+const showEditDialog = ref(false)
 const importing = ref(false)
+const updating = ref(false)
+const editingCardId = ref<number | null>(null)
 const redeeming = ref(false)
 const importResult = ref<any>(null)
 const redeemResult = ref<any>(null)
@@ -418,6 +488,21 @@ const redeemForm = reactive({
   key_id: '',
   pool_type: 'public',
   config_id: undefined as number | undefined
+})
+
+const editForm = reactive({
+  card_number: '',
+  card_holder: '',
+  expiry_month: 1,
+  expiry_year: 2024,
+  cvv: '',
+  card_type: 'Unknown',
+  bank_name: '',
+  pool_type: 'public',
+  status: 'available',
+  max_use_count: 1,
+  key_expire_time: '',
+  notes: ''
 })
 
 // API 配置相关
@@ -471,6 +556,24 @@ const getStatusType = (status: string) => {
   return map[status] || 'info'
 }
 
+// 根据 key_expire_time 动态判断显示状态
+const getDisplayStatus = (row: any): string => {
+  // 如果 key_expire_time 存在且已过期，优先显示"已过期"
+  if (row.key_expire_time && isExpired(row.key_expire_time)) {
+    return '已过期'
+  }
+  // 否则使用后端返回的状态
+  return row.status_display || row.status
+}
+
+const getDisplayStatusType = (row: any): string => {
+  // 如果 key_expire_time 存在且已过期，显示红色
+  if (row.key_expire_time && isExpired(row.key_expire_time)) {
+    return 'danger'
+  }
+  return getStatusType(row.status)
+}
+
 const isExpired = (expireTime: string) => {
   if (!expireTime) return false
   return new Date(expireTime) < new Date()
@@ -493,8 +596,61 @@ const formatCountdown = (expireTime: string) => {
   return `${minutes}分钟`
 }
 
-const editCard = (_card: any) => {
-  ElMessage.info('编辑功能开发中')
+const editCard = (card: any) => {
+  editingCardId.value = card.id
+  Object.assign(editForm, {
+    card_number: card.card_number || '',
+    card_holder: card.card_holder || '',
+    expiry_month: card.expiry_month || 1,
+    expiry_year: card.expiry_year || 2024,
+    cvv: card.cvv || '',
+    card_type: card.card_type || 'Unknown',
+    bank_name: card.bank_name || '',
+    pool_type: card.pool_type || 'public',
+    status: card.status || 'available',
+    max_use_count: card.max_use_count || 1,
+    key_expire_time: card.key_expire_time || '',
+    notes: card.notes || ''
+  })
+  showEditDialog.value = true
+}
+
+const handleUpdateCard = async () => {
+  if (!editingCardId.value) return
+  
+  updating.value = true
+  try {
+    const data: any = {
+      card_holder: editForm.card_holder,
+      expiry_month: editForm.expiry_month,
+      expiry_year: editForm.expiry_year,
+      card_type: editForm.card_type,
+      bank_name: editForm.bank_name,
+      pool_type: editForm.pool_type,
+      status: editForm.status,
+      max_use_count: editForm.max_use_count,
+      notes: editForm.notes
+    }
+    // 只有填写了卡号/CVV才传（后端可能不允许更新敏感信息）
+    if (editForm.card_number) {
+      data.card_number = editForm.card_number
+    }
+    if (editForm.cvv) {
+      data.cvv = editForm.cvv
+    }
+    // 卡密过期时间：空字符串转为 null
+    data.key_expire_time = editForm.key_expire_time.trim() || null
+    
+    await cardsApi.updateCard(editingCardId.value, data)
+    ElMessage.success('更新成功')
+    showEditDialog.value = false
+    editingCardId.value = null
+    fetchCards()
+  } catch (error: any) {
+    ElMessage.error(error.response?.data?.message || '更新失败')
+  } finally {
+    updating.value = false
+  }
 }
 
 const deleteCard = async (card: any) => {
