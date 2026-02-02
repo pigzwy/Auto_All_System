@@ -489,43 +489,18 @@
               </div>
             </template>
 
-            <div class="mt-4 grid gap-2">
-            <label class="text-sm font-medium">S2A API Base</label>
-            <Input v-model="sub2apiForm.api_base" placeholder="https://sub2.pigll.site/api/v1" />
-          </div>
+            <template v-if="poolMode === 's2a'">
+              <div class="mt-4 grid gap-2">
+                <label class="text-sm font-medium">S2A API Base</label>
+                <Input v-model="sub2apiForm.api_base" placeholder="https://sub2.pigll.site/api/v1" />
+              </div>
 
-          <div class="grid gap-2">
-            <label class="text-sm font-medium">Admin API Key (推荐)</label>
-            <Input v-model="sub2apiForm.admin_key" type="password" placeholder="留空表示不修改" />
-            <div v-if="sub2apiHint.admin_key_masked" class="text-xs text-muted-foreground">已保存：{{ sub2apiHint.admin_key_masked }}</div>
-          </div>
-
-          <div class="grid gap-2">
-            <label class="text-sm font-medium">JWT Token (备选)</label>
-            <Input v-model="sub2apiForm.admin_token" type="password" placeholder="留空表示不修改" />
-            <div v-if="sub2apiHint.admin_token_masked" class="text-xs text-muted-foreground">已保存：{{ sub2apiHint.admin_token_masked }}</div>
-          </div>
-
-          <div class="grid grid-cols-2 gap-4">
-            <div class="grid gap-2">
-              <label class="text-sm font-medium">并发</label>
-              <Input :model-value="sub2apiForm.concurrency" @update:modelValue="(v) => sub2apiForm.concurrency = Number(v)" type="number" :min="1" :max="50" />
-            </div>
-            <div class="grid gap-2">
-              <label class="text-sm font-medium">优先级</label>
-              <Input :model-value="sub2apiForm.priority" @update:modelValue="(v) => sub2apiForm.priority = Number(v)" type="number" :min="0" :max="999" />
-            </div>
-          </div>
-
-          <div class="grid gap-2">
-            <label class="text-sm font-medium">分组 ID 列表</label>
-            <Input v-model="sub2apiForm.group_ids" placeholder="例如：2 或 2,3" />
-          </div>
-
-          <div class="grid gap-2">
-            <label class="text-sm font-medium">分组名称列表（可选）</label>
-            <Input v-model="sub2apiForm.group_names" placeholder="例如：默认组 或 default" />
-          </div>
+              <div class="grid gap-2">
+                <label class="text-sm font-medium">S2A Admin API Key</label>
+                <Input v-model="sub2apiForm.admin_key" type="password" placeholder="留空表示不修改" />
+                <div v-if="sub2apiHint.admin_key_masked" class="text-xs text-muted-foreground">已保存：{{ sub2apiHint.admin_key_masked }}（不需要每次输入，只有要更新 key 才粘贴）</div>
+              </div>
+            </template>
 
             <div class="text-xs text-muted-foreground">流程：保存 → 测试连接 → 开始入池</div>
             <div v-if="sub2apiTestMessage" class="text-xs" :class="sub2apiTestOk ? 'text-emerald-600' : 'text-rose-600'">{{ sub2apiTestMessage }}</div>
@@ -533,10 +508,10 @@
         </div>
         <DialogFooter>
           <Button variant="outline" @click="sub2apiDialogVisible = false">取消</Button>
-          <Button variant="outline" :disabled="sub2apiSaving" @click="saveS2aTargetConfig">
-            <Loader2 v-if="sub2apiSaving" class="mr-2 h-4 w-4 animate-spin" />
-            保存
-          </Button>
+           <Button variant="outline" :disabled="sub2apiSaving" @click="saveS2aTargetConfig">
+             <Loader2 v-if="sub2apiSaving" class="mr-2 h-4 w-4 animate-spin" />
+             保存
+           </Button>
           <Button variant="outline" :disabled="sub2apiTesting" @click="testS2aTargetConnection">
             <Loader2 v-if="sub2apiTesting" class="mr-2 h-4 w-4 animate-spin" />
             测试连接
@@ -793,25 +768,12 @@ const batchRunAutoInvite = async () => {
   }
 }
 
-type S2aTarget = {
-  key: string
-  label?: string
-  config: any
-}
-
 const sub2apiDialogVisible = ref(false)
 const sub2apiMotherIds = ref<string[]>([])
-const sub2apiTargets = ref<S2aTarget[]>([])
-const sub2apiTargetKey = ref('sub2')
 
 const sub2apiForm = reactive({
   api_base: '',
-  admin_key: '',
-  admin_token: '',
-  concurrency: 5,
-  priority: 50,
-  group_ids: '2',
-  group_names: ''
+  admin_key: ''
 })
 
 const crsForm = reactive({
@@ -824,8 +786,7 @@ const crsHint = reactive({
 })
 
 const sub2apiHint = reactive({
-  admin_key_masked: '',
-  admin_token_masked: ''
+  admin_key_masked: ''
 })
 
 const sub2apiSaving = ref(false)
@@ -836,34 +797,7 @@ const sub2apiStarting = ref(false)
 
 const poolMode = ref<'crs' | 's2a'>('crs')
 
-const _splitCsv = (raw: string) => {
-  return String(raw || '')
-    .split(/[,\s]+/)
-    .map(s => s.trim())
-    .filter(Boolean)
-}
-
-const applyS2aTargetToForm = () => {
-  const t = sub2apiTargets.value.find(x => x.key === sub2apiTargetKey.value) || sub2apiTargets.value[0]
-  const cfg = t?.config || {}
-
-  sub2apiForm.api_base = String(cfg.api_base || '')
-  sub2apiForm.concurrency = Number(cfg.concurrency || 5)
-  sub2apiForm.priority = Number(cfg.priority || 50)
-  sub2apiForm.group_ids = Array.isArray(cfg.group_ids) ? cfg.group_ids.join(',') : ''
-  sub2apiForm.group_names = Array.isArray(cfg.group_names) ? cfg.group_names.join(',') : ''
-
-  // secrets are masked by backend; do not prefill to avoid overwriting
-  sub2apiHint.admin_key_masked = String(cfg.admin_key || '')
-  sub2apiHint.admin_token_masked = String(cfg.admin_token || '')
-  sub2apiForm.admin_key = ''
-  sub2apiForm.admin_token = ''
-
-  sub2apiTestOk.value = false
-  sub2apiTestMessage.value = ''
-}
-
-const loadS2aTargetsFromSettings = async () => {
+const loadSinkSettingsFromSettings = async () => {
   const settings = await gptBusinessApi.getSettings()
 
   const crsCfg = settings?.crs || {}
@@ -871,29 +805,14 @@ const loadS2aTargetsFromSettings = async () => {
   crsHint.admin_token_masked = String(crsCfg.admin_token || '')
   crsForm.admin_token = ''
 
-  const rawTargets = Array.isArray(settings?.s2a_targets) ? settings.s2a_targets : []
-  const rawDefaultKey = String(settings?.s2a_default_target || '').trim()
+  const s2aCfg = settings?.s2a || {}
+  sub2apiForm.api_base = String(s2aCfg.api_base || '')
+  // secrets are masked by backend; do not prefill to avoid overwriting
+  sub2apiHint.admin_key_masked = String(s2aCfg.admin_key || '')
+  sub2apiForm.admin_key = ''
 
-  let targets: S2aTarget[] = []
-  if (rawTargets.length > 0) {
-    targets = rawTargets
-      .filter((t: any) => t && typeof t === 'object')
-      .map((t: any) => ({
-        key: String(t.key || '').trim() || 'sub2',
-        label: String(t.label || '').trim(),
-        config: t.config || {}
-      }))
-  } else {
-    targets = [{
-      key: 'sub2',
-      label: 'sub2',
-      config: settings?.s2a || {}
-    }]
-  }
-
-  sub2apiTargets.value = targets
-  sub2apiTargetKey.value = rawDefaultKey || targets[0]?.key || 'sub2'
-  applyS2aTargetToForm()
+  sub2apiTestOk.value = false
+  sub2apiTestMessage.value = ''
 }
 
 const saveCrsConfig = async () => {
@@ -912,7 +831,7 @@ const saveCrsConfig = async () => {
 const openSub2apiSinkDialog = async (motherIds: string[]) => {
   sub2apiMotherIds.value = motherIds
   try {
-    await loadS2aTargetsFromSettings()
+    await loadSinkSettingsFromSettings()
   } catch (e: any) {
     ElMessage.error(e?.response?.data?.detail || e?.message || '读取入池配置失败')
   }
@@ -922,43 +841,24 @@ const openSub2apiSinkDialog = async (motherIds: string[]) => {
 const saveS2aTargetConfig = async () => {
   sub2apiSaving.value = true
   try {
-    // 保存按钮：CRS 同步模式下也一起保存 CRS（避免用户只点“保存”但 CRS 没落库）
     if (poolMode.value === 'crs') {
       await saveCrsConfig()
-    }
-
-    const groupIds = _splitCsv(sub2apiForm.group_ids)
-      .filter(x => /^\d+$/.test(x))
-      .map(x => Number(x))
-    const groupNames = _splitCsv(sub2apiForm.group_names)
-
-    const cfg: any = {
-      api_base: sub2apiForm.api_base,
-      concurrency: Number(sub2apiForm.concurrency || 5),
-      priority: Number(sub2apiForm.priority || 50),
-      group_ids: groupIds,
-      group_names: groupNames
-    }
-    if (sub2apiForm.admin_key.trim()) cfg.admin_key = sub2apiForm.admin_key.trim()
-    if (sub2apiForm.admin_token.trim()) cfg.admin_token = sub2apiForm.admin_token.trim()
-
-    const nextTargets = sub2apiTargets.value.map(t => {
-      if (t.key !== sub2apiTargetKey.value) return t
-      return {
-        ...t,
-        config: {
-          ...(t.config || {}),
-          ...cfg
-        }
+    } else {
+      const payload: any = {
+        s2a: {
+          api_base: String(sub2apiForm.api_base || '').trim()
+        },
+        // Single-config mode: disable multi-target settings to avoid unexpected overrides
+        s2a_targets: [],
+        s2a_default_target: ''
       }
-    })
-
-    await gptBusinessApi.updateSettings({
-      s2a_targets: nextTargets,
-      s2a_default_target: sub2apiTargetKey.value
-    })
+      if (String(sub2apiForm.admin_key || '').trim()) {
+        payload.s2a.admin_key = String(sub2apiForm.admin_key || '').trim()
+      }
+      await gptBusinessApi.updateSettings(payload)
+    }
     ElMessage.success('已保存入池配置')
-    await loadS2aTargetsFromSettings()
+    await loadSinkSettingsFromSettings()
   } catch (e: any) {
     ElMessage.error(e?.response?.data?.detail || e?.message || '保存失败')
   } finally {
@@ -974,7 +874,7 @@ const testS2aTargetConnection = async () => {
     // 避免测试到旧配置：先保存一次（后端会保留已脱敏的 secret，不会被空值覆盖）
     await saveS2aTargetConfig()
 
-    const s2aRes = await gptBusinessApi.testS2aConnection({ target_key: sub2apiTargetKey.value })
+    const s2aRes = await gptBusinessApi.testS2aConnection({})
     const s2aOk = !!s2aRes?.success
 
     if (poolMode.value === 'crs') {
@@ -1010,7 +910,7 @@ const startSub2apiSink = async () => {
   sub2apiStarting.value = true
   try {
     const ids = sub2apiMotherIds.value || []
-    await Promise.all(ids.map(id => gptBusinessApi.sub2apiSink(id, { target_key: sub2apiTargetKey.value, mode: poolMode.value })))
+    await Promise.all(ids.map(id => gptBusinessApi.sub2apiSink(id, { mode: poolMode.value })))
     ElMessage.success(`已启动 ${ids.length} 个母号的自动入池`)
     selectedIds.value.clear()
     selectedIds.value = new Set(selectedIds.value)
