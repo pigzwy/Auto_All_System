@@ -496,9 +496,36 @@
               </div>
 
               <div class="grid gap-2">
-                <label class="text-sm font-medium">S2A Admin API Key</label>
+                <label class="text-sm font-medium">Admin API Key（推荐）</label>
                 <Input v-model="sub2apiForm.admin_key" type="password" placeholder="留空表示不修改" />
                 <div v-if="sub2apiHint.admin_key_masked" class="text-xs text-muted-foreground">已保存：{{ sub2apiHint.admin_key_masked }}（不需要每次输入，只有要更新 key 才粘贴）</div>
+              </div>
+
+              <div class="grid gap-2">
+                <label class="text-sm font-medium">JWT Token（备选）</label>
+                <Input v-model="sub2apiForm.admin_token" type="password" placeholder="留空表示不修改" />
+                <div v-if="sub2apiHint.admin_token_masked" class="text-xs text-muted-foreground">已保存：{{ sub2apiHint.admin_token_masked }}（不需要每次输入，只有要更新 token 才粘贴）</div>
+              </div>
+
+              <div class="grid grid-cols-2 gap-4">
+                <div class="grid gap-2">
+                  <label class="text-sm font-medium">并发</label>
+                  <Input :model-value="sub2apiForm.concurrency" @update:modelValue="(v) => sub2apiForm.concurrency = Number(v)" type="number" :min="1" :max="50" />
+                </div>
+                <div class="grid gap-2">
+                  <label class="text-sm font-medium">优先级</label>
+                  <Input :model-value="sub2apiForm.priority" @update:modelValue="(v) => sub2apiForm.priority = Number(v)" type="number" :min="0" :max="999" />
+                </div>
+              </div>
+
+              <div class="grid gap-2">
+                <label class="text-sm font-medium">分组 ID 列表</label>
+                <Input v-model="sub2apiForm.group_ids" placeholder="例如：2 或 2,3" />
+              </div>
+
+              <div class="grid gap-2">
+                <label class="text-sm font-medium">分组名称列表（可选）</label>
+                <Input v-model="sub2apiForm.group_names" placeholder="例如：默认组 或 default" />
               </div>
             </template>
 
@@ -773,7 +800,12 @@ const sub2apiMotherIds = ref<string[]>([])
 
 const sub2apiForm = reactive({
   api_base: '',
-  admin_key: ''
+  admin_key: '',
+  admin_token: '',
+  concurrency: 5,
+  priority: 50,
+  group_ids: '2',
+  group_names: ''
 })
 
 const crsForm = reactive({
@@ -786,7 +818,8 @@ const crsHint = reactive({
 })
 
 const sub2apiHint = reactive({
-  admin_key_masked: ''
+  admin_key_masked: '',
+  admin_token_masked: ''
 })
 
 const sub2apiSaving = ref(false)
@@ -796,6 +829,13 @@ const sub2apiTestMessage = ref('')
 const sub2apiStarting = ref(false)
 
 const poolMode = ref<'crs' | 's2a'>('crs')
+
+const _splitCsv = (raw: string) => {
+  return String(raw || '')
+    .split(/[,\s]+/)
+    .map(s => s.trim())
+    .filter(Boolean)
+}
 
 const loadSinkSettingsFromSettings = async () => {
   const settings = await gptBusinessApi.getSettings()
@@ -807,25 +847,18 @@ const loadSinkSettingsFromSettings = async () => {
 
   const s2aCfg = settings?.s2a || {}
   sub2apiForm.api_base = String(s2aCfg.api_base || '')
+  sub2apiForm.concurrency = Number(s2aCfg.concurrency || 5)
+  sub2apiForm.priority = Number(s2aCfg.priority || 50)
+  sub2apiForm.group_ids = Array.isArray(s2aCfg.group_ids) ? s2aCfg.group_ids.join(',') : String(s2aCfg.group_ids || '2')
+  sub2apiForm.group_names = Array.isArray(s2aCfg.group_names) ? s2aCfg.group_names.join(',') : String(s2aCfg.group_names || '')
   // secrets are masked by backend; do not prefill to avoid overwriting
   sub2apiHint.admin_key_masked = String(s2aCfg.admin_key || '')
+  sub2apiHint.admin_token_masked = String(s2aCfg.admin_token || '')
   sub2apiForm.admin_key = ''
+  sub2apiForm.admin_token = ''
 
   sub2apiTestOk.value = false
   sub2apiTestMessage.value = ''
-}
-
-const saveCrsConfig = async () => {
-  const payload: any = {
-    crs: {
-      api_base: crsForm.api_base
-    }
-  }
-  if (String(crsForm.admin_token || '').trim()) {
-    payload.crs.admin_token = String(crsForm.admin_token || '').trim()
-  }
-
-  await gptBusinessApi.updateSettings(payload)
 }
 
 const openSub2apiSinkDialog = async (motherIds: string[]) => {
@@ -841,22 +874,39 @@ const openSub2apiSinkDialog = async (motherIds: string[]) => {
 const saveS2aTargetConfig = async () => {
   sub2apiSaving.value = true
   try {
-    if (poolMode.value === 'crs') {
-      await saveCrsConfig()
-    } else {
-      const payload: any = {
-        s2a: {
-          api_base: String(sub2apiForm.api_base || '').trim()
-        },
-        // Single-config mode: disable multi-target settings to avoid unexpected overrides
-        s2a_targets: [],
-        s2a_default_target: ''
-      }
-      if (String(sub2apiForm.admin_key || '').trim()) {
-        payload.s2a.admin_key = String(sub2apiForm.admin_key || '').trim()
-      }
-      await gptBusinessApi.updateSettings(payload)
+    // 一键保存：CRS + S2A（隐藏的字段也按当前已加载值保存，避免每次都要重输）
+    const groupIds = _splitCsv(sub2apiForm.group_ids)
+      .filter(x => /^\d+$/.test(x))
+      .map(x => Number(x))
+    const groupNames = _splitCsv(sub2apiForm.group_names)
+
+    const payload: any = {
+      crs: {
+        api_base: String(crsForm.api_base || '').trim()
+      },
+      s2a: {
+        api_base: String(sub2apiForm.api_base || '').trim(),
+        concurrency: Number(sub2apiForm.concurrency || 5),
+        priority: Number(sub2apiForm.priority || 50),
+        group_ids: groupIds,
+        group_names: groupNames
+      },
+      // Single-config mode: disable multi-target settings to avoid unexpected overrides
+      s2a_targets: [],
+      s2a_default_target: ''
     }
+
+    if (String(crsForm.admin_token || '').trim()) {
+      payload.crs.admin_token = String(crsForm.admin_token || '').trim()
+    }
+    if (String(sub2apiForm.admin_key || '').trim()) {
+      payload.s2a.admin_key = String(sub2apiForm.admin_key || '').trim()
+    }
+    if (String(sub2apiForm.admin_token || '').trim()) {
+      payload.s2a.admin_token = String(sub2apiForm.admin_token || '').trim()
+    }
+
+    await gptBusinessApi.updateSettings(payload)
     ElMessage.success('已保存入池配置')
     await loadSinkSettingsFromSettings()
   } catch (e: any) {
