@@ -460,9 +460,11 @@
         </DialogHeader>
           <div class="grid gap-4 py-4">
           <div class="rounded-lg border border-border bg-muted/30 p-3">
-            <div class="text-sm font-medium">入池目标</div>
+            <div class="text-sm font-medium">目标</div>
+            <div class="mt-1 text-xs text-muted-foreground">保存配置后测试连接，通过后再开始。</div>
+
             <div class="mt-3 grid gap-2">
-              <label class="text-sm font-medium">目标</label>
+              <label class="text-sm font-medium">入池到</label>
               <Select v-model="poolMode">
                 <SelectTrigger>
                   <SelectValue placeholder="请选择" />
@@ -486,37 +488,8 @@
                 <div v-if="crsHint.admin_token_masked" class="text-xs text-muted-foreground">已保存：{{ crsHint.admin_token_masked }}（不需要每次输入，只有要更新 token 才粘贴）</div>
               </div>
             </template>
-          </div>
 
-          <div class="rounded-lg border border-border bg-muted/30 p-3">
-            <div class="text-sm font-medium">Sub2API（目标）</div>
-            <div class="mt-1 text-xs text-muted-foreground">选择入到哪里，保存配置后测试连接，通过后再开始。</div>
-
-          <div class="grid gap-2">
-            <label class="text-sm font-medium">入到哪里</label>
-            <Select v-model="sub2apiTargetKey">
-              <SelectTrigger>
-                <SelectValue placeholder="请选择" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem v-for="t in sub2apiTargets" :key="t.key" :value="t.key">
-                  {{ t.label || t.key }}
-                </SelectItem>
-              </SelectContent>
-            </Select>
-            <div class="flex items-center gap-2">
-              <Button size="xs" variant="outline" @click="addS2aTarget">新增目标</Button>
-              <Button size="xs" variant="outline" :disabled="sub2apiTargets.length <= 1" @click="removeS2aTarget">删除当前</Button>
-            </div>
-          </div>
-
-          <div class="grid gap-2">
-            <label class="text-sm font-medium">目标名称</label>
-            <Input :model-value="getCurrentS2aTargetLabel()" @update:modelValue="(v) => setCurrentS2aTargetLabel(String(v))" placeholder="例如：sub2（生产）" />
-            <div class="text-xs text-muted-foreground">仅用于展示，不影响后端逻辑（后端按 key 匹配）。</div>
-          </div>
-
-          <div class="grid gap-2">
+            <div class="mt-4 grid gap-2">
             <label class="text-sm font-medium">S2A API Base</label>
             <Input v-model="sub2apiForm.api_base" placeholder="https://sub2.pigll.site/api/v1" />
           </div>
@@ -554,8 +527,8 @@
             <Input v-model="sub2apiForm.group_names" placeholder="例如：默认组 或 default" />
           </div>
 
-          <div class="text-xs text-muted-foreground">流程：保存 → 测试连接 → 开始入池</div>
-          <div v-if="sub2apiTestMessage" class="text-xs" :class="sub2apiTestOk ? 'text-emerald-600' : 'text-rose-600'">{{ sub2apiTestMessage }}</div>
+            <div class="text-xs text-muted-foreground">流程：保存 → 测试连接 → 开始入池</div>
+            <div v-if="sub2apiTestMessage" class="text-xs" :class="sub2apiTestOk ? 'text-emerald-600' : 'text-rose-600'">{{ sub2apiTestMessage }}</div>
           </div>
         </div>
         <DialogFooter>
@@ -694,7 +667,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, inject, onMounted, onUnmounted, provide, reactive, ref, watch, type Ref } from 'vue'
+import { computed, inject, onMounted, onUnmounted, provide, reactive, ref, type Ref } from 'vue'
 import { ElMessage, ElMessageBox } from '@/lib/element'
 import {
   Armchair,
@@ -890,102 +863,6 @@ const applyS2aTargetToForm = () => {
   sub2apiTestMessage.value = ''
 }
 
-const getCurrentS2aTargetLabel = () => {
-  const t = sub2apiTargets.value.find(x => x.key === sub2apiTargetKey.value)
-  return String(t?.label || t?.key || '')
-}
-
-const setCurrentS2aTargetLabel = (label: string) => {
-  const next = String(label || '').trim()
-  sub2apiTargets.value = sub2apiTargets.value.map(t => {
-    if (t.key !== sub2apiTargetKey.value) return t
-    return { ...t, label: next }
-  })
-}
-
-const addS2aTarget = async () => {
-  try {
-    const { value } = await ElMessageBox.prompt('请输入目标 Key（用于匹配/传参）', '新增入池目标', {
-      confirmButtonText: '下一步',
-      cancelButtonText: '取消',
-      inputValue: '',
-      inputPattern: /^[a-zA-Z0-9_-]{2,32}$/,
-      inputErrorMessage: 'Key 仅允许字母/数字/_/-，长度 2-32'
-    })
-    const key = String(value || '').trim()
-    if (!key) return
-    if (sub2apiTargets.value.some(t => t.key === key)) {
-      ElMessage.warning('该 Key 已存在')
-      return
-    }
-
-    let label = key
-    try {
-      const res = await ElMessageBox.prompt('请输入显示名称（可选）', '新增入池目标', {
-        confirmButtonText: '确定',
-        cancelButtonText: '跳过',
-        inputValue: key
-      })
-      label = String(res.value || '').trim() || key
-    } catch {
-      label = key
-    }
-
-    const groupIds = _splitCsv(sub2apiForm.group_ids)
-      .filter(x => /^\d+$/.test(x))
-      .map(x => Number(x))
-    const groupNames = _splitCsv(sub2apiForm.group_names)
-
-    const newTarget: S2aTarget = {
-      key,
-      label,
-      config: {
-        api_base: '',
-        concurrency: Number(sub2apiForm.concurrency || 5),
-        priority: Number(sub2apiForm.priority || 50),
-        group_ids: groupIds,
-        group_names: groupNames
-      }
-    }
-
-    sub2apiTargets.value = [...sub2apiTargets.value, newTarget]
-    sub2apiTargetKey.value = key
-    applyS2aTargetToForm()
-    ElMessage.success('已新增目标（记得保存配置）')
-  } catch {
-    return
-  }
-}
-
-const removeS2aTarget = async () => {
-  if (sub2apiTargets.value.length <= 1) {
-    ElMessage.warning('至少保留一个目标')
-    return
-  }
-  const key = sub2apiTargetKey.value
-  const target = sub2apiTargets.value.find(t => t.key === key)
-  const label = target?.label || key
-  try {
-    await ElMessageBox.confirm(`确定删除目标：${label}（${key}）？`, '删除目标', {
-      confirmButtonText: '删除',
-      cancelButtonText: '取消',
-      type: 'warning'
-    })
-  } catch {
-    return
-  }
-
-  const nextTargets = sub2apiTargets.value.filter(t => t.key !== key)
-  sub2apiTargets.value = nextTargets
-  sub2apiTargetKey.value = nextTargets[0]?.key || 'sub2'
-  applyS2aTargetToForm()
-  ElMessage.success('已删除目标（记得保存配置）')
-}
-
-watch(sub2apiTargetKey, () => {
-  applyS2aTargetToForm()
-})
-
 const loadS2aTargetsFromSettings = async () => {
   const settings = await gptBusinessApi.getSettings()
 
@@ -1104,10 +981,10 @@ const testS2aTargetConnection = async () => {
       const crsRes = await gptBusinessApi.testCrsConnection()
       const crsOk = !!crsRes?.success
       sub2apiTestOk.value = crsOk && s2aOk
-      sub2apiTestMessage.value = `CRS: ${crsOk ? 'ok' : (crsRes?.message || 'failed')} | S2A(${sub2apiTargetKey.value}): ${s2aOk ? 'ok' : (s2aRes?.message || 'failed')}`
+      sub2apiTestMessage.value = `CRS: ${crsOk ? 'ok' : (crsRes?.message || 'failed')} | S2A: ${s2aOk ? 'ok' : (s2aRes?.message || 'failed')}`
     } else {
       sub2apiTestOk.value = s2aOk
-      sub2apiTestMessage.value = `S2A(${sub2apiTargetKey.value}): ${s2aOk ? 'ok' : (s2aRes?.message || 'failed')}`
+      sub2apiTestMessage.value = `S2A: ${s2aOk ? 'ok' : (s2aRes?.message || 'failed')}`
     }
 
     if (sub2apiTestOk.value) {
