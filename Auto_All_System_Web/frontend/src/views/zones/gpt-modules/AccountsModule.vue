@@ -450,6 +450,135 @@
       </DialogContent>
     </Dialog>
 
+    <Dialog v-model:open="sub2apiDialogVisible">
+      <DialogContent class="sm:max-w-[620px]">
+        <DialogHeader>
+          <DialogTitle>自动入池配置</DialogTitle>
+          <DialogDescription>
+            保存配置后先测试连接，通过后再开始执行（当前将对 {{ sub2apiMotherIds.length }} 个母号生效）
+          </DialogDescription>
+        </DialogHeader>
+          <div class="grid gap-4 py-4">
+          <div class="rounded-lg border border-border bg-muted/30 p-3">
+            <div class="text-sm font-medium">来源</div>
+            <div v-if="poolMode === 'crs_sync'" class="mt-1 text-xs text-muted-foreground">从 CRS 拉取 OpenAI OAuth 凭据，然后写入 Sub2API。</div>
+            <div v-else class="mt-1 text-xs text-muted-foreground">不依赖 CRS，直接通过 Sub2API OpenAI OAuth 自动授权入池。</div>
+            <div class="mt-3 grid gap-2">
+              <label class="text-sm font-medium">入池模式</label>
+              <Select v-model="poolMode">
+                <SelectTrigger>
+                  <SelectValue placeholder="请选择" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="crs_sync">CRS 同步入池（推荐）</SelectItem>
+                  <SelectItem value="s2a_oauth">S2A OAuth 入池（不依赖 CRS）</SelectItem>
+                </SelectContent>
+              </Select>
+              <div class="text-xs text-muted-foreground">选择 S2A OAuth 时，将直接调用 Sub2API 的 OpenAI OAuth 接口生成授权 URL 并自动授权入池。</div>
+            </div>
+
+            <template v-if="poolMode === 'crs_sync'">
+              <div class="mt-3 text-xs text-muted-foreground font-mono"># [crs] api_base = "..."  admin_token = "..."</div>
+              <div class="mt-3 grid gap-2">
+                <label class="text-sm font-medium">CRS API Base</label>
+                <Input v-model="crsForm.api_base" placeholder="https://crs.example.com" />
+              </div>
+              <div class="mt-3 grid gap-2">
+                <label class="text-sm font-medium">CRS Admin Token</label>
+                <Input v-model="crsForm.admin_token" type="password" placeholder="留空表示不修改" />
+                <div v-if="crsHint.admin_token_masked" class="text-xs text-muted-foreground">已保存：{{ crsHint.admin_token_masked }}</div>
+              </div>
+            </template>
+          </div>
+
+          <div class="rounded-lg border border-border bg-muted/30 p-3">
+            <div class="text-sm font-medium">Sub2API（目标）</div>
+            <div class="mt-1 text-xs text-muted-foreground">选择入到哪里，保存配置后测试连接，通过后再开始。</div>
+
+          <div class="grid gap-2">
+            <label class="text-sm font-medium">入到哪里</label>
+            <Select v-model="sub2apiTargetKey">
+              <SelectTrigger>
+                <SelectValue placeholder="请选择" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem v-for="t in sub2apiTargets" :key="t.key" :value="t.key">
+                  {{ t.label || t.key }}
+                </SelectItem>
+              </SelectContent>
+            </Select>
+            <div class="flex items-center gap-2">
+              <Button size="xs" variant="outline" @click="addS2aTarget">新增目标</Button>
+              <Button size="xs" variant="outline" :disabled="sub2apiTargets.length <= 1" @click="removeS2aTarget">删除当前</Button>
+            </div>
+          </div>
+
+          <div class="grid gap-2">
+            <label class="text-sm font-medium">目标名称</label>
+            <Input :model-value="getCurrentS2aTargetLabel()" @update:modelValue="(v) => setCurrentS2aTargetLabel(String(v))" placeholder="例如：sub2（生产）" />
+            <div class="text-xs text-muted-foreground">仅用于展示，不影响后端逻辑（后端按 key 匹配）。</div>
+          </div>
+
+          <div class="grid gap-2">
+            <label class="text-sm font-medium">S2A API Base</label>
+            <Input v-model="sub2apiForm.api_base" placeholder="https://sub2.pigll.site/api/v1" />
+          </div>
+
+          <div class="grid gap-2">
+            <label class="text-sm font-medium">Admin API Key (推荐)</label>
+            <Input v-model="sub2apiForm.admin_key" type="password" placeholder="留空表示不修改" />
+            <div v-if="sub2apiHint.admin_key_masked" class="text-xs text-muted-foreground">已保存：{{ sub2apiHint.admin_key_masked }}</div>
+          </div>
+
+          <div class="grid gap-2">
+            <label class="text-sm font-medium">JWT Token (备选)</label>
+            <Input v-model="sub2apiForm.admin_token" type="password" placeholder="留空表示不修改" />
+            <div v-if="sub2apiHint.admin_token_masked" class="text-xs text-muted-foreground">已保存：{{ sub2apiHint.admin_token_masked }}</div>
+          </div>
+
+          <div class="grid grid-cols-2 gap-4">
+            <div class="grid gap-2">
+              <label class="text-sm font-medium">并发</label>
+              <Input :model-value="sub2apiForm.concurrency" @update:modelValue="(v) => sub2apiForm.concurrency = Number(v)" type="number" :min="1" :max="50" />
+            </div>
+            <div class="grid gap-2">
+              <label class="text-sm font-medium">优先级</label>
+              <Input :model-value="sub2apiForm.priority" @update:modelValue="(v) => sub2apiForm.priority = Number(v)" type="number" :min="0" :max="999" />
+            </div>
+          </div>
+
+          <div class="grid gap-2">
+            <label class="text-sm font-medium">分组 ID 列表</label>
+            <Input v-model="sub2apiForm.group_ids" placeholder="例如：2 或 2,3" />
+          </div>
+
+          <div class="grid gap-2">
+            <label class="text-sm font-medium">分组名称列表（可选）</label>
+            <Input v-model="sub2apiForm.group_names" placeholder="例如：默认组 或 default" />
+          </div>
+
+          <div class="text-xs text-muted-foreground">流程：保存 → 测试连接 → 开始入池</div>
+          <div v-if="sub2apiTestMessage" class="text-xs" :class="sub2apiTestOk ? 'text-emerald-600' : 'text-rose-600'">{{ sub2apiTestMessage }}</div>
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" @click="sub2apiDialogVisible = false">取消</Button>
+          <Button variant="outline" :disabled="sub2apiSaving" @click="saveS2aTargetConfig">
+            <Loader2 v-if="sub2apiSaving" class="mr-2 h-4 w-4 animate-spin" />
+            保存
+          </Button>
+          <Button variant="outline" :disabled="sub2apiTesting" @click="testS2aTargetConnection">
+            <Loader2 v-if="sub2apiTesting" class="mr-2 h-4 w-4 animate-spin" />
+            测试连接
+          </Button>
+          <Button :disabled="!sub2apiTestOk || sub2apiStarting" class="bg-violet-600 hover:bg-violet-700 text-white" @click="startSub2apiSink">
+            <Loader2 v-if="sub2apiStarting" class="mr-2 h-4 w-4 animate-spin" />
+            开始入池
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+
     <!-- Tasks Sheet -->
     <Sheet v-model:open="tasksDrawerVisible">
       <SheetContent side="right" class="w-full sm:max-w-[800px]">
@@ -568,7 +697,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, inject, onMounted, onUnmounted, provide, reactive, ref, type Ref } from 'vue'
+import { computed, inject, onMounted, onUnmounted, provide, reactive, ref, watch, type Ref } from 'vue'
 import { ElMessage, ElMessageBox } from '@/lib/element'
 import {
   Armchair,
@@ -576,7 +705,6 @@ import {
   Loader2,
   Monitor,
   Plus,
-  RefreshCcw,
   Search,
   UserPlus,
   Users,
@@ -695,16 +823,335 @@ const batchRunAutoInvite = async () => {
   }
 }
 
+type S2aTarget = {
+  key: string
+  label?: string
+  config: any
+}
+
+const sub2apiDialogVisible = ref(false)
+const sub2apiMotherIds = ref<string[]>([])
+const sub2apiTargets = ref<S2aTarget[]>([])
+const sub2apiTargetKey = ref('sub2')
+
+const sub2apiForm = reactive({
+  api_base: '',
+  admin_key: '',
+  admin_token: '',
+  concurrency: 5,
+  priority: 50,
+  group_ids: '2',
+  group_names: ''
+})
+
+const crsForm = reactive({
+  api_base: '',
+  admin_token: ''
+})
+
+const crsHint = reactive({
+  admin_token_masked: ''
+})
+
+const sub2apiHint = reactive({
+  admin_key_masked: '',
+  admin_token_masked: ''
+})
+
+const sub2apiSaving = ref(false)
+const sub2apiTesting = ref(false)
+const sub2apiTestOk = ref(false)
+const sub2apiTestMessage = ref('')
+const sub2apiStarting = ref(false)
+
+const poolMode = ref<'crs_sync' | 's2a_oauth'>('crs_sync')
+
+const _splitCsv = (raw: string) => {
+  return String(raw || '')
+    .split(/[,\s]+/)
+    .map(s => s.trim())
+    .filter(Boolean)
+}
+
+const applyS2aTargetToForm = () => {
+  const t = sub2apiTargets.value.find(x => x.key === sub2apiTargetKey.value) || sub2apiTargets.value[0]
+  const cfg = t?.config || {}
+
+  sub2apiForm.api_base = String(cfg.api_base || '')
+  sub2apiForm.concurrency = Number(cfg.concurrency || 5)
+  sub2apiForm.priority = Number(cfg.priority || 50)
+  sub2apiForm.group_ids = Array.isArray(cfg.group_ids) ? cfg.group_ids.join(',') : ''
+  sub2apiForm.group_names = Array.isArray(cfg.group_names) ? cfg.group_names.join(',') : ''
+
+  // secrets are masked by backend; do not prefill to avoid overwriting
+  sub2apiHint.admin_key_masked = String(cfg.admin_key || '')
+  sub2apiHint.admin_token_masked = String(cfg.admin_token || '')
+  sub2apiForm.admin_key = ''
+  sub2apiForm.admin_token = ''
+
+  sub2apiTestOk.value = false
+  sub2apiTestMessage.value = ''
+}
+
+const getCurrentS2aTargetLabel = () => {
+  const t = sub2apiTargets.value.find(x => x.key === sub2apiTargetKey.value)
+  return String(t?.label || t?.key || '')
+}
+
+const setCurrentS2aTargetLabel = (label: string) => {
+  const next = String(label || '').trim()
+  sub2apiTargets.value = sub2apiTargets.value.map(t => {
+    if (t.key !== sub2apiTargetKey.value) return t
+    return { ...t, label: next }
+  })
+}
+
+const addS2aTarget = async () => {
+  try {
+    const { value } = await ElMessageBox.prompt('请输入目标 Key（用于匹配/传参）', '新增入池目标', {
+      confirmButtonText: '下一步',
+      cancelButtonText: '取消',
+      inputValue: '',
+      inputPattern: /^[a-zA-Z0-9_-]{2,32}$/,
+      inputErrorMessage: 'Key 仅允许字母/数字/_/-，长度 2-32'
+    })
+    const key = String(value || '').trim()
+    if (!key) return
+    if (sub2apiTargets.value.some(t => t.key === key)) {
+      ElMessage.warning('该 Key 已存在')
+      return
+    }
+
+    let label = key
+    try {
+      const res = await ElMessageBox.prompt('请输入显示名称（可选）', '新增入池目标', {
+        confirmButtonText: '确定',
+        cancelButtonText: '跳过',
+        inputValue: key
+      })
+      label = String(res.value || '').trim() || key
+    } catch {
+      label = key
+    }
+
+    const groupIds = _splitCsv(sub2apiForm.group_ids)
+      .filter(x => /^\d+$/.test(x))
+      .map(x => Number(x))
+    const groupNames = _splitCsv(sub2apiForm.group_names)
+
+    const newTarget: S2aTarget = {
+      key,
+      label,
+      config: {
+        api_base: '',
+        concurrency: Number(sub2apiForm.concurrency || 5),
+        priority: Number(sub2apiForm.priority || 50),
+        group_ids: groupIds,
+        group_names: groupNames
+      }
+    }
+
+    sub2apiTargets.value = [...sub2apiTargets.value, newTarget]
+    sub2apiTargetKey.value = key
+    applyS2aTargetToForm()
+    ElMessage.success('已新增目标（记得保存配置）')
+  } catch {
+    return
+  }
+}
+
+const removeS2aTarget = async () => {
+  if (sub2apiTargets.value.length <= 1) {
+    ElMessage.warning('至少保留一个目标')
+    return
+  }
+  const key = sub2apiTargetKey.value
+  const target = sub2apiTargets.value.find(t => t.key === key)
+  const label = target?.label || key
+  try {
+    await ElMessageBox.confirm(`确定删除目标：${label}（${key}）？`, '删除目标', {
+      confirmButtonText: '删除',
+      cancelButtonText: '取消',
+      type: 'warning'
+    })
+  } catch {
+    return
+  }
+
+  const nextTargets = sub2apiTargets.value.filter(t => t.key !== key)
+  sub2apiTargets.value = nextTargets
+  sub2apiTargetKey.value = nextTargets[0]?.key || 'sub2'
+  applyS2aTargetToForm()
+  ElMessage.success('已删除目标（记得保存配置）')
+}
+
+watch(sub2apiTargetKey, () => {
+  applyS2aTargetToForm()
+})
+
+const loadS2aTargetsFromSettings = async () => {
+  const settings = await gptBusinessApi.getSettings()
+
+  const crsCfg = settings?.crs || {}
+  crsForm.api_base = String(crsCfg.api_base || '')
+  crsHint.admin_token_masked = String(crsCfg.admin_token || '')
+  crsForm.admin_token = ''
+
+  const rawTargets = Array.isArray(settings?.s2a_targets) ? settings.s2a_targets : []
+  const rawDefaultKey = String(settings?.s2a_default_target || '').trim()
+
+  let targets: S2aTarget[] = []
+  if (rawTargets.length > 0) {
+    targets = rawTargets
+      .filter((t: any) => t && typeof t === 'object')
+      .map((t: any) => ({
+        key: String(t.key || '').trim() || 'sub2',
+        label: String(t.label || '').trim(),
+        config: t.config || {}
+      }))
+  } else {
+    targets = [{
+      key: 'sub2',
+      label: 'sub2',
+      config: settings?.s2a || {}
+    }]
+  }
+
+  sub2apiTargets.value = targets
+  sub2apiTargetKey.value = rawDefaultKey || targets[0]?.key || 'sub2'
+  applyS2aTargetToForm()
+}
+
+const saveCrsConfig = async () => {
+  const payload: any = {
+    crs: {
+      api_base: crsForm.api_base
+    }
+  }
+  if (String(crsForm.admin_token || '').trim()) {
+    payload.crs.admin_token = String(crsForm.admin_token || '').trim()
+  }
+
+  await gptBusinessApi.updateSettings(payload)
+}
+
+const openSub2apiSinkDialog = async (motherIds: string[]) => {
+  sub2apiMotherIds.value = motherIds
+  try {
+    await loadS2aTargetsFromSettings()
+  } catch (e: any) {
+    ElMessage.error(e?.response?.data?.detail || e?.message || '读取入池配置失败')
+  }
+  sub2apiDialogVisible.value = true
+}
+
+const saveS2aTargetConfig = async () => {
+  sub2apiSaving.value = true
+  try {
+    // 保存按钮：CRS 同步模式下也一起保存 CRS（避免用户只点“保存”但 CRS 没落库）
+    if (poolMode.value === 'crs_sync') {
+      await saveCrsConfig()
+    }
+
+    const groupIds = _splitCsv(sub2apiForm.group_ids)
+      .filter(x => /^\d+$/.test(x))
+      .map(x => Number(x))
+    const groupNames = _splitCsv(sub2apiForm.group_names)
+
+    const cfg: any = {
+      api_base: sub2apiForm.api_base,
+      concurrency: Number(sub2apiForm.concurrency || 5),
+      priority: Number(sub2apiForm.priority || 50),
+      group_ids: groupIds,
+      group_names: groupNames
+    }
+    if (sub2apiForm.admin_key.trim()) cfg.admin_key = sub2apiForm.admin_key.trim()
+    if (sub2apiForm.admin_token.trim()) cfg.admin_token = sub2apiForm.admin_token.trim()
+
+    const nextTargets = sub2apiTargets.value.map(t => {
+      if (t.key !== sub2apiTargetKey.value) return t
+      return {
+        ...t,
+        config: {
+          ...(t.config || {}),
+          ...cfg
+        }
+      }
+    })
+
+    await gptBusinessApi.updateSettings({
+      s2a_targets: nextTargets,
+      s2a_default_target: sub2apiTargetKey.value
+    })
+    ElMessage.success('已保存入池配置')
+    await loadS2aTargetsFromSettings()
+  } catch (e: any) {
+    ElMessage.error(e?.response?.data?.detail || e?.message || '保存失败')
+  } finally {
+    sub2apiSaving.value = false
+  }
+}
+
+const testS2aTargetConnection = async () => {
+  sub2apiTesting.value = true
+  sub2apiTestOk.value = false
+  sub2apiTestMessage.value = ''
+  try {
+    // 避免测试到旧配置：先保存一次（后端会保留已脱敏的 secret，不会被空值覆盖）
+    await saveS2aTargetConfig()
+
+    const s2aRes = await gptBusinessApi.testS2aConnection({ target_key: sub2apiTargetKey.value })
+    const s2aOk = !!s2aRes?.success
+
+    if (poolMode.value === 'crs_sync') {
+      const crsRes = await gptBusinessApi.testCrsConnection()
+      const crsOk = !!crsRes?.success
+      sub2apiTestOk.value = crsOk && s2aOk
+      sub2apiTestMessage.value = `CRS: ${crsOk ? 'ok' : (crsRes?.message || 'failed')} | S2A(${sub2apiTargetKey.value}): ${s2aOk ? 'ok' : (s2aRes?.message || 'failed')}`
+    } else {
+      sub2apiTestOk.value = s2aOk
+      sub2apiTestMessage.value = `S2A(${sub2apiTargetKey.value}): ${s2aOk ? 'ok' : (s2aRes?.message || 'failed')}`
+    }
+
+    if (sub2apiTestOk.value) {
+      ElMessage.success('连接测试通过')
+    } else {
+      ElMessage.error('连接测试失败')
+    }
+  } catch (e: any) {
+    sub2apiTestOk.value = false
+    sub2apiTestMessage.value = e?.response?.data?.message || e?.response?.data?.detail || e?.message || '连接测试失败'
+    ElMessage.error(sub2apiTestMessage.value)
+  } finally {
+    sub2apiTesting.value = false
+  }
+}
+
+const startSub2apiSink = async () => {
+  if (!sub2apiTestOk.value) {
+    ElMessage.warning('请先测试连接，通过后再开始')
+    return
+  }
+
+  sub2apiStarting.value = true
+  try {
+    const ids = sub2apiMotherIds.value || []
+    await Promise.all(ids.map(id => gptBusinessApi.sub2apiSink(id, { target_key: sub2apiTargetKey.value, mode: poolMode.value })))
+    ElMessage.success(`已启动 ${ids.length} 个母号的自动入池`)
+    selectedIds.value.clear()
+    selectedIds.value = new Set(selectedIds.value)
+    sub2apiDialogVisible.value = false
+  } catch (e: any) {
+    ElMessage.error(e?.response?.data?.detail || e?.message || '启动失败')
+  } finally {
+    sub2apiStarting.value = false
+  }
+}
+
 const batchRunSub2apiSink = async () => {
   if (selectedIds.value.size === 0) return
   const ids = Array.from(selectedIds.value)
-  try {
-    await Promise.all(ids.map(id => gptBusinessApi.sub2apiSink(id)))
-    ElMessage.success(`已启动 ${ids.length} 个母号的自动入池`)
-    selectedIds.value.clear()
-  } catch (e: any) {
-    ElMessage.error(e?.response?.data?.detail || e?.message || '批量操作失败')
-  }
+  await openSub2apiSinkDialog(ids)
 }
 
 // 提供给父组件
@@ -961,7 +1408,6 @@ const getAccountStatusBadges = (account: any): StatusBadge[] => {
   const badges: StatusBadge[] = []
 
   const accountType = String(account?.type || '')
-  const isMother = accountType === 'mother'
   const isChild = accountType === 'child'
 
   const registerStatus = String(account?.register_status || 'not_started')
@@ -998,8 +1444,8 @@ const getAccountStatusBadges = (account: any): StatusBadge[] => {
     not_started: '未登录'
   })
 
-  // 母号：入池状态
-  if (isMother && poolStatus) {
+  // 入池状态（母号/子号都展示）
+  if (poolStatus) {
     mapCommon('pool', poolStatus, {
       success: '已入池',
       running: '入池中',
@@ -1161,6 +1607,18 @@ const handleViewTasks = (e: Event) => {
   if (mother) viewTasks(mother)
 }
 
+const handleOpenSub2apiSink = (e: Event) => {
+  const detail = (e as CustomEvent).detail || {}
+  const ids = Array.isArray(detail.mother_ids) ? detail.mother_ids : []
+  if (ids.length > 0) {
+    openSub2apiSinkDialog(ids)
+    return
+  }
+  if (selectedMother.value?.id) {
+    openSub2apiSinkDialog([selectedMother.value.id])
+  }
+}
+
 // 快捷键支持
 const handleKeydown = (e: KeyboardEvent) => {
   // 忽略输入框内的按键
@@ -1216,6 +1674,7 @@ onMounted(() => {
   window.addEventListener('gpt-open-create-mother', handleOpenCreateMother)
   window.addEventListener('gpt-open-create-child', handleOpenCreateChild)
   window.addEventListener('gpt-view-tasks', handleViewTasks)
+  window.addEventListener('gpt-open-sub2api-sink', handleOpenSub2apiSink)
   
   // 快捷键支持
   window.addEventListener('keydown', handleKeydown)
@@ -1227,6 +1686,7 @@ onUnmounted(() => {
   window.removeEventListener('gpt-open-create-mother', handleOpenCreateMother)
   window.removeEventListener('gpt-open-create-child', handleOpenCreateChild)
   window.removeEventListener('gpt-view-tasks', handleViewTasks)
+  window.removeEventListener('gpt-open-sub2api-sink', handleOpenSub2apiSink)
   window.removeEventListener('keydown', handleKeydown)
 })
 </script>

@@ -355,6 +355,19 @@ def register_openai_account(
 
         return True
 
+    def _wait_target_session(target_email: str, timeout_sec: int = 60) -> tuple[bool, str]:
+        """在 chatgpt.com 上轮询 /api/auth/session，确认是否已登录目标账号。"""
+        start = time.time()
+        last_email = ""
+        while time.time() - start < timeout_sec:
+            ok, current_email = is_logged_in(page, timeout=7)
+            if current_email:
+                last_email = current_email
+            if ok and current_email and current_email.lower() == target_email.lower():
+                return True, current_email
+            time.sleep(2)
+        return False, last_email
+
     _log(f"开始注册 OpenAI 账号: {email}")
 
     try:
@@ -484,23 +497,47 @@ def register_openai_account(
                     fallback_auth_login_done = True
                     try:
                         _log("仍未进入 auth0，尝试打开 /auth/login 并点击 signup-button")
-                        old_url = page.url
                         page.get("https://chatgpt.com/auth/login")
                         wait_for_page_stable(page, timeout=8)
                         _shot("fallback_auth_login.png")
+                        old_url = page.url
                         signup_btn = wait_for_element(page, 'css:button[data-testid="signup-button"]', timeout=6)
                         if signup_btn:
-                            signup_btn.click()
+                            try:
+                                signup_btn.click()
+                            except Exception:
+                                try:
+                                    page.run_js(
+                                        'var b=document.querySelector(\'button[data-testid="signup-button"]\'); if (b) { b.click(); }',
+                                        timeout=2,
+                                    )
+                                except Exception:
+                                    pass
                             wait_for_url_change(page, old_url, timeout=15)
                             _shot("fallback_after_signup_click.png")
                             continue
                     except Exception:
                         pass
 
+            # 明确处理：卡在 chatgpt.com/auth/login 时，直接跳转 auth0（避免按钮点击无反应）
+            if "chatgpt.com/auth/login" in current_url:
+                try:
+                    _log("卡在 /auth/login，尝试直接打开 auth.openai.com/log-in-or-create-account")
+                    page.get("https://auth.openai.com/log-in-or-create-account")
+                    wait_for_page_stable(page, timeout=8)
+                    _shot("force_auth0_from_auth_login.png")
+                    continue
+                except Exception:
+                    pass
+
             # 步骤1: 输入邮箱
             if "auth.openai.com/log-in-or-create-account" in current_url:
                 _log("邮箱输入页面")
-                email_input = wait_for_element(page, 'css:input[type="email"]', timeout=15)
+                email_input = wait_for_element(
+                    page,
+                    'css:input[type="email"], input[name="email"], input[name="username"], input[id="username"], input[autocomplete="username"], input[autocomplete="email"]',
+                    timeout=15,
+                )
                 if not email_input:
                     _log("无法找到邮箱输入框")
                     return False
@@ -579,8 +616,8 @@ def register_openai_account(
             try:
                 page.get(url)
                 wait_for_page_stable(page, timeout=8)
-                logged_in, current_email = is_logged_in(page)
-                if logged_in and current_email and current_email.lower() == email.lower():
+                ok, current_email = _wait_target_session(email, timeout_sec=60)
+                if ok:
                     _log(f"注册完成: {current_email}")
                     return True
             except Exception:
@@ -664,8 +701,8 @@ def register_openai_account(
             try:
                 page.get(url)
                 wait_for_page_stable(page, timeout=8)
-                logged_in, current_email = is_logged_in(page)
-                if logged_in and current_email and current_email.lower() == email.lower():
+                ok, current_email = _wait_target_session(email, timeout_sec=60)
+                if ok:
                     _shot("07_registered.png")
                     _log(f"注册完成: {current_email}")
                     return True

@@ -237,12 +237,12 @@ const runAutoInvite = async () => {
 
 const runSub2apiSink = async () => {
   if (!selectedMother.value) return
-  try {
-    const res = await gptBusinessApi.sub2apiSink(selectedMother.value.id)
-    ElMessage.success(res?.message || '已启动：自动入池')
-  } catch (e: any) {
-    ElMessage.error(e?.response?.data?.detail || e?.message || '启动失败')
-  }
+  // 统一走 AccountsModule 弹窗：保存配置 -> 测试连接 -> 开始
+  window.dispatchEvent(
+    new CustomEvent('gpt-open-sub2api-sink', {
+      detail: { mother_ids: [selectedMother.value.id] }
+    })
+  )
 }
 
 const editSeat = async () => {

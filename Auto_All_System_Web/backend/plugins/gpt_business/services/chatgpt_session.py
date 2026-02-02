@@ -269,7 +269,8 @@ def ensure_access_token(
                 if email_input:
                     _log("fill email on chatgpt.com login")
                     human_delay()
-                    type_slowly(page, email_selector, target_email)
+                    # Use the element we just located; selector may match hidden inputs.
+                    type_slowly(page, email_input, target_email)
                     _shot("invite_login_02_email_filled.png")
                     human_delay(0.5, 1.0)
                     submit_btn = wait_for_element(page, 'css:button[type="submit"]', timeout=5)
@@ -292,7 +293,8 @@ def ensure_access_token(
                     _shot("invite_login_err_email_input_missing.png")
                     raise RuntimeError(f"login email input not found (url={current_url})")
                 human_delay()
-                type_slowly(page, email_selector, target_email)
+                # Use the element we just located; selector may match hidden inputs.
+                type_slowly(page, email_input, target_email)
                 _shot("invite_login_03_auth0_email_filled.png")
                 human_delay(0.5, 1.2)
                 submit_btn = wait_for_element(page, 'css:button[type="submit"]', timeout=5)
@@ -324,7 +326,8 @@ def ensure_access_token(
                     _shot("invite_login_err_password_input_missing.png")
                     raise RuntimeError(f"login password input not found (url={current_url})")
                 human_delay()
-                type_slowly(page, password_selector, str(password))
+                # Use the element we just located; selector may match hidden inputs.
+                type_slowly(page, password_input, str(password))
                 _shot("invite_login_04_auth0_password_filled.png")
                 human_delay(0.5, 1.2)
                 submit_btn = wait_for_element(page, 'css:button[type="submit"]', timeout=5)
@@ -344,7 +347,8 @@ def ensure_access_token(
                 if email_input:
                     _log("auth0 generic page: found email input")
                     human_delay()
-                    type_slowly(page, email_selector, target_email)
+                    # Use the element we just located; selector may match hidden inputs.
+                    type_slowly(page, email_input, target_email)
                     _shot("invite_login_03b_auth0_email_filled.png")
                     human_delay(0.5, 1.2)
                     submit_btn = wait_for_element(page, 'css:button[type="submit"]', timeout=5)
@@ -360,7 +364,8 @@ def ensure_access_token(
                 if password_input:
                     _log("auth0 generic page: found password input")
                     human_delay()
-                    type_slowly(page, password_selector, str(password))
+                    # Use the element we just located; selector may match hidden inputs.
+                    type_slowly(page, password_input, str(password))
                     _shot("invite_login_04b_auth0_password_filled.png")
                     human_delay(0.5, 1.2)
                     submit_btn = wait_for_element(page, 'css:button[type="submit"]', timeout=5)

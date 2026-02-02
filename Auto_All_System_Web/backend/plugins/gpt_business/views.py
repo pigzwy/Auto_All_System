@@ -22,6 +22,8 @@ from .serializers import (
     AccountCreateChildSerializer,
     AccountCreateMotherSerializer,
     AccountUpdateSerializer,
+    CrsTestSerializer,
+    S2aTestSerializer,
     SettingsUpdateSerializer,
     TaskCreateSerializer,
 )
@@ -82,6 +84,25 @@ def _mask_settings(settings: dict[str, Any]) -> dict[str, Any]:
             s2a["admin_token"] = _mask_secret(str(s2a.get("admin_token") or ""))
         masked["s2a"] = s2a
 
+    # s2a_targets
+    s2a_targets_masked: list[dict[str, Any]] = []
+    if isinstance(masked.get("s2a_targets"), list):
+        for t in masked.get("s2a_targets") or []:
+            if not isinstance(t, dict):
+                continue
+            item = {**t}
+            cfg = item.get("config")
+            if isinstance(cfg, dict):
+                cfg2 = {**cfg}
+                if "admin_key" in cfg2:
+                    cfg2["admin_key"] = _mask_secret(str(cfg2.get("admin_key") or ""))
+                if "admin_token" in cfg2:
+                    cfg2["admin_token"] = _mask_secret(str(cfg2.get("admin_token") or ""))
+                item["config"] = cfg2
+            s2a_targets_masked.append(item)
+    if s2a_targets_masked:
+        masked["s2a_targets"] = s2a_targets_masked
+
     # proxies 里的密码也做脱敏
     proxies: list[dict[str, Any]] = []
     for p in masked.get("proxies") or []:
@@ -130,6 +151,45 @@ class SettingsViewSet(ViewSet):
             if "teams" in payload:
                 settings["teams"] = payload["teams"]
 
+            # multiple s2a targets (merge + preserve secrets)
+            if "s2a_targets" in payload:
+                incoming = payload.get("s2a_targets") or []
+                existing = settings.get("s2a_targets") if isinstance(settings.get("s2a_targets"), list) else []
+
+                existing_by_key: dict[str, dict[str, Any]] = {}
+                for t in existing:
+                    if not isinstance(t, dict):
+                        continue
+                    k = str(t.get("key") or "").strip()
+                    if k:
+                        existing_by_key[k] = t
+
+                merged: list[dict[str, Any]] = []
+                for t in incoming:
+                    if not isinstance(t, dict):
+                        continue
+                    key = str(t.get("key") or "").strip()
+                    if not key:
+                        continue
+
+                    prev = existing_by_key.get(key) or {}
+                    prev_cfg = prev.get("config") if isinstance(prev.get("config"), dict) else {}
+                    new_cfg = t.get("config") if isinstance(t.get("config"), dict) else {}
+
+                    cfg = {**prev_cfg, **new_cfg}
+                    for secret_field in ["admin_key", "admin_token"]:
+                        v = str(new_cfg.get(secret_field) or "").strip()
+                        # empty or masked -> keep existing
+                        if not v or "*" in v:
+                            if secret_field in prev_cfg:
+                                cfg[secret_field] = prev_cfg.get(secret_field)
+
+                    merged.append({**prev, **t, "key": key, "config": cfg})
+
+                settings["s2a_targets"] = merged
+            if "s2a_default_target" in payload:
+                settings["s2a_default_target"] = payload["s2a_default_target"]
+
             # 兼容 oai-team-auto-provisioner 的配置项
             for key in [
                 "proxy_enabled",
@@ -149,13 +209,95 @@ class SettingsViewSet(ViewSet):
                 if section in payload:
                     current_section = settings.get(section) or {}
                     if isinstance(current_section, dict) and isinstance(payload[section], dict):
-                        settings[section] = {**current_section, **payload[section]}
+                        merged = {**current_section, **payload[section]}
+
+                        # preserve secrets when payload is empty/masked
+                        if section == "crs":
+                            v = str((payload[section] or {}).get("admin_token") or "").strip()
+                            if (not v or "*" in v) and "admin_token" in current_section:
+                                merged["admin_token"] = current_section.get("admin_token")
+
+                        settings[section] = merged
                     else:
                         settings[section] = payload[section]
             return settings
 
         new_settings = update_settings(mutator)
         return Response(_mask_settings(new_settings))
+
+    @action(detail=False, methods=["post"], url_path="s2a/test")
+    def s2a_test(self, request):
+        """测试 S2A API Base + admin_key/admin_token 是否可用。
+
+        支持两种方式：
+        - 传 target_key：从 settings.s2a_targets 中读取 config
+        - 传 config：直接用该 config 测试（不依赖保存）
+        """
+        serializer = S2aTestSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        payload = serializer.validated_data
+
+        settings = get_settings()
+        target_key = str(payload.get("target_key") or "").strip()
+        config = payload.get("config") if isinstance(payload.get("config"), dict) else None
+
+        if not config:
+            if target_key and isinstance(settings.get("s2a_targets"), list):
+                for t in settings.get("s2a_targets") or []:
+                    if not isinstance(t, dict):
+                        continue
+                    if str(t.get("key") or "").strip() == target_key and isinstance(t.get("config"), dict):
+                        config = t.get("config")
+                        break
+            if not config:
+                config = settings.get("s2a") if isinstance(settings.get("s2a"), dict) else {}
+
+        api_base = str((config or {}).get("api_base") or "").strip()
+        admin_key = str((config or {}).get("admin_key") or "").strip()
+        admin_token = str((config or {}).get("admin_token") or "").strip()
+
+        if not api_base:
+            return Response({"success": False, "message": "missing s2a.api_base"}, status=status.HTTP_400_BAD_REQUEST)
+        if not admin_key and not admin_token:
+            return Response({"success": False, "message": "missing s2a.admin_key/admin_token"}, status=status.HTTP_400_BAD_REQUEST)
+
+        timeout = int(((settings.get("request") or {}).get("timeout") or 20))
+
+        from .services.sub2api_sink_service import sub2api_test_connection
+
+        ok, msg = sub2api_test_connection(
+            api_base=api_base,
+            admin_key=admin_key,
+            admin_token=admin_token,
+            timeout=timeout,
+        )
+        return Response({"success": bool(ok), "message": msg, "target_key": target_key or ""})
+
+    @action(detail=False, methods=["post"], url_path="crs/test")
+    def crs_test(self, request):
+        """测试 CRS api_base + admin_token 是否可用。"""
+        serializer = CrsTestSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        payload = serializer.validated_data
+
+        settings = get_settings()
+        config = payload.get("config") if isinstance(payload.get("config"), dict) else None
+        if not config:
+            config = settings.get("crs") if isinstance(settings.get("crs"), dict) else {}
+
+        api_base = str((config or {}).get("api_base") or "").strip()
+        admin_token = str((config or {}).get("admin_token") or "").strip()
+
+        if not api_base:
+            return Response({"success": False, "message": "missing crs.api_base"}, status=status.HTTP_400_BAD_REQUEST)
+        if not admin_token:
+            return Response({"success": False, "message": "missing crs.admin_token"}, status=status.HTTP_400_BAD_REQUEST)
+
+        timeout = int(((settings.get("request") or {}).get("timeout") or 20))
+        from .services.sub2api_sink_service import crs_test_connection
+
+        ok, msg = crs_test_connection(api_base=api_base, admin_token=admin_token, timeout=timeout)
+        return Response({"success": bool(ok), "message": msg})
 
 
 class TaskViewSet(ViewSet):
@@ -712,6 +854,8 @@ class AccountsViewSet(ViewSet):
                     "register_updated_at": "",
                     "login_status": "not_started",
                     "login_updated_at": "",
+                    "pool_status": "not_started",
+                    "pool_updated_at": "",
                     "team_join_status": "not_started",
                     "team_join_updated_at": "",
                     "created_at": now,
@@ -883,18 +1027,31 @@ class AccountsViewSet(ViewSet):
         if not isinstance(acc, dict) or str(acc.get("type")) != "mother":
             return Response({"detail": "Mother account not found"}, status=status.HTTP_400_BAD_REQUEST)
 
+        target_key = str(request.data.get("target_key") or request.data.get("s2a_target_key") or "").strip()
+        mode = str(request.data.get("mode") or request.data.get("pool_mode") or "").strip() or "crs_sync"
+
         record_id = uuid.uuid4().hex
         now = timezone.now().isoformat()
         add_task({
             "id": record_id,
             "type": "sub2api_sink",
             "mother_id": str(pk),
+            "s2a_target_key": target_key,
+            "pool_mode": mode,
             "status": "pending",
             "created_at": now,
         })
 
         async_result = sub2api_sink_task.delay(record_id)
-        return Response({"message": "已启动：自动入池", "task_id": async_result.id, "record_id": record_id})
+        return Response(
+            {
+                "message": "已启动：自动入池",
+                "task_id": async_result.id,
+                "record_id": record_id,
+                "target_key": target_key,
+                "mode": mode,
+            }
+        )
 
 
 class CeleryTaskViewSet(ViewSet):

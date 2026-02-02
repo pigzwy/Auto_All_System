@@ -53,6 +53,26 @@ class S2aSettingsSerializer(serializers.Serializer):
     group_names = serializers.ListField(child=serializers.CharField(trim_whitespace=True), required=False, allow_empty=True)
 
 
+class S2aTargetSerializer(serializers.Serializer):
+    # logical name, e.g. "sub2"
+    key = serializers.CharField(required=True, trim_whitespace=True)
+    # display name, optional
+    label = serializers.CharField(required=False, allow_blank=True, trim_whitespace=True)
+    config = S2aSettingsSerializer(required=True)
+
+
+class S2aTestSerializer(serializers.Serializer):
+    # If provided, backend will resolve target config from plugin settings.
+    target_key = serializers.CharField(required=False, allow_blank=True, trim_whitespace=True)
+    # If provided, use this config directly (does not require saving first).
+    config = S2aSettingsSerializer(required=False)
+
+
+class CrsTestSerializer(serializers.Serializer):
+    # If provided, use this config directly (does not require saving first).
+    config = CrsSettingsSerializer(required=False)
+
+
 class RequestSettingsSerializer(serializers.Serializer):
     timeout = serializers.IntegerField(required=False, min_value=1, max_value=120)
     user_agent = serializers.CharField(required=False, allow_blank=True, trim_whitespace=True)
@@ -94,6 +114,9 @@ class SettingsUpdateSerializer(serializers.Serializer):
     crs = CrsSettingsSerializer(required=False)
     cpa = CpaSettingsSerializer(required=False)
     s2a = S2aSettingsSerializer(required=False)
+    # multiple targets (optional; used by UI)
+    s2a_targets = serializers.ListField(child=S2aTargetSerializer(), required=False, allow_empty=True)
+    s2a_default_target = serializers.CharField(required=False, allow_blank=True, trim_whitespace=True)
     request = RequestSettingsSerializer(required=False)
     verification = VerificationSettingsSerializer(required=False)
     browser = BrowserSettingsSerializer(required=False)

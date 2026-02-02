@@ -161,6 +161,10 @@ task record 关键字段：
 
 整个任务可分为 2 个阶段：
 
+补充：子号自动补齐
+- 若母号当前子号数量 < `seat_total` 且 `seat_total > 0`，`auto_invite_task` 会自动创建缺少的子号（通过 CloudMail），再进入邀请/入队流程。
+- 若 `seat_total == 0`（未配置/无限制），不会自动创建（避免无上限生成），此时没有子号会直接报错。
+
 ### 4.1 阶段 A：母号拿 token + account_id，并发送 invites
 
 关键点：
@@ -353,9 +357,48 @@ task record 关键字段：
 
 必要配置（Plugin settings）：
 - CRS：`crs.api_base`、`crs.admin_token`
-- Sub2API：`s2a.api_base`，二选一认证：
-  - `s2a.admin_api_key`（推荐） 或 `s2a.admin_jwt`
+- Sub2API：`s2a.api_base`，二选一认证（字段名兼容 oai-team-auto-provisioner 的 [s2a]）：
+  - `s2a.admin_key`（推荐，对应 Header `x-api-key`）
+  - `s2a.admin_token`（备选，对应 Header `Authorization: Bearer ...`）
 - 账号参数：`s2a.group_ids`、`s2a.concurrency`、`s2a.priority`
+
+多目标配置（已实现，用于“入到哪里”下拉框）：
+- `s2a_targets`: `[{ key, label?, config: { api_base, admin_key/admin_token, concurrency, priority, group_ids, group_names } }]`
+- `s2a_default_target`: 默认选择的 `key`（例如 `sub2`）
+
+安全注意（已实现）：
+- `GET /settings/current/` 返回的 `admin_key/admin_token` 会脱敏。
+- 保存配置时：如果未重新输入 `admin_key/admin_token`，后端会保留旧值（不会被空字符串覆盖）。
+
+配置示例（来源：oai-team-auto-provisioner [s2a]，字段名保持一致便于迁移）：
+```toml
+[s2a]
+api_base = "https://sub2.pigll.site/api/v1"
+admin_key = "admin-xxxx"
+admin_token = ""
+concurrency = 5
+priority = 50
+group_ids = [2]
+group_names = []
+```
+
+连接测试（已实现）：
+- 后端接口：`POST /api/v1/plugins/gpt-business/settings/s2a/test/`
+  - 支持 `target_key`（从 settings.s2a_targets 取 config）
+  - 也支持 `config`（不保存直接测）
+- 测试通过后再执行入池任务（前端已做强制要求）
+
+状态展示（已实现）：
+- 子号列表增加 `已入池`（使用 `pool_status` / `pool_updated_at` 字段）
+- 入池任务会对每个 email 记录 ok/skip/fail，并逐个写回对应账号的 `pool_status`：
+  - `ok` / `skipped` -> `pool_status=success`
+  - `failed` -> `pool_status=failed`
+
+前端交互（已实现）：
+- 点击“入池”/“批量入池”会弹出对话框：
+  - 选择“入到哪里”（默认 `s2a_default_target`，若无则 fallback `sub2`）
+  - 编辑并保存配置
+  - 测试连接通过后才允许点击“开始入池”
 
 状态写回（维护要点）：
 - `pool_status`：任务开始写 `running`，结束写 `success/failed`

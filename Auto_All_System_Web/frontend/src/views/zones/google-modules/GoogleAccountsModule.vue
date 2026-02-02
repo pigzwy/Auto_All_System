@@ -957,18 +957,10 @@ import { ref, reactive, onMounted, computed, nextTick, watch, onBeforeUnmount } 
 import { ElMessage, ElMessageBox } from '@/lib/element'
 import {
   CheckCircle2,
-  ChevronDown as ChevronDownIcon,
   CreditCard as CreditCardIcon,
-  Download as DownloadIcon,
   Loader2 as Loader2Icon,
   Monitor as MonitorIcon,
-  Plus as PlusIcon,
-  RefreshCw as RefreshCwIcon,
-  Shield as ShieldIcon,
-  Trash2 as Trash2Icon,
-  Upload as UploadIcon,
   Users,
-  Wand2 as Wand2Icon,
   XCircle,
 } from 'lucide-vue-next'
 
@@ -977,13 +969,6 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import {
   Dialog,
@@ -1366,11 +1351,6 @@ const fetchGroups = async () => {
 
 const getSelectedIds = () => {
   return selectedAccounts.value.map(acc => acc.id)
-}
-
-const getGeekezActionLabel = (row: GoogleAccount) => {
-  // 统一语义：不存在=创建环境；已存在=打开环境（不再创建）
-  return row.geekez_profile_exists ? '打开环境' : '创建环境'
 }
 
 const handleLaunchGeekez = async (row: GoogleAccount) => {
@@ -1979,23 +1959,6 @@ const handleImportAccounts = async () => {
 const viewAccount = (account: GoogleAccount) => {
   selectedAccount.value = account
   showViewDialog.value = true
-}
-
-const deleteAccount = async (account: GoogleAccount) => {
-  try {
-    await ElMessageBox.confirm(`确定要删除账号 ${account.email} 吗？`, '确认删除', {
-      type: 'warning',
-      confirmButtonText: '删除',
-      cancelButtonText: '取消'
-    })
-    await googleAccountsApi.deleteAccount(account.id)
-    ElMessage.success('删除成功')
-    fetchAccounts()
-  } catch (error: any) {
-    if (error !== 'cancel') {
-      ElMessage.error('删除失败: ' + (error.message || '未知错误'))
-    }
-  }
 }
 
 const getGeminiStatusText = (status: string) => {

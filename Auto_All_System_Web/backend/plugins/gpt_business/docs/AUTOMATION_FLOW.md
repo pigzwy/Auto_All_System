@@ -129,6 +129,12 @@
 │                        自动邀请流程                               │
 ├─────────────────────────────────────────────────────────────────┤
 │                                                                 │
+│  0. 子号补齐（可选）                                              │
+│     ├── 若母号无子号 / 子号数量不足 seat_total                     │
+│     ├── 且 seat_total > 0                                         │
+│     └── 自动从 CloudMail 创建子号并写入账号列表                    │
+│     └── 若 seat_total == 0：不自动创建（避免无上限），会直接报错    │
+│                                                                 │
 │  1. 获取管理员 Token / Account ID                                │
 │     ├── 优先复用母号已保存的 auth_token / account_id              │
 │     ├── 若缺失：使用 Geekez + DrissionPage 登录 chatgpt.com       │
@@ -212,33 +218,76 @@ GET https://chatgpt.com/backend-api/subscriptions?account_id={account_id}
 
 ### 3.2 流程步骤
 
+自动入池支持两种模式（前端弹窗选择，对应后端参数 `mode` / `pool_mode`）：
+
+| 模式 | 值 | 是否依赖 CRS | 适用场景 |
+|------|----|-------------|----------|
+| CRS 同步入池（推荐） | `crs_sync` | 依赖 | 已有 CRS 存的 OpenAI OAuth 凭据，直接同步到 Sub2API |
+| S2A OAuth 入池 | `s2a_oauth` | 不依赖 | 不从 CRS 拉取，直接通过 Sub2API 的 OpenAI OAuth 接口为子号生成/写入凭据 |
+
+#### 3.2.1 CRS 同步入池（`crs_sync`）
+
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│                        自动入池流程                               │
+│                    CRS 同步入池（crs_sync）                        │
 ├─────────────────────────────────────────────────────────────────┤
 │                                                                 │
-│  1. 生成授权 URL                                                 │
-│     ├── API: POST /admin/openai/generate-auth-url                │
-│     └── 返回: auth_url, session_id                               │
+│  1. 读取子号邮箱列表                                              │
+│     └── 从母号下挂载的 child accounts 收集 emails                 │
 │                                                                 │
-│  2. 用户授权 (浏览器自动化)                                       │
-│     ├── 打开 auth_url (OpenAI OAuth 页面)                        │
-│     ├── 自动登录或使用已登录状态                                  │
-│     ├── 同意授权                                                  │
-│     └── 回调到 localhost:1455/auth/callback?code=xxx             │
+│  2. 连接校验（推荐）                                              │
+│     ├── 校验 S2A api_base 可访问                                 │
+│     └── 校验 admin_key/admin_token 生效                          │
+│     └── 后端接口：POST /settings/s2a/test                          │
 │                                                                 │
-│  3. 创建账号                                                     │
-│     ├── 从回调 URL 提取 code                                     │
-│     ├── API: POST /admin/openai/create-from-oauth                │
-│     │   ├── session_id                                           │
-│     │   ├── code                                                 │
-│     │   ├── concurrency (并发数)                                 │
-│     │   ├── priority (优先级)                                    │
-│     │   └── group_ids (分组 ID)                                  │
-│     └── 返回: 账号数据 (id, name, credentials)                   │
+│  3. 从 CRS 拉取 OpenAI OAuth 凭据                                 │
+│     └── GET {CRS_API_BASE}/admin/openai-accounts                  │
 │                                                                 │
-│  4. 完成                                                         │
-│     └── 账号已添加到 S2A 账号池                                   │
+│  4. 写入 Sub2API                                                  │
+│     └── POST {S2A_API_BASE}/admin/accounts (platform=openai,type=oauth)
+│                                                                 │
+│  5. 完成                                                         │
+│     ├── 生成 sub2api_sink_result.json (ok/skip/fail)              │
+│     ├── 写回母号 pool_status=success/failed                        │
+│     └── 写回子号 pool_status=success/failed（ok/skipped 视为成功） │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+#### 3.2.2 S2A OAuth 入池（`s2a_oauth`，不依赖 CRS）
+
+说明：该模式会在服务端启动浏览器（Geekez/DrissionPage），登录子号 ChatGPT 后访问 Sub2API 返回的 `auth_url` 完成授权，并从回调 URL 提取 `code`。
+
+```text
+┌─────────────────────────────────────────────────────────────────┐
+│                  S2A OAuth 入池（s2a_oauth）                      │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│  1. 读取子号邮箱列表                                              │
+│     └── 从母号下挂载的 child accounts 收集 emails                 │
+│                                                                 │
+│  2. 连接校验（推荐）                                              │
+│     ├── 校验 S2A api_base 可访问                                 │
+│     └── 校验 admin_key/admin_token 生效                          │
+│     └── 后端接口：POST /settings/s2a/test                          │
+│                                                                 │
+│  3. 为每个子号生成授权 URL                                        │
+│     └── POST {S2A_API_BASE}/admin/openai/generate-auth-url        │
+│                                                                 │
+│  4. 浏览器授权拿 code（服务端自动化）                              │
+│     ├── 打开 auth_url（auth.openai.com 登录/授权页）                │
+│     ├── 如需登录：输入子号邮箱/密码（需要 account_password）         │
+│     ├── 点击 Allow/Authorize/Continue 等授权按钮                    │
+│     └── 从回调 URL 提取 code                                      │
+│                                                                 │
+│  5. 用 code 换 token 并创建账号（Sub2API）                          │
+│     ├── 优先：POST /admin/openai/create-from-oauth                 │
+│     └── 回退：POST /admin/openai/exchange-code -> POST /admin/accounts
+│                                                                 │
+│  6. 完成                                                         │
+│     ├── 生成 sub2api_sink_result.json (ok/skip/fail)              │
+│     ├── 写回母号 pool_status=success/failed                        │
+│     └── 写回子号 pool_status=success/failed（ok/skipped 视为成功） │
 │                                                                 │
 └─────────────────────────────────────────────────────────────────┘
 ```
@@ -252,55 +301,103 @@ S2A 支持两种认证方式：
 | Admin API Key | `x-api-key: {key}` | 推荐，永久有效 |
 | JWT Token | `Authorization: Bearer {token}` | 需要定期刷新 |
 
+### 3.3.1 多目标入池（入到哪里）
+
+支持在插件 settings 中配置多个 Sub2API 目标：
+- `s2a_targets`: `[{ key, label?, config }]`
+- `s2a_default_target`: 默认选中的 `key`（例如 `sub2`）
+
+触发入池时可通过请求体传入：
+```json
+{ "target_key": "sub2" }
+```
+
+### 3.3.2 CRS 配置（crs_sync 模式）
+
+CRS 配置格式（示例，勿提交真实 token）：
+
+```toml
+[crs]
+api_base = "https://crs.example.com"
+admin_token = "REDACTED"
+```
+
+说明：
+- 前端 token 输入框支持“留空表示不修改”，后端会保留已保存的脱敏 secret
+- `s2a_oauth` 模式不需要 CRS 配置
+
 ### 3.4 关键 API
 
-#### 生成授权 URL
+#### 触发入池（本系统后端）
+
 ```
-POST {S2A_API_BASE}/admin/openai/generate-auth-url
-Headers:
-  x-api-key: {admin_key}
-返回:
+POST /plugins/gpt-business/accounts/{mother_id}/sub2api_sink/
+Body:
   {
-    "code": 0,
-    "data": {
-      "auth_url": "https://auth.openai.com/...",
-      "session_id": "xxx"
-    }
+    "target_key": "sub2",
+    "mode": "crs_sync" | "s2a_oauth"
   }
 ```
 
-#### 从 OAuth 创建账号
+#### 连接测试（本系统后端）
+
 ```
-POST {S2A_API_BASE}/admin/openai/create-from-oauth
+POST /plugins/gpt-business/settings/s2a/test/
+POST /plugins/gpt-business/settings/crs/test/
+```
+
+#### CRS 拉取账号列表
+```
+GET {CRS_API_BASE}/admin/openai-accounts
+Headers:
+  Authorization: Bearer {crs_admin_token}
+```
+
+#### Sub2API OpenAI OAuth（S2A OAuth 模式）
+
+```
+POST {S2A_API_BASE}/admin/openai/generate-auth-url
+POST {S2A_API_BASE}/admin/openai/exchange-code
+POST {S2A_API_BASE}/admin/openai/create-from-oauth  # 新版本可用（推荐）
+```
+
+#### Sub2API 创建 OAuth 账号
+```
+POST {S2A_API_BASE}/admin/accounts
 Headers:
   x-api-key: {admin_key}
 Body:
   {
-    "session_id": "xxx",
-    "code": "授权码",
-    "concurrency": 1,
-    "priority": 0,
-    "group_ids": [1, 2]
+    "name": "child@example.com",
+    "platform": "openai",
+    "type": "oauth",
+    "credentials": {
+      "access_token": "...",
+      "refresh_token": "...",
+      "expires_at": "..."
+    },
+    "concurrency": 5,
+    "priority": 50,
+    "group_ids": [2]
   }
 ```
 
-#### 获取分组列表
+#### Sub2API 连接测试（建议）
 ```
-GET {S2A_API_BASE}/admin/groups?page=1&page_size=100
+GET {S2A_API_BASE}/admin/accounts?platform=openai&type=oauth&page=1&page_size=1
+Headers:
+  x-api-key: {admin_key}
 ```
 
 ### 3.5 参考代码
 
-来源: `oai-team-auto-provisioner/s2a_service.py`
+本仓库对应实现：
 
-| 函数 | 说明 |
+| 文件 | 说明 |
 |------|------|
-| `s2a_verify_connection()` | 验证连接和认证 |
-| `s2a_generate_auth_url()` | 生成授权 URL |
-| `s2a_create_account_from_oauth()` | 从 OAuth 创建账号 |
-| `s2a_add_account()` | 直接添加账号 |
-| `s2a_get_groups()` | 获取分组列表 |
-| `extract_code_from_url()` | 从回调 URL 提取授权码 |
+| `tasks.py` | Celery 任务入口 `sub2api_sink_task`（按 `pool_mode` 分支执行） |
+| `services/sub2api_sink_service.py` | CRS/S2A API 封装（test、list、exchange-code、create-from-oauth 等） |
+| `views.py` | 入池/连接测试 API 路由（`/accounts/{id}/sub2api_sink/`、`/settings/*/test/`） |
 
 ---
 
@@ -370,6 +467,10 @@ S2A_GROUP_IDS = [1, 2]  # 或 S2A_GROUP_NAMES = ["group1", "group2"]
 每个任务会生成：
 - `run.log` - 完整执行日志
 - `*.png` - 每个关键步骤的截图
+
+自动入池（Sub2API Sink）额外产物：
+- `sub2api_sink_result.json` - ok/skip/fail 统计与每个子号的原因
+- `oauth_<email>_<attempt>_<ts>.png` - S2A OAuth 模式授权失败时的截图（文件名已做安全字符处理）
 
 存储路径: `MEDIA_ROOT/gpt_business/jobs/{task_id}/`
 

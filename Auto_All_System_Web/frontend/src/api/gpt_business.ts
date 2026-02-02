@@ -149,8 +149,14 @@ export const gptBusinessApi = {
     return request.post(`/plugins/gpt-business/accounts/${motherAccountId}/auto_invite/`)
   },
 
-  sub2apiSink(motherAccountId: string): Promise<{ message?: string; task_id?: string }> {
-    return request.post(`/plugins/gpt-business/accounts/${motherAccountId}/sub2api_sink/`)
+  sub2apiSink(
+    motherAccountId: string,
+    data?: {
+      target_key?: string
+      mode?: string
+    }
+  ): Promise<{ message?: string; task_id?: string; record_id?: string; target_key?: string }> {
+    return request.post(`/plugins/gpt-business/accounts/${motherAccountId}/sub2api_sink/`, data || {})
   },
 
   launchGeekez(accountId: string): Promise<{
@@ -165,5 +171,29 @@ export const gptBusinessApi = {
     saved?: boolean
   }> {
     return request.post(`/plugins/gpt-business/accounts/${accountId}/launch_geekez/`)
-  }
+  },
+
+  testS2aConnection(data: {
+    target_key?: string
+    config?: {
+      api_base?: string
+      admin_key?: string
+      admin_token?: string
+      concurrency?: number
+      priority?: number
+      group_ids?: number[]
+      group_names?: string[]
+    }
+  }): Promise<{ success: boolean; message: string; target_key?: string }> {
+    return request.post('/plugins/gpt-business/settings/s2a/test/', data)
+  },
+
+  testCrsConnection(data?: {
+    config?: {
+      api_base?: string
+      admin_token?: string
+    }
+  }): Promise<{ success: boolean; message: string }> {
+    return request.post('/plugins/gpt-business/settings/crs/test/', data || {})
+  },
 }
