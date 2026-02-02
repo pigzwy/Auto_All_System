@@ -1582,6 +1582,14 @@ def sub2api_sink_task(self, record_id: str):
 
         s2a_target_key = str(task_record.get("s2a_target_key") or "").strip()
         pool_mode = str(task_record.get("pool_mode") or "").strip() or "crs_sync"
+        # Backward/forward compatibility for UI values
+        # - "crs"      -> "crs_sync"
+        # - "s2a"      -> "s2a_oauth"
+        # Keep internal logic normalized.
+        if pool_mode in {"crs", "crs_sync"}:
+            pool_mode = "crs_sync"
+        elif pool_mode in {"s2a", "s2a_oauth"}:
+            pool_mode = "s2a_oauth"
 
         children = [
             a

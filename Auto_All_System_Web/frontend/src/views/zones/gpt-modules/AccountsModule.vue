@@ -460,24 +460,24 @@
         </DialogHeader>
           <div class="grid gap-4 py-4">
           <div class="rounded-lg border border-border bg-muted/30 p-3">
-            <div class="text-sm font-medium">来源</div>
-            <div v-if="poolMode === 'crs_sync'" class="mt-1 text-xs text-muted-foreground">从 CRS 拉取 OpenAI OAuth 凭据，然后写入 Sub2API。</div>
+            <div class="text-sm font-medium">目标（来源）</div>
+            <div v-if="poolMode === 'crs'" class="mt-1 text-xs text-muted-foreground">选择 crs：从 CRS 拉取 OpenAI OAuth 凭据，然后写入 Sub2API。</div>
             <div v-else class="mt-1 text-xs text-muted-foreground">不依赖 CRS，直接通过 Sub2API OpenAI OAuth 自动授权入池。</div>
             <div class="mt-3 grid gap-2">
-              <label class="text-sm font-medium">入池模式</label>
+              <label class="text-sm font-medium">选择目标</label>
               <Select v-model="poolMode">
                 <SelectTrigger>
                   <SelectValue placeholder="请选择" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="crs_sync">CRS 同步入池（推荐）</SelectItem>
-                  <SelectItem value="s2a_oauth">S2A OAuth 入池（不依赖 CRS）</SelectItem>
+                  <SelectItem value="crs">crs（同步入池）</SelectItem>
+                  <SelectItem value="s2a">s2a（OAuth 入池）</SelectItem>
                 </SelectContent>
               </Select>
               <div class="text-xs text-muted-foreground">选择 S2A OAuth 时，将直接调用 Sub2API 的 OpenAI OAuth 接口生成授权 URL 并自动授权入池。</div>
             </div>
 
-            <template v-if="poolMode === 'crs_sync'">
+            <template v-if="poolMode === 'crs'">
               <div class="mt-3 text-xs text-muted-foreground font-mono"># [crs] api_base = "..."  admin_token = "..."</div>
               <div class="mt-3 grid gap-2">
                 <label class="text-sm font-medium">CRS API Base</label>
@@ -486,7 +486,7 @@
               <div class="mt-3 grid gap-2">
                 <label class="text-sm font-medium">CRS Admin Token</label>
                 <Input v-model="crsForm.admin_token" type="password" placeholder="留空表示不修改" />
-                <div v-if="crsHint.admin_token_masked" class="text-xs text-muted-foreground">已保存：{{ crsHint.admin_token_masked }}</div>
+                <div v-if="crsHint.admin_token_masked" class="text-xs text-muted-foreground">已保存：{{ crsHint.admin_token_masked }}（不需要每次输入，只有要更新 token 才粘贴）</div>
               </div>
             </template>
           </div>
@@ -864,7 +864,7 @@ const sub2apiTestOk = ref(false)
 const sub2apiTestMessage = ref('')
 const sub2apiStarting = ref(false)
 
-const poolMode = ref<'crs_sync' | 's2a_oauth'>('crs_sync')
+const poolMode = ref<'crs' | 's2a'>('crs')
 
 const _splitCsv = (raw: string) => {
   return String(raw || '')
@@ -1049,7 +1049,7 @@ const saveS2aTargetConfig = async () => {
   sub2apiSaving.value = true
   try {
     // 保存按钮：CRS 同步模式下也一起保存 CRS（避免用户只点“保存”但 CRS 没落库）
-    if (poolMode.value === 'crs_sync') {
+    if (poolMode.value === 'crs') {
       await saveCrsConfig()
     }
 
@@ -1103,7 +1103,7 @@ const testS2aTargetConnection = async () => {
     const s2aRes = await gptBusinessApi.testS2aConnection({ target_key: sub2apiTargetKey.value })
     const s2aOk = !!s2aRes?.success
 
-    if (poolMode.value === 'crs_sync') {
+    if (poolMode.value === 'crs') {
       const crsRes = await gptBusinessApi.testCrsConnection()
       const crsOk = !!crsRes?.success
       sub2apiTestOk.value = crsOk && s2aOk
