@@ -460,21 +460,18 @@
         </DialogHeader>
           <div class="grid gap-4 py-4">
           <div class="rounded-lg border border-border bg-muted/30 p-3">
-            <div class="text-sm font-medium">目标（来源）</div>
-            <div v-if="poolMode === 'crs'" class="mt-1 text-xs text-muted-foreground">选择 crs：从 CRS 拉取 OpenAI OAuth 凭据，然后写入 Sub2API。</div>
-            <div v-else class="mt-1 text-xs text-muted-foreground">不依赖 CRS，直接通过 Sub2API OpenAI OAuth 自动授权入池。</div>
+            <div class="text-sm font-medium">入池目标</div>
             <div class="mt-3 grid gap-2">
-              <label class="text-sm font-medium">选择目标</label>
+              <label class="text-sm font-medium">目标</label>
               <Select v-model="poolMode">
                 <SelectTrigger>
                   <SelectValue placeholder="请选择" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="crs">crs（同步入池）</SelectItem>
-                  <SelectItem value="s2a">s2a（OAuth 入池）</SelectItem>
+                  <SelectItem value="crs">crs</SelectItem>
+                  <SelectItem value="s2a">s2a</SelectItem>
                 </SelectContent>
               </Select>
-              <div class="text-xs text-muted-foreground">选择 S2A OAuth 时，将直接调用 Sub2API 的 OpenAI OAuth 接口生成授权 URL 并自动授权入池。</div>
             </div>
 
             <template v-if="poolMode === 'crs'">
