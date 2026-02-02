@@ -218,12 +218,20 @@ GET https://chatgpt.com/backend-api/subscriptions?account_id={account_id}
 
 ### 3.2 流程步骤
 
-自动入池支持两种模式（前端弹窗选择，对应后端参数 `mode` / `pool_mode`）：
+自动入池支持两种模式（前端弹窗选择，对应后端参数 `mode` / `pool_mode`）。
 
-| 模式 | 值 | 是否依赖 CRS | 适用场景 |
+说明：
+- 前端弹窗使用更简单的值：`crs` / `s2a`
+- 后端内部逻辑会归一化为：`crs_sync` / `s2a_oauth`（同时兼容两套写法）
+
+幂等/跳过规则：
+- 若子号本地状态 `pool_status=success`，本次任务会直接跳过该子号（不会重复授权/重复入池，也不会先置为 running）
+- 如需强制重跑某个子号：先把该子号的 `pool_status` 手动重置为非 success（例如 `not_started`），再执行入池
+
+| 模式 | 值（前端/请求） | 是否依赖 CRS | 适用场景 |
 |------|----|-------------|----------|
-| CRS 同步入池（推荐） | `crs_sync` | 依赖 | 已有 CRS 存的 OpenAI OAuth 凭据，直接同步到 Sub2API |
-| S2A OAuth 入池 | `s2a_oauth` | 不依赖 | 不从 CRS 拉取，直接通过 Sub2API 的 OpenAI OAuth 接口为子号生成/写入凭据 |
+| CRS 同步入池（推荐） | `crs`（或 `crs_sync`） | 依赖 | 已有 CRS 存的 OpenAI OAuth 凭据，直接同步到 Sub2API |
+| S2A OAuth 入池 | `s2a`（或 `s2a_oauth`） | 不依赖 | 不从 CRS 拉取，直接通过 Sub2API 的 OpenAI OAuth 接口为子号生成/写入凭据 |
 
 #### 3.2.1 CRS 同步入池（`crs_sync`）
 
@@ -301,7 +309,12 @@ S2A 支持两种认证方式：
 | Admin API Key | `x-api-key: {key}` | 推荐，永久有效 |
 | JWT Token | `Authorization: Bearer {token}` | 需要定期刷新 |
 
-### 3.3.1 多目标入池（入到哪里）
+### 3.3.1 单目标 / 多目标入池
+
+默认（前端弹窗）使用单目标配置：
+- `s2a`: `{ api_base, admin_key/admin_token, concurrency, priority, group_ids, group_names }`
+
+如果需要配置多个 Sub2API 目标（仅后端/接口支持，前端默认不暴露）：
 
 支持在插件 settings 中配置多个 Sub2API 目标：
 - `s2a_targets`: `[{ key, label?, config }]`
@@ -334,8 +347,8 @@ admin_token = "REDACTED"
 POST /plugins/gpt-business/accounts/{mother_id}/sub2api_sink/
 Body:
   {
-    "target_key": "sub2",
-    "mode": "crs_sync" | "s2a_oauth"
+    "mode": "crs" | "s2a" | "crs_sync" | "s2a_oauth",
+    "target_key": "sub2"  // 可选：仅多目标配置时需要
   }
 ```
 

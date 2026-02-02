@@ -1591,17 +1591,33 @@ def sub2api_sink_task(self, record_id: str):
         elif pool_mode in {"s2a", "s2a_oauth"}:
             pool_mode = "s2a_oauth"
 
-        children = [
+        children_all = [
             a
             for a in list_accounts(settings)
             if isinstance(a, dict) and str(a.get("type")) == "child" and str(a.get("parent_id")) == mother_id
         ]
-        emails = [str(a.get("email") or "").strip() for a in children]
-        emails = [e for e in emails if e]
-        if not emails:
+        emails_all = [str(a.get("email") or "").strip() for a in children_all]
+        emails_all = [e for e in emails_all if e]
+        if not emails_all:
             raise RuntimeError("No child accounts")
 
-        # 子号状态：入池中
+        # 已入池（success）的子号直接跳过：避免重复入池/重复授权
+        children: list[dict[str, Any]] = []
+        already_pooled: dict[str, Any] = {}
+        for c in children_all:
+            cemail = str(c.get("email") or "").strip()
+            if not cemail:
+                continue
+            pool_status = str(c.get("pool_status") or "").strip()
+            if pool_status == "success":
+                already_pooled[cemail] = {"status": "skipped", "reason": "pool_status_success"}
+                continue
+            children.append(c)
+
+        emails = [str(a.get("email") or "").strip() for a in children]
+        emails = [e for e in emails if e]
+
+        # 子号状态：入池中（只标记需要处理的子号；已入池 success 的不动）
         now_running = timezone.now().isoformat()
         for c in children:
             cid = str(c.get("id") or "").strip()
@@ -1647,10 +1663,6 @@ def sub2api_sink_task(self, record_id: str):
         sub2api_api_base = str(s2a.get("api_base") or "").strip()
         sub2api_admin_api_key = str(s2a.get("admin_key") or "").strip()
         sub2api_admin_jwt = str(s2a.get("admin_token") or "").strip()
-        if not sub2api_api_base:
-            raise RuntimeError("S2A settings missing api_base")
-        if not sub2api_admin_api_key and not sub2api_admin_jwt:
-            raise RuntimeError("S2A settings missing admin_key/admin_token")
 
         group_ids = s2a.get("group_ids") or []
         group_ids_str = ",".join([str(int(x)) for x in group_ids if str(x).strip().isdigit()])
@@ -1693,436 +1705,464 @@ def sub2api_sink_task(self, record_id: str):
                 pass
 
         _log_line(
-            f"sub2api_sink start record_id={record_id} mother_id={mother_id} children={len(emails)} pool_mode={pool_mode} s2a_target_key={s2a_target_key or '-'}"
+            f"sub2api_sink start record_id={record_id} mother_id={mother_id} children_total={len(emails_all)} to_process={len(emails)} already_success={len(already_pooled)} pool_mode={pool_mode} s2a_target_key={s2a_target_key or '-'}"
         )
         _log_line(f"s2a_api_base={sub2api_api_base}")
 
-        # Test connection early (fail fast)
-        from .services.sub2api_sink_service import sub2api_test_connection
+        # 如果全部子号都已入池，直接跳过（不强制校验 S2A/CRS 连通性，也不重复入池动作）
+        if not emails:
+            sink_result: dict[str, Any] = {
+                "ok": 0,
+                "skip": len(already_pooled),
+                "fail": 0,
+                "details": dict(already_pooled),
+            }
+            _log_line("no children to process (all pool_status=success); skip")
+        else:
+            if not sub2api_api_base:
+                raise RuntimeError("S2A settings missing api_base")
+            if not sub2api_admin_api_key and not sub2api_admin_jwt:
+                raise RuntimeError("S2A settings missing admin_key/admin_token")
 
-        ok, msg = sub2api_test_connection(
-            api_base=sub2api_api_base,
-            admin_key=sub2api_admin_api_key,
-            admin_token=sub2api_admin_jwt,
-            timeout=int((settings.get("request") or {}).get("timeout") or 20),
-        )
-        if not ok:
-            _log_line(f"s2a_test_connection failed: {msg}")
-            raise RuntimeError(f"S2A connection test failed: {msg}")
-        _log_line("s2a_test_connection ok")
+            # Test connection early (fail fast)
+            from .services.sub2api_sink_service import sub2api_test_connection
 
-        # 生成一个 accounts.csv（只要 email+status=success 即可被 sub2api_sink_run 读取）
-        with artifacts.csv_file.open("w", encoding="utf-8", newline="") as f:
-            writer = csv.DictWriter(f, fieldnames=["email", "status"])
-            writer.writeheader()
-            for e in emails:
-                writer.writerow({"email": e, "status": "success"})
+            ok, msg = sub2api_test_connection(
+                api_base=sub2api_api_base,
+                admin_key=sub2api_admin_api_key,
+                admin_token=sub2api_admin_jwt,
+                timeout=int((settings.get("request") or {}).get("timeout") or 20),
+            )
+            if not ok:
+                _log_line(f"s2a_test_connection failed: {msg}")
+                raise RuntimeError(f"S2A connection test failed: {msg}")
+            _log_line("s2a_test_connection ok")
 
-        # 直接走内置逻辑（不再 subprocess 外部 repo）
-        from .services.sub2api_sink_service import (
-            CrsConfig,
-            Sub2ApiConfig,
-            sink_openai_oauth_from_crs_to_sub2api,
-            sub2api_create_openai_oauth_account,
-            sub2api_openai_generate_auth_url,
-            sub2api_openai_create_from_oauth,
-            sub2api_openai_exchange_code,
-            sub2api_find_openai_oauth_account,
-        )
+            # 生成一个 accounts.csv（只要 email+status=success 即可被 sub2api_sink_run 读取）
+            with artifacts.csv_file.open("w", encoding="utf-8", newline="") as f:
+                writer = csv.DictWriter(f, fieldnames=["email", "status"])
+                writer.writeheader()
+                for e in emails:
+                    writer.writerow({"email": e, "status": "success"})
 
-        group_ids: list[int] = []
-        for x in (s2a.get("group_ids") or []):
-            try:
-                group_ids.append(int(x))
-            except Exception:
-                continue
+            # 直接走内置逻辑（不再 subprocess 外部 repo）
+            from .services.sub2api_sink_service import (
+                CrsConfig,
+                Sub2ApiConfig,
+                sink_openai_oauth_from_crs_to_sub2api,
+                sub2api_create_openai_oauth_account,
+                sub2api_openai_generate_auth_url,
+                sub2api_openai_create_from_oauth,
+                sub2api_openai_exchange_code,
+                sub2api_find_openai_oauth_account,
+            )
 
-        if not group_ids:
-            group_names = s2a.get("group_names") or []
-            if isinstance(group_names, list) and group_names:
+            group_ids: list[int] = []
+            for x in (s2a.get("group_ids") or []):
                 try:
-                    from .services.sub2api_sink_service import sub2api_resolve_group_ids
+                    group_ids.append(int(x))
+                except Exception:
+                    continue
 
-                    group_ids = sub2api_resolve_group_ids(
-                        api_base=sub2api_api_base,
-                        admin_key=sub2api_admin_api_key,
-                        admin_token=sub2api_admin_jwt,
-                        group_names=[str(x or "").strip() for x in group_names if str(x or "").strip()],
-                        timeout=int((settings.get("request") or {}).get("timeout") or 30),
+            if not group_ids:
+                group_names = s2a.get("group_names") or []
+                if isinstance(group_names, list) and group_names:
+                    try:
+                        from .services.sub2api_sink_service import sub2api_resolve_group_ids
+
+                        group_ids = sub2api_resolve_group_ids(
+                            api_base=sub2api_api_base,
+                            admin_key=sub2api_admin_api_key,
+                            admin_token=sub2api_admin_jwt,
+                            group_names=[str(x or "").strip() for x in group_names if str(x or "").strip()],
+                            timeout=int((settings.get("request") or {}).get("timeout") or 30),
+                        )
+                    except Exception:
+                        group_ids = []
+
+            sub2_cfg = Sub2ApiConfig(
+                api_base=sub2api_api_base,
+                admin_api_key=sub2api_admin_api_key,
+                admin_jwt=sub2api_admin_jwt,
+                group_ids=group_ids,
+                concurrency=max(1, int(concurrency)),
+                priority=max(1, min(int(priority), 100)),
+            )
+
+            timeout = int((settings.get("request") or {}).get("timeout") or 30)
+
+            if pool_mode == "crs_sync":
+                if not crs_api_base or not crs_admin_token:
+                    raise RuntimeError(
+                        "CRS settings missing api_base/admin_token (source of OAuth tokens). "
+                        "Please configure plugin settings: crs.api_base + crs.admin_token"
+                    )
+                crs_cfg = CrsConfig(api_base=crs_api_base, admin_token=crs_admin_token)
+                _log_line(f"crs_sync start: crs_api_base={crs_api_base}")
+                sink_result = sink_openai_oauth_from_crs_to_sub2api(
+                    emails=emails,
+                    crs_cfg=crs_cfg,
+                    sub2_cfg=sub2_cfg,
+                    timeout=timeout,
+                    dry_run=False,
+                )
+                if already_pooled:
+                    sink_result["skip"] = int(sink_result.get("skip") or 0) + len(already_pooled)
+                    details = sink_result.get("details")
+                    if isinstance(details, dict):
+                        details.update(already_pooled)
+                try:
+                    _log_line(
+                        f"crs_sync done: ok={int((sink_result or {}).get('ok') or 0)} skip={int((sink_result or {}).get('skip') or 0)} fail={int((sink_result or {}).get('fail') or 0)}"
                     )
                 except Exception:
-                    group_ids = []
-
-        sub2_cfg = Sub2ApiConfig(
-            api_base=sub2api_api_base,
-            admin_api_key=sub2api_admin_api_key,
-            admin_jwt=sub2api_admin_jwt,
-            group_ids=group_ids,
-            concurrency=max(1, int(concurrency)),
-            priority=max(1, min(int(priority), 100)),
-        )
-
-        timeout = int((settings.get("request") or {}).get("timeout") or 30)
-
-        if pool_mode == "crs_sync":
-            if not crs_api_base or not crs_admin_token:
-                raise RuntimeError(
-                    "CRS settings missing api_base/admin_token (source of OAuth tokens). "
-                    "Please configure plugin settings: crs.api_base + crs.admin_token"
-                )
-            crs_cfg = CrsConfig(api_base=crs_api_base, admin_token=crs_admin_token)
-            _log_line(f"crs_sync start: crs_api_base={crs_api_base}")
-            sink_result = sink_openai_oauth_from_crs_to_sub2api(
-                emails=emails,
-                crs_cfg=crs_cfg,
-                sub2_cfg=sub2_cfg,
-                timeout=timeout,
-                dry_run=False,
-            )
-            try:
-                _log_line(
-                    f"crs_sync done: ok={int((sink_result or {}).get('ok') or 0)} skip={int((sink_result or {}).get('skip') or 0)} fail={int((sink_result or {}).get('fail') or 0)}"
-                )
-            except Exception:
-                pass
-        elif pool_mode == "s2a_oauth":
-            # S2A OAuth 模式：不依赖 CRS，直接通过 Sub2API OpenAI OAuth 接口授权入池
-            # Flow: generate-auth-url -> browser authorize -> extract code -> create-from-oauth
-            from .services.browser_service import BrowserService
-
-            sink_result = {"ok": 0, "skip": 0, "fail": 0, "details": {}}
-
-            _log_line("s2a_oauth start")
-
-            for c in children:
-                cemail = str(c.get("email") or "").strip()
-                cid = str(c.get("id") or "").strip()
-                cpwd = str(c.get("account_password") or "").strip()
-                if not cemail or not cid:
-                    continue
-
-                try:
-                    existing = sub2api_find_openai_oauth_account(sub2_cfg, cemail, timeout=timeout)
-                    if existing:
-                        sink_result["skip"] += 1
-                        sink_result["details"][cemail] = {"status": "skipped", "reason": "already_exists"}
-                        _log_line(f"[{cemail}] skipped: already_exists")
-                        continue
-                except Exception:
                     pass
+            elif pool_mode == "s2a_oauth":
+                # S2A OAuth 模式：不依赖 CRS，直接通过 Sub2API OpenAI OAuth 接口授权入池
+                # Flow: generate-auth-url -> browser authorize -> extract code -> create-from-oauth
+                from .services.browser_service import BrowserService
 
-                if not cpwd:
-                    sink_result["fail"] += 1
-                    sink_result["details"][cemail] = {"status": "failed", "reason": "missing account_password"}
-                    _log_line(f"[{cemail}] failed: missing account_password")
-                    continue
+                sink_result = {
+                    "ok": 0,
+                    "skip": len(already_pooled),
+                    "fail": 0,
+                    "details": dict(already_pooled),
+                }
 
-                try:
-                    safe_email = re.sub(r"[^a-zA-Z0-9]+", "_", cemail).strip("_") or "user"
-                    _log_line(f"[{cemail}] oauth start")
-                    max_attempts = 2
-                    code = ""
-                    session_id = ""
-                    for attempt in range(1, max_attempts + 1):
-                        try:
-                            _log_line(f"[{cemail}] oauth attempt {attempt}/{max_attempts} start")
+                _log_line("s2a_oauth start")
 
-                            auth = sub2api_openai_generate_auth_url(sub2_cfg, email=cemail, timeout=timeout)
-                            auth_url = str(auth.get("auth_url") or "").strip()
-                            session_id = str(auth.get("session_id") or "").strip()
-                            if not auth_url or not session_id:
-                                raise RuntimeError("generate-auth-url returned empty auth_url/session_id")
+                for c in children:
+                    cemail = str(c.get("email") or "").strip()
+                    cid = str(c.get("id") or "").strip()
+                    cpwd = str(c.get("account_password") or "").strip()
+                    if not cemail or not cid:
+                        continue
 
+                    try:
+                        existing = sub2api_find_openai_oauth_account(sub2_cfg, cemail, timeout=timeout)
+                        if existing:
+                            sink_result["skip"] += 1
+                            sink_result["details"][cemail] = {"status": "skipped", "reason": "already_exists"}
+                            _log_line(f"[{cemail}] skipped: already_exists")
+                            continue
+                    except Exception:
+                        pass
+
+                    if not cpwd:
+                        sink_result["fail"] += 1
+                        sink_result["details"][cemail] = {"status": "failed", "reason": "missing account_password"}
+                        _log_line(f"[{cemail}] failed: missing account_password")
+                        continue
+
+                    try:
+                        safe_email = re.sub(r"[^a-zA-Z0-9]+", "_", cemail).strip("_") or "user"
+                        _log_line(f"[{cemail}] oauth start")
+                        max_attempts = 2
+                        code = ""
+                        session_id = ""
+                        for attempt in range(1, max_attempts + 1):
                             try:
-                                sid_tail = session_id[-8:] if len(session_id) >= 8 else session_id
-                                _log_line(f"[{cemail}] generated auth_url session_id=...{sid_tail}")
-                            except Exception:
-                                pass
+                                _log_line(f"[{cemail}] oauth attempt {attempt}/{max_attempts} start")
 
-                            # browser authorize to get code
-                            with BrowserService(profile_name=f"gpt_{cemail}") as browser:
-                                page = browser.page
-                                if page is None:
-                                    raise RuntimeError("Browser page is not available")
-                                assert page is not None
-
-                                # NOTE: This is for Codex/OpenAI OAuth authorization.
-                                # Do NOT rely on chatgpt.com session/cookies; open the auth_url and complete
-                                # the auth.openai.com login/consent flow directly.
-                                page.get(auth_url)
-                                time.sleep(2)
+                                auth = sub2api_openai_generate_auth_url(sub2_cfg, email=cemail, timeout=timeout)
+                                auth_url = str(auth.get("auth_url") or "").strip()
+                                session_id = str(auth.get("session_id") or "").strip()
+                                if not auth_url or not session_id:
+                                    raise RuntimeError("generate-auth-url returned empty auth_url/session_id")
 
                                 try:
-                                    _log_line(f"[{cemail}] opened url={_sanitize_url(browser.current_url())}")
+                                    sid_tail = session_id[-8:] if len(session_id) >= 8 else session_id
+                                    _log_line(f"[{cemail}] generated auth_url session_id=...{sid_tail}")
                                 except Exception:
                                     pass
 
-                                from .services.openai_register import (
-                                    human_delay,
-                                    type_slowly,
-                                    wait_for_element,
-                                    wait_for_url_change,
-                                )
+                                # browser authorize to get code
+                                with BrowserService(profile_name=f"gpt_{cemail}") as browser:
+                                    page = browser.page
+                                    if page is None:
+                                        raise RuntimeError("Browser page is not available")
+                                    assert page is not None
 
-                                email_selector = (
-                                    'css:input[type="email"], input[name="email"], input[id="email"], '
-                                    'input[name="username"], input[id="username"], '
-                                    'input[autocomplete="username"], input[autocomplete="email"], input[inputmode="email"]'
-                                )
-                                password_selector = (
-                                    'css:input[type="password"], input[name="password"], input[id="password"], '
-                                    'input[autocomplete="current-password"], input[autocomplete="new-password"]'
-                                )
+                                    # NOTE: This is for Codex/OpenAI OAuth authorization.
+                                    # Do NOT rely on chatgpt.com session/cookies; open the auth_url and complete
+                                    # the auth.openai.com login/consent flow directly.
+                                    page.get(auth_url)
+                                    time.sleep(2)
 
-                                def _click_submit_if_any(timeout_sec: int) -> bool:
-                                    btn = wait_for_element(page, 'css:button[type="submit"]', timeout=timeout_sec)
-                                    if not btn:
-                                        return False
-                                    old_url = str(browser.current_url() or "")
                                     try:
-                                        btn.click()
-                                    except Exception:
-                                        return False
-                                    wait_for_url_change(page, old_url, timeout=20)
-                                    human_delay(0.8, 1.6)
-                                    return True
-
-                                # 1) If auth_url redirects to login, fill email/password.
-                                for _ in range(30):
-                                    u = str(browser.current_url() or "")
-                                    if "code=" in u:
-                                        break
-
-                                    email_input = wait_for_element(page, email_selector, timeout=1)
-                                    if email_input:
-                                        human_delay()
-                                        type_slowly(page, email_input, cemail)
-                                        _log_line(f"[{cemail}] filled email")
-                                        human_delay(0.4, 0.9)
-                                        _click_submit_if_any(2)
-                                        time.sleep(1)
-                                        continue
-
-                                    password_input = wait_for_element(page, password_selector, timeout=1)
-                                    if password_input:
-                                        human_delay()
-                                        type_slowly(page, password_input, str(cpwd))
-                                        _log_line(f"[{cemail}] filled password")
-                                        human_delay(0.4, 0.9)
-                                        _click_submit_if_any(2)
-                                        time.sleep(1)
-                                        continue
-
-                                    break
-
-                                # 2) Click consent/authorize (avoid clicking submit when login inputs exist).
-                                for _ in range(30):
-                                    u = str(browser.current_url() or "")
-                                    if "code=" in u:
-                                        break
-
-                                    email_input = wait_for_element(page, email_selector, timeout=1)
-                                    if email_input:
-                                        human_delay()
-                                        type_slowly(page, email_input, cemail)
-                                        _log_line(f"[{cemail}] filled email")
-                                        human_delay(0.4, 0.9)
-                                        _click_submit_if_any(2)
-                                        time.sleep(1)
-                                        continue
-
-                                    password_input = wait_for_element(page, password_selector, timeout=1)
-                                    if password_input:
-                                        human_delay()
-                                        type_slowly(page, password_input, str(cpwd))
-                                        _log_line(f"[{cemail}] filled password")
-                                        human_delay(0.4, 0.9)
-                                        _click_submit_if_any(2)
-                                        time.sleep(1)
-                                        continue
-
-                                    btn = None
-                                    btn_label = ""
-                                    for sel in [
-                                        "text:Authorize",
-                                        "text:Allow",
-                                        "text:Approve",
-                                        "text:同意",
-                                        "text:授权",
-                                        "text:继续",
-                                        "text:Continue",
-                                    ]:
-                                        btn = wait_for_element(page, sel, timeout=1)
-                                        if btn:
-                                            btn_label = sel
-                                            break
-
-                                    if btn:
-                                        try:
-                                            btn.click()
-                                        except Exception:
-                                            pass
-                                        if btn_label:
-                                            _log_line(f"[{cemail}] clicked consent {btn_label}")
-                                        human_delay(0.8, 1.6)
-                                        time.sleep(1)
-                                        continue
-
-                                    # Some consent pages only have a submit button.
-                                    # Never click submit on login/identifier pages unless we filled inputs.
-                                    if any(
-                                        x in u
-                                        for x in [
-                                            "auth.openai.com/log-in",
-                                            "auth.openai.com/log-in-or-create-account",
-                                            "auth0.openai.com/u/login",
-                                            "/u/login/",
-                                            "/login/identifier",
-                                            "/login/password",
-                                        ]
-                                    ):
-                                        time.sleep(0.5)
-                                        continue
-
-                                    if _click_submit_if_any(1):
-                                        _log_line(f"[{cemail}] clicked submit")
-                                        time.sleep(1)
-                                        continue
-
-                                    time.sleep(0.5)
-
-                                # wait redirect to callback with code
-                                code = ""
-                                for _ in range(120):
-                                    u = str(browser.current_url() or "")
-                                    if "code=" in u:
-                                        m = re.search(r"[?&]code=([^&]+)", u)
-                                        if m:
-                                            code = unquote(m.group(1))
-                                            _log_line(f"[{cemail}] oauth callback reached")
-                                            break
-                                    time.sleep(0.5)
-
-                                if not code:
-                                    try:
-                                        shot_path = artifacts.job_dir / f"oauth_{safe_email}_{attempt}_{int(time.time())}.png"
-                                        browser.screenshot(str(shot_path))
-                                        _log_line(
-                                            f"[{cemail}] oauth callback code not found url={_sanitize_url(browser.current_url())} screenshot={shot_path.name}"
-                                        )
+                                        _log_line(f"[{cemail}] opened url={_sanitize_url(browser.current_url())}")
                                     except Exception:
                                         pass
 
-                        except Exception as attempt_e:
-                            _log_line(f"[{cemail}] oauth attempt {attempt} failed: {attempt_e}")
-                            _log_line(traceback.format_exc())
-                            if attempt < max_attempts:
-                                time.sleep(2)
-                                continue
-                            raise
+                                    from .services.openai_register import (
+                                        human_delay,
+                                        type_slowly,
+                                        wait_for_element,
+                                        wait_for_url_change,
+                                    )
 
-                        if code:
-                            break
+                                    email_selector = (
+                                        'css:input[type="email"], input[name="email"], input[id="email"], '
+                                        'input[name="username"], input[id="username"], '
+                                        'input[autocomplete="username"], input[autocomplete="email"], input[inputmode="email"]'
+                                    )
+                                    password_selector = (
+                                        'css:input[type="password"], input[name="password"], input[id="password"], '
+                                        'input[autocomplete="current-password"], input[autocomplete="new-password"]'
+                                    )
 
-                    if not code or not session_id:
-                        raise RuntimeError("oauth callback code not found")
+                                    def _click_submit_if_any(timeout_sec: int) -> bool:
+                                        btn = wait_for_element(page, 'css:button[type="submit"]', timeout=timeout_sec)
+                                        if not btn:
+                                            return False
+                                        old_url = str(browser.current_url() or "")
+                                        try:
+                                            btn.click()
+                                        except Exception:
+                                            return False
+                                        wait_for_url_change(page, old_url, timeout=20)
+                                        human_delay(0.8, 1.6)
+                                        return True
 
-                    created = sub2api_openai_create_from_oauth(
-                        sub2_cfg,
-                        session_id=session_id,
-                        code=code,
-                        name=cemail,
-                        concurrency=max(1, int(concurrency)),
-                        priority=max(1, min(int(priority), 999)),
-                        group_ids=[int(x) for x in group_ids],
-                        timeout=timeout,
-                    )
+                                    # 1) If auth_url redirects to login, fill email/password.
+                                    for _ in range(30):
+                                        u = str(browser.current_url() or "")
+                                        if "code=" in u:
+                                            break
 
-                    if not created:
-                        # Fallback for older Sub2API versions:
-                        # exchange-code -> create /admin/accounts
-                        token_info_raw = sub2api_openai_exchange_code(
+                                        email_input = wait_for_element(page, email_selector, timeout=1)
+                                        if email_input:
+                                            human_delay()
+                                            type_slowly(page, email_input, cemail)
+                                            _log_line(f"[{cemail}] filled email")
+                                            human_delay(0.4, 0.9)
+                                            _click_submit_if_any(2)
+                                            time.sleep(1)
+                                            continue
+
+                                        password_input = wait_for_element(page, password_selector, timeout=1)
+                                        if password_input:
+                                            human_delay()
+                                            type_slowly(page, password_input, str(cpwd))
+                                            _log_line(f"[{cemail}] filled password")
+                                            human_delay(0.4, 0.9)
+                                            _click_submit_if_any(2)
+                                            time.sleep(1)
+                                            continue
+
+                                        break
+
+                                    # 2) Click consent/authorize (avoid clicking submit when login inputs exist).
+                                    for _ in range(30):
+                                        u = str(browser.current_url() or "")
+                                        if "code=" in u:
+                                            break
+
+                                        email_input = wait_for_element(page, email_selector, timeout=1)
+                                        if email_input:
+                                            human_delay()
+                                            type_slowly(page, email_input, cemail)
+                                            _log_line(f"[{cemail}] filled email")
+                                            human_delay(0.4, 0.9)
+                                            _click_submit_if_any(2)
+                                            time.sleep(1)
+                                            continue
+
+                                        password_input = wait_for_element(page, password_selector, timeout=1)
+                                        if password_input:
+                                            human_delay()
+                                            type_slowly(page, password_input, str(cpwd))
+                                            _log_line(f"[{cemail}] filled password")
+                                            human_delay(0.4, 0.9)
+                                            _click_submit_if_any(2)
+                                            time.sleep(1)
+                                            continue
+
+                                        btn = None
+                                        btn_label = ""
+                                        for sel in [
+                                            "text:Authorize",
+                                            "text:Allow",
+                                            "text:Approve",
+                                            "text:同意",
+                                            "text:授权",
+                                            "text:继续",
+                                            "text:Continue",
+                                        ]:
+                                            btn = wait_for_element(page, sel, timeout=1)
+                                            if btn:
+                                                btn_label = sel
+                                                break
+
+                                        if btn:
+                                            try:
+                                                btn.click()
+                                            except Exception:
+                                                pass
+                                            if btn_label:
+                                                _log_line(f"[{cemail}] clicked consent {btn_label}")
+                                            human_delay(0.8, 1.6)
+                                            time.sleep(1)
+                                            continue
+
+                                        # Some consent pages only have a submit button.
+                                        # Never click submit on login/identifier pages unless we filled inputs.
+                                        if any(
+                                            x in u
+                                            for x in [
+                                                "auth.openai.com/log-in",
+                                                "auth.openai.com/log-in-or-create-account",
+                                                "auth0.openai.com/u/login",
+                                                "/u/login/",
+                                                "/login/identifier",
+                                                "/login/password",
+                                            ]
+                                        ):
+                                            time.sleep(0.5)
+                                            continue
+
+                                        if _click_submit_if_any(1):
+                                            _log_line(f"[{cemail}] clicked submit")
+                                            time.sleep(1)
+                                            continue
+
+                                        time.sleep(0.5)
+
+                                    # wait redirect to callback with code
+                                    code = ""
+                                    for _ in range(120):
+                                        u = str(browser.current_url() or "")
+                                        if "code=" in u:
+                                            m = re.search(r"[?&]code=([^&]+)", u)
+                                            if m:
+                                                code = unquote(m.group(1))
+                                                _log_line(f"[{cemail}] oauth callback reached")
+                                                break
+                                        time.sleep(0.5)
+
+                                    if not code:
+                                        try:
+                                            shot_path = (
+                                                artifacts.job_dir
+                                                / f"oauth_{safe_email}_{attempt}_{int(time.time())}.png"
+                                            )
+                                            browser.screenshot(str(shot_path))
+                                            _log_line(
+                                                f"[{cemail}] oauth callback code not found url={_sanitize_url(browser.current_url())} screenshot={shot_path.name}"
+                                            )
+                                        except Exception:
+                                            pass
+
+                            except Exception as attempt_e:
+                                _log_line(f"[{cemail}] oauth attempt {attempt} failed: {attempt_e}")
+                                _log_line(traceback.format_exc())
+                                if attempt < max_attempts:
+                                    time.sleep(2)
+                                    continue
+                                raise
+
+                            if code:
+                                break
+
+                        if not code or not session_id:
+                            raise RuntimeError("oauth callback code not found")
+
+                        created = sub2api_openai_create_from_oauth(
                             sub2_cfg,
                             session_id=session_id,
                             code=code,
+                            name=cemail,
+                            concurrency=max(1, int(concurrency)),
+                            priority=max(1, min(int(priority), 999)),
+                            group_ids=[int(x) for x in group_ids],
                             timeout=timeout,
                         )
-                        token_info = token_info_raw
-                        if isinstance(token_info_raw, dict):
-                            if isinstance(token_info_raw.get("tokenInfo"), dict):
-                                token_info = token_info_raw.get("tokenInfo")
-                            elif isinstance(token_info_raw.get("token_info"), dict):
-                                token_info = token_info_raw.get("token_info")
 
-                        access_token = ""
-                        refresh_token = ""
-                        expires_in: int | None = None
-                        try:
-                            if isinstance(token_info, dict):
-                                access_token = str(
-                                    token_info.get("access_token")
-                                    or token_info.get("accessToken")
-                                    or token_info.get("access")
-                                    or ""
-                                ).strip()
-                                refresh_token = str(
-                                    token_info.get("refresh_token")
-                                    or token_info.get("refreshToken")
-                                    or token_info.get("refresh")
-                                    or ""
-                                ).strip()
+                        if not created:
+                            # Fallback for older Sub2API versions:
+                            # exchange-code -> create /admin/accounts
+                            token_info_raw = sub2api_openai_exchange_code(
+                                sub2_cfg,
+                                session_id=session_id,
+                                code=code,
+                                timeout=timeout,
+                            )
+                            token_info = token_info_raw
+                            if isinstance(token_info_raw, dict):
+                                if isinstance(token_info_raw.get("tokenInfo"), dict):
+                                    token_info = token_info_raw.get("tokenInfo")
+                                elif isinstance(token_info_raw.get("token_info"), dict):
+                                    token_info = token_info_raw.get("token_info")
 
-                                expires_in_val = token_info.get("expires_in") or token_info.get("expiresIn")
-                                expires_at_val = token_info.get("expires_at") or token_info.get("expiresAt")
-
-                                if isinstance(expires_in_val, int):
-                                    expires_in = expires_in_val
-                                elif isinstance(expires_in_val, str) and expires_in_val.strip():
-                                    try:
-                                        expires_in = int(expires_in_val)
-                                    except Exception:
-                                        expires_in = None
-                                elif expires_at_val is not None:
-                                    try:
-                                        expires_at_i = int(expires_at_val)
-                                        now = int(time.time())
-                                        if expires_at_i > now:
-                                            expires_in = expires_at_i - now
-                                    except Exception:
-                                        expires_in = None
-                        except Exception:
                             access_token = ""
                             refresh_token = ""
-                            expires_in = None
+                            expires_in: int | None = None
+                            try:
+                                if isinstance(token_info, dict):
+                                    access_token = str(
+                                        token_info.get("access_token")
+                                        or token_info.get("accessToken")
+                                        or token_info.get("access")
+                                        or ""
+                                    ).strip()
+                                    refresh_token = str(
+                                        token_info.get("refresh_token")
+                                        or token_info.get("refreshToken")
+                                        or token_info.get("refresh")
+                                        or ""
+                                    ).strip()
 
-                        created2, msg2 = sub2api_create_openai_oauth_account(
-                            sub2_cfg,
-                            email=cemail,
-                            access_token=access_token,
-                            refresh_token=refresh_token,
-                            expires_in=expires_in,
-                            timeout=timeout,
-                            dry_run=False,
-                        )
-                        created = bool(created2)
-                        if not created and msg2:
-                            raise RuntimeError(f"exchange-code/create-account failed: {msg2}")
+                                    expires_in_val = token_info.get("expires_in") or token_info.get("expiresIn")
+                                    expires_at_val = token_info.get("expires_at") or token_info.get("expiresAt")
 
-                    if created:
-                        sink_result["ok"] += 1
-                        sink_result["details"][cemail] = {"status": "ok"}
-                        _log_line(f"[{cemail}] ok")
-                    else:
+                                    if isinstance(expires_in_val, int):
+                                        expires_in = expires_in_val
+                                    elif isinstance(expires_in_val, str) and expires_in_val.strip():
+                                        try:
+                                            expires_in = int(expires_in_val)
+                                        except Exception:
+                                            expires_in = None
+                                    elif expires_at_val is not None:
+                                        try:
+                                            expires_at_i = int(expires_at_val)
+                                            now_i = int(time.time())
+                                            if expires_at_i > now_i:
+                                                expires_in = expires_at_i - now_i
+                                        except Exception:
+                                            expires_in = None
+                            except Exception:
+                                access_token = ""
+                                refresh_token = ""
+                                expires_in = None
+
+                            created2, msg2 = sub2api_create_openai_oauth_account(
+                                sub2_cfg,
+                                email=cemail,
+                                access_token=access_token,
+                                refresh_token=refresh_token,
+                                expires_in=expires_in,
+                                timeout=timeout,
+                                dry_run=False,
+                            )
+                            created = bool(created2)
+                            if not created and msg2:
+                                raise RuntimeError(f"exchange-code/create-account failed: {msg2}")
+
+                        if created:
+                            sink_result["ok"] += 1
+                            sink_result["details"][cemail] = {"status": "ok"}
+                            _log_line(f"[{cemail}] ok")
+                        else:
+                            sink_result["fail"] += 1
+                            sink_result["details"][cemail] = {"status": "failed", "reason": "oauth create failed"}
+                            _log_line(f"[{cemail}] failed: oauth create failed")
+                    except Exception as e:
                         sink_result["fail"] += 1
-                        sink_result["details"][cemail] = {"status": "failed", "reason": "oauth create failed"}
-                        _log_line(f"[{cemail}] failed: oauth create failed")
-                except Exception as e:
-                    sink_result["fail"] += 1
-                    sink_result["details"][cemail] = {"status": "failed", "reason": str(e)}
-                    _log_line(f"[{cemail}] failed: {e}")
-                    _log_line(traceback.format_exc())
-        else:
-            raise RuntimeError(f"unknown pool_mode: {pool_mode}")
+                        sink_result["details"][cemail] = {"status": "failed", "reason": str(e)}
+                        _log_line(f"[{cemail}] failed: {e}")
+                        _log_line(traceback.format_exc())
+            else:
+                raise RuntimeError(f"unknown pool_mode: {pool_mode}")
 
         return_code = 0 if int(sink_result.get("fail") or 0) == 0 else 1
 
