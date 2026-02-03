@@ -221,6 +221,45 @@ serializer：
 - `security_change_2fa: true` -> 在主流程结束后顺带修改 2FA
 - `security_new_recovery_email: "xxx@xxx.com"`（兼容字段：new_recovery_email/new_recovery_email/new_email/new_email）-> 修改辅助邮箱
 
+续跑/重跑（由 config 控制）：
+- `resume: true`（默认）：按账号当前状态跳过已完成步骤
+- `force_rerun: true`（或 `force` / `rerun`）：忽略已有状态，强制重跑全流程
+
+续跑判断依据（简化规则）：
+- 步骤 2/3：`metadata.google_one_status` 或 `sheerid_link` 或 `sheerid_verified`
+- 步骤 4：`sheerid_verified` 或 `metadata.google_one_status` 为 `verified/subscribed`
+- 步骤 5：`card_bound` 或 `gemini_status=active` 或 `metadata.google_one_status=subscribed`
+- `metadata.google_one_status=ineligible` 直接跳过步骤 4/5
+
+### 5.6 统一主线与功能映射（前端/产品约定）
+
+统一主线（6 步）：
+1) 登录账号
+2) 打开 Google One
+3) 检查学生资格
+4) 学生验证
+5) 订阅服务
+6) 完成处理
+
+功能映射要求（以主线为唯一叙事）：
+- 一键全自动：完整执行 1-6（主流程 + 可选安全增项）
+
+前端入口收拢：
+- 仅保留“自动化”入口；一键全自动为唯一主流程入口
+- “验证/绑卡”“订阅管理”不再作为前端入口展示（仍可通过 API/任务类型调用）
+
+安全设置为独立功能：
+- 修改 2FA / 修改辅助邮箱 / 获取备份码 / 一键安全更新
+- 不纳入主线步骤，不影响 1-6 的完成度
+
+账号状态与亮灰规则（前端展示约定）：
+- 账号列表展示主线 1-6 的完成情况；完成则亮色，未完成灰色
+- 详情面板展示“1-6”步骤进度（支持显示主线增项/备注）
+- 状态来源优先级：
+  1) 主线任务日志（one_click 的 `步骤 x/6`）
+  2) 账号字段（`status`/`sheerid_verified`/`card_bound`/`metadata.google_one_status`/`gemini_status`）
+  3) 订阅/安全动作记录（`metadata.google_zone_actions`）仅用于历史，不影响主线步骤
+
 ---
 
 ## 6. 自动化：安全设置（SecurityViewSet）
