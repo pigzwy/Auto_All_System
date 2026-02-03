@@ -1079,12 +1079,41 @@ class AccountsViewSet(ViewSet):
         if not isinstance(acc, dict) or str(acc.get("type")) != "mother":
             return Response({"detail": "Mother account not found"}, status=status.HTTP_400_BAD_REQUEST)
 
+        mother_id = str(pk)
+        seat_total = int(acc.get("seat_total") or 0)
+        accounts = list_accounts(settings)
+        children = [
+            a
+            for a in accounts
+            if isinstance(a, dict)
+            and str(a.get("type")) == "child"
+            and str(a.get("parent_id") or "") == mother_id
+        ]
+
+        if seat_total <= 0 and not children:
+            return Response(
+                {"message": "该母号暂无子号，请先生成子号或设置座位数", "skipped": True}
+            )
+
+        if seat_total <= 0 or len(children) >= seat_total:
+            pending_children: list[str] = []
+            for child in children:
+                join_status = str(child.get("team_join_status") or "").strip()
+                team_account_id_saved = str(child.get("team_account_id") or "").strip()
+                if join_status == "success" or team_account_id_saved:
+                    continue
+                child_email = str(child.get("email") or "").strip()
+                if child_email:
+                    pending_children.append(child_email)
+            if not pending_children:
+                return Response({"message": "全部子号已入队，无需邀请", "skipped": True})
+
         record_id = uuid.uuid4().hex
         now = timezone.now().isoformat()
         add_task({
             "id": record_id,
             "type": "auto_invite",
-            "mother_id": str(pk),
+            "mother_id": mother_id,
             "status": "pending",
             "created_at": now,
         })
