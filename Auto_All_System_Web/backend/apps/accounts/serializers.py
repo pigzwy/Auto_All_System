@@ -12,6 +12,8 @@ User = get_user_model()
 
 class UserSerializer(serializers.ModelSerializer):
     """用户序列化器"""
+
+    is_staff = serializers.SerializerMethodField()
     
     class Meta:
         model = User
@@ -21,6 +23,9 @@ class UserSerializer(serializers.ModelSerializer):
             'created_at', 'last_login'
         ]
         read_only_fields = ['id', 'role', 'is_staff', 'is_superuser', 'created_at', 'last_login']
+
+    def get_is_staff(self, obj):
+        return bool(obj.is_staff or obj.is_admin or obj.is_superuser)
 
 
 class UserRegisterSerializer(serializers.ModelSerializer):

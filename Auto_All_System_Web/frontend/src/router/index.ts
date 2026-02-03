@@ -244,10 +244,16 @@ router.beforeEach((to, _from, next) => {
   const userStore = useUserStore()
   const requiresAuth = to.matched.some(record => record.meta.requiresAuth !== false)
   const requiresAdmin = to.matched.some(record => record.meta.requiresAdmin)
+  const isAdmin = Boolean(
+    userStore.user?.is_staff
+      || userStore.user?.is_superuser
+      || userStore.user?.role === 'admin'
+      || userStore.user?.role === 'super_admin'
+  )
 
   if (requiresAuth && !userStore.isAuthenticated) {
     next({ name: 'Login', query: { redirect: to.fullPath } })
-  } else if (requiresAdmin && !userStore.user?.is_staff) {
+  } else if (requiresAdmin && !isAdmin) {
     ElMessage.error('需要管理员权限')
     next({ name: 'Dashboard' })
   } else if (!requiresAuth && userStore.isAuthenticated && (to.name === 'Login' || to.name === 'Register')) {

@@ -61,10 +61,14 @@ class AuthViewSet(viewsets.GenericViewSet):
             # 生成JWT Token
             refresh = RefreshToken.for_user(user)
             
-            # 更新最后登录时间
+            # 更新管理员标记与最后登录时间
             from django.utils import timezone
+            update_fields = ['last_login']
+            if user.is_admin and not user.is_staff:
+                user.is_staff = True
+                update_fields.append('is_staff')
             user.last_login = timezone.now()
-            user.save(update_fields=['last_login'])
+            user.save(update_fields=update_fields)
             
             return Response({
                 'code': 200,
