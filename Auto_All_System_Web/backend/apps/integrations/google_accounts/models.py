@@ -9,70 +9,6 @@ from django.utils import timezone
 User = get_user_model()
 
 
-class AccountGroup(models.Model):
-    """
-    账号分组表
-    用于对Google账号进行分类管理，如：售后分组、2FA分组等
-    """
-
-    name = models.CharField(
-        max_length=100, verbose_name="分组名称", help_text="如：售后_10个、2FA_5个"
-    )
-    description = models.TextField(blank=True, verbose_name="分组描述")
-    owner_user = models.ForeignKey(
-        User,
-        on_delete=models.CASCADE,
-        null=True,
-        blank=True,
-        related_name="account_groups",
-        verbose_name="所有者",
-    )
-
-    # 统计信息（冗余字段，方便查询）
-    account_count = models.PositiveIntegerField(default=0, verbose_name="账号数量")
-
-    # 时间戳
-    created_at = models.DateTimeField(auto_now_add=True, verbose_name="创建时间")
-    updated_at = models.DateTimeField(auto_now=True, verbose_name="更新时间")
-
-    class Meta:
-        db_table = "account_groups"
-        verbose_name = "账号分组"
-        verbose_name_plural = "账号分组"
-        ordering = ["-created_at"]
-        indexes = [
-            models.Index(fields=["owner_user", "name"]),
-        ]
-
-    def __str__(self):
-        return f"{self.name} ({self.account_count}个)"
-
-    def update_account_count(self):
-        """更新账号数量"""
-        self.account_count = self.accounts.count()
-        self.save(update_fields=["account_count"])
-
-    @classmethod
-    def generate_default_name(cls, prefix: str = None, count: int = 0) -> str:
-        """
-        生成默认分组名称
-
-        Args:
-            prefix: 前缀，如 "售后"、"2FA"
-            count: 账号数量
-
-        Returns:
-            分组名称，如 "售后_10个" 或 "2025-01-25_10个"
-        """
-        if prefix:
-            return f"{prefix}_{count}个"
-        else:
-            # 使用当前时间作为默认前缀
-            now = timezone.now()
-            date_str = now.strftime("%Y-%m-%d_%H%M")
-            return f"{date_str}_{count}个"
-
-
 class GoogleAccountStatus(models.TextChoices):
     """Google账号状态"""
 
@@ -148,15 +84,14 @@ class GoogleAccount(models.Model):
         help_text="如果为空则为平台账号池",
     )
 
-    # 分组
-    group = models.ForeignKey(
-        AccountGroup,
-        on_delete=models.SET_NULL,
-        null=True,
+    # 分组（简单字符串字段）
+    group_name = models.CharField(
+        max_length=100,
         blank=True,
-        related_name="accounts",
-        verbose_name="所属分组",
-        help_text="账号分组，如：售后分组、2FA分组等",
+        default="",
+        db_index=True,
+        verbose_name="分组名称",
+        help_text="账号分组名称，如：售后、2FA等",
     )
 
     # 使用信息

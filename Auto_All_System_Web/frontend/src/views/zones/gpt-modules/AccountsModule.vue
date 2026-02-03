@@ -110,12 +110,10 @@
                 </TableHead>
                 <TableHead class="w-10"></TableHead>
                 <TableHead class="min-w-[220px]">母号邮箱</TableHead>
-                <TableHead class="min-w-[180px]">账号密码</TableHead>
-                <TableHead class="min-w-[180px]">邮箱密码</TableHead>
-                <TableHead class="w-24">座位</TableHead>
-                <TableHead class="min-w-[120px]">备注</TableHead>
-                <TableHead class="w-28">环境</TableHead>
-                <TableHead class="w-40">创建时间</TableHead>
+                <TableHead class="w-20">座位</TableHead>
+                <TableHead class="w-24">备注</TableHead>
+                <TableHead class="min-w-[280px]">状态</TableHead>
+                <TableHead class="w-36">创建时间</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -195,22 +193,10 @@
                       <LayoutList class="h-4 w-4 transition-transform" :class="{ 'rotate-90': expandedRows.has(mother.id) }" />
                     </Button>
                   </TableCell>
-                  <TableCell class="font-medium">{{ mother.email }}</TableCell>
-                  <TableCell>
-                    <div class="flex items-center gap-2">
-                      <code class="rounded bg-muted px-1.5 py-0.5 font-mono text-xs">{{ mother.account_password || '-' }}</code>
-                      <Button v-if="mother.account_password" variant="ghost" size="xs" class="h-6 w-6" @click.stop="copyAccountPassword(mother)">
-                        <Copy class="h-3 w-3" />
-                      </Button>
-                    </div>
-                  </TableCell>
-                  <TableCell>
-                    <div class="flex items-center gap-2">
-                      <code class="rounded bg-muted px-1.5 py-0.5 font-mono text-xs">{{ mother.email_password || '-' }}</code>
-                      <Button v-if="mother.email_password" variant="ghost" size="xs" class="h-6 w-6" @click.stop="copyEmailPassword(mother)">
-                        <Copy class="h-3 w-3" />
-                      </Button>
-                    </div>
+                  <TableCell class="font-medium">
+                    <button class="text-left text-primary hover:text-primary/70 transition-colors cursor-pointer" @click.stop="openAccountDetail(mother)">
+                      {{ mother.email }}
+                    </button>
                   </TableCell>
                   <TableCell>
                     <Badge variant="outline" class="font-mono">
@@ -219,32 +205,23 @@
                   </TableCell>
                   <TableCell class="text-muted-foreground text-xs truncate max-w-[120px]">{{ mother.note }}</TableCell>
                   <TableCell>
-                    <div class="flex flex-col gap-1">
-                      <div class="flex items-center gap-2">
-                        <Badge 
-                          :class="mother.geekez_profile_exists 
-                            ? 'bg-emerald-100 text-emerald-700 border-emerald-200 dark:bg-emerald-900/30 dark:text-emerald-400 dark:border-emerald-800' 
-                            : 'bg-slate-100 text-slate-500 border-slate-200 dark:bg-slate-800 dark:text-slate-400 dark:border-slate-700'"
-                          variant="outline" 
-                          class="text-xs"
-                        >
-                          {{ mother.geekez_profile_exists ? '✓ 已创建' : '○ 未创建' }}
-                        </Badge>
-                        <Badge v-if="mother.geekez_env" class="bg-sky-100 text-sky-700 border-sky-200 dark:bg-sky-900/30 dark:text-sky-400 dark:border-sky-800 text-xs font-mono" variant="outline">
-                          :{{ mother.geekez_env.debug_port || '' }}
-                        </Badge>
-                      </div>
-                      <div class="flex flex-wrap gap-1">
-                        <Badge
-                          v-for="b in getAccountStatusBadges(mother)"
-                          :key="b.key"
-                          variant="outline"
-                          class="text-[11px] leading-4"
-                          :class="b.class"
-                        >
-                          {{ b.text }}
-                        </Badge>
-                      </div>
+                    <div class="flex flex-wrap gap-1">
+                      <Badge 
+                        :class="getEnvStatusClass(mother.geekez_profile_exists)"
+                        variant="outline" 
+                        class="text-xs"
+                      >
+                        创建
+                      </Badge>
+                      <Badge
+                        v-for="b in getAccountStatusBadges(mother)"
+                        :key="b.key"
+                        variant="outline"
+                        class="text-[11px] leading-4"
+                        :class="b.class"
+                      >
+                        {{ b.text }}
+                      </Badge>
                     </div>
                   </TableCell>
                   <TableCell class="text-muted-foreground text-xs">{{ formatDate(mother.created_at) }}</TableCell>
@@ -260,61 +237,38 @@
                           <TableHeader class="bg-muted/30">
                             <TableRow>
                               <TableHead>邮箱</TableHead>
-                              <TableHead>账号密码</TableHead>
-                              <TableHead>邮箱密码</TableHead>
                               <TableHead>备注</TableHead>
-                              <TableHead>环境</TableHead>
+                              <TableHead>状态</TableHead>
                               <TableHead>创建时间</TableHead>
                               <TableHead class="text-right">操作</TableHead>
                             </TableRow>
                           </TableHeader>
                           <TableBody>
                             <TableRow v-for="child in mother.children || []" :key="child.id">
-                              <TableCell>{{ child.email }}</TableCell>
                               <TableCell>
-                                <div class="flex items-center gap-2">
-                                  <code class="rounded bg-muted px-1.5 py-0.5 font-mono text-xs">{{ child.account_password || '-' }}</code>
-                                  <Button v-if="child.account_password" variant="ghost" size="xs" class="h-6 w-6" @click.stop="copyAccountPassword(child)">
-                                    <Copy class="h-3 w-3" />
-                                  </Button>
-                                </div>
-                              </TableCell>
-                              <TableCell>
-                                <div class="flex items-center gap-2">
-                                  <code class="rounded bg-muted px-1.5 py-0.5 font-mono text-xs">{{ child.email_password || '-' }}</code>
-                                  <Button v-if="child.email_password" variant="ghost" size="xs" class="h-6 w-6" @click.stop="copyEmailPassword(child)">
-                                    <Copy class="h-3 w-3" />
-                                  </Button>
-                                </div>
+                                <button class="text-left text-primary hover:text-primary/70 transition-colors cursor-pointer" @click.stop="openAccountDetail(child)">
+                                  {{ child.email }}
+                                </button>
                               </TableCell>
                               <TableCell class="text-muted-foreground text-xs">{{ child.note }}</TableCell>
                               <TableCell>
-                                <div class="flex flex-col gap-1">
-                                  <div class="flex items-center gap-1">
-                                    <Badge 
-                                      :class="child.geekez_profile_exists 
-                                        ? 'bg-emerald-100 text-emerald-700 border-emerald-200 dark:bg-emerald-900/30 dark:text-emerald-400 dark:border-emerald-800' 
-                                        : 'bg-slate-100 text-slate-500 border-slate-200 dark:bg-slate-800 dark:text-slate-400 dark:border-slate-700'"
-                                      variant="outline"
-                                      class="text-xs"
-                                    >
-                                      {{ child.geekez_profile_exists ? '✓ 已创建' : '○ 未创建' }}
-                                    </Badge>
-                                    <Badge v-if="child.geekez_env" class="bg-sky-100 text-sky-700 border-sky-200 dark:bg-sky-900/30 dark:text-sky-400 dark:border-sky-800 text-xs font-mono" variant="outline">
-                                      :{{ child.geekez_env.debug_port || '' }}
-                                    </Badge>
-                                  </div>
-                                  <div class="flex flex-wrap gap-1">
-                                    <Badge
-                                      v-for="b in getAccountStatusBadges(child)"
-                                      :key="b.key"
-                                      variant="outline"
-                                      class="text-[11px] leading-4"
-                                      :class="b.class"
-                                    >
-                                      {{ b.text }}
-                                    </Badge>
-                                  </div>
+                                <div class="flex flex-wrap gap-1">
+                                  <Badge 
+                                    :class="getEnvStatusClass(child.geekez_profile_exists)"
+                                    variant="outline"
+                                    class="text-xs"
+                                  >
+                                    创建
+                                  </Badge>
+                                  <Badge
+                                    v-for="b in getAccountStatusBadges(child)"
+                                    :key="b.key"
+                                    variant="outline"
+                                    class="text-[11px] leading-4"
+                                    :class="b.class"
+                                  >
+                                    {{ b.text }}
+                                  </Badge>
                                 </div>
                               </TableCell>
                               <TableCell class="text-muted-foreground text-xs">{{ formatDate(child.created_at) }}</TableCell>
@@ -323,13 +277,12 @@
                                   <Button variant="ghost" size="xs" @click.stop="launchGeekez(child)">
                                     {{ getGeekezActionLabel(child) }}
                                   </Button>
-                                  <Button variant="ghost" size="xs" @click.stop="copyFull(child)">复制</Button>
                                   <Button variant="ghost" size="xs" class="text-destructive hover:text-destructive" @click.stop="removeAccount(child.id)">删除</Button>
                                 </div>
                               </TableCell>
                             </TableRow>
                             <TableRow v-if="!mother.children?.length">
-                              <TableCell colspan="7" class="text-center text-xs text-muted-foreground py-4">无子账号</TableCell>
+                              <TableCell colspan="5" class="text-center text-xs text-muted-foreground py-4">无子账号</TableCell>
                             </TableRow>
                           </TableBody>
                         </Table>
@@ -589,7 +542,13 @@
                   <TableCell class="text-right">
                     <div class="flex justify-end gap-2">
                       <Button variant="ghost" size="xs" @click="viewTaskArtifacts(task)">产物</Button>
-                      <Button variant="ghost" size="xs" @click="viewTaskLog(task)">日志</Button>
+                      <Button
+                        variant="ghost"
+                        size="xs"
+                        @click="task.celery_task_id ? openCeleryTask(String(task.celery_task_id)) : viewTaskLog(task)"
+                      >
+                        日志
+                      </Button>
                     </div>
                   </TableCell>
                 </TableRow>
@@ -638,12 +597,54 @@
       </DialogContent>
     </Dialog>
 
+    <!-- Account Detail Dialog -->
+    <Dialog v-model:open="accountDetailDialogVisible">
+      <DialogContent class="sm:max-w-[400px]">
+        <DialogHeader>
+          <DialogTitle>账号信息</DialogTitle>
+          <DialogDescription>{{ accountDetailData?.email }}</DialogDescription>
+        </DialogHeader>
+        <div class="grid gap-4 py-4">
+          <div class="grid gap-2">
+            <label class="text-sm font-medium text-muted-foreground">邮箱</label>
+            <div class="flex items-center gap-2">
+              <code class="flex-1 rounded bg-muted px-3 py-2 font-mono text-sm">{{ accountDetailData?.email || '-' }}</code>
+              <Button v-if="accountDetailData?.email" variant="outline" size="sm" @click="copyText(accountDetailData.email)">
+                <Copy class="h-4 w-4" />
+              </Button>
+            </div>
+          </div>
+          <div class="grid gap-2">
+            <label class="text-sm font-medium text-muted-foreground">账号密码</label>
+            <div class="flex items-center gap-2">
+              <code class="flex-1 rounded bg-muted px-3 py-2 font-mono text-sm">{{ accountDetailData?.account_password || '-' }}</code>
+              <Button v-if="accountDetailData?.account_password" variant="outline" size="sm" @click="copyText(accountDetailData.account_password)">
+                <Copy class="h-4 w-4" />
+              </Button>
+            </div>
+          </div>
+          <div class="grid gap-2">
+            <label class="text-sm font-medium text-muted-foreground">邮箱密码</label>
+            <div class="flex items-center gap-2">
+              <code class="flex-1 rounded bg-muted px-3 py-2 font-mono text-sm">{{ accountDetailData?.email_password || '-' }}</code>
+              <Button v-if="accountDetailData?.email_password" variant="outline" size="sm" @click="copyText(accountDetailData.email_password)">
+                <Copy class="h-4 w-4" />
+              </Button>
+            </div>
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" @click="accountDetailDialogVisible = false">关闭</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+
     <!-- Log Dialog -->
     <Dialog v-model:open="taskLogDialogVisible">
       <DialogContent class="sm:max-w-[900px]">
         <DialogHeader>
           <DialogTitle>任务日志</DialogTitle>
-          <DialogDescription v-if="currentLogTask">Task ID: {{ currentLogTask.id }}</DialogDescription>
+          <DialogDescription v-if="currentLogTask">步骤、增项与日志内容（Task ID: {{ currentLogTask.id }}）</DialogDescription>
         </DialogHeader>
         <div class="py-2">
           <div class="mb-2 flex items-center justify-between">
@@ -653,14 +654,158 @@
               <button class="text-xs text-primary hover:underline" @click="reloadTaskLog">刷新</button>
             </div>
           </div>
-          <textarea
-            v-if="!taskLogLoading"
-            class="h-[400px] w-full rounded-md border border-input bg-muted/50 p-4 font-mono text-xs text-foreground focus-visible:outline-none"
-            readonly
-            :value="taskLogText || '暂无日志内容'"
-          ></textarea>
+          <div v-if="!taskLogLoading">
+            <div v-if="currentSteps.length > 0" class="mb-4 rounded-xl border border-border bg-muted/20 p-4">
+              <div class="mb-3 flex items-center justify-between">
+                <div class="text-sm font-semibold">流程步骤</div>
+                <div class="text-xs text-muted-foreground">
+                  {{ Math.min(activeStep + 1, currentSteps.length) }}/{{ currentSteps.length }}
+                </div>
+              </div>
+
+              <div class="h-2 w-full rounded-full bg-muted overflow-hidden">
+                <div
+                  class="h-full bg-primary transition-all"
+                  :style="{ width: `${currentSteps.length ? Math.round(((activeStep + 1) / currentSteps.length) * 100) : 0}%` }"
+                />
+              </div>
+
+              <div class="mt-4 grid gap-2">
+                <div
+                  v-for="(step, index) in currentSteps"
+                  :key="index"
+                  class="flex items-start gap-3 rounded-lg border border-border bg-background/60 px-3 py-2"
+                  :class="index === activeStep ? 'ring-1 ring-ring' : ''"
+                >
+                  <div class="mt-0.5 h-6 w-6 rounded-full bg-muted flex items-center justify-center text-xs font-semibold">
+                    {{ index + 1 }}
+                  </div>
+                  <div class="min-w-0 flex-1">
+                    <div class="font-medium truncate">{{ step.title }}</div>
+                    <div v-if="step.time" class="text-xs text-muted-foreground">{{ step.time }}</div>
+                  </div>
+                </div>
+              </div>
+
+              <div v-if="currentLogExtras.length > 0" class="mt-4 flex flex-wrap gap-2">
+                <span
+                  v-for="extra in currentLogExtras"
+                  :key="extra"
+                  class="inline-flex items-center rounded-full border border-amber-500/20 bg-amber-500/10 px-2 py-0.5 text-xs text-amber-700"
+                >
+                  {{ extra }}
+                </span>
+              </div>
+            </div>
+
+            <div class="max-h-[520px] overflow-auto rounded-xl border border-border bg-muted/20 p-4">
+              <pre class="whitespace-pre-wrap font-mono text-xs text-foreground">{{ taskLogText || '暂无日志内容' }}</pre>
+            </div>
+          </div>
           <div v-else class="flex h-[400px] items-center justify-center">
             <Loader2 class="h-8 w-8 animate-spin text-muted-foreground" />
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
+
+    <!-- Celery 任务：实时 trace 日志（滚动 + 轮询） -->
+    <Dialog
+      :open="showCeleryDialog"
+      @update:open="(open) => { showCeleryDialog = open; if (!open) onCeleryDialogClosed() }"
+    >
+      <DialogContent class="sm:max-w-[1000px]">
+        <DialogHeader>
+          <DialogTitle>{{ celeryDialogTitle }}</DialogTitle>
+          <DialogDescription>实时 trace（支持上滑加载历史）</DialogDescription>
+        </DialogHeader>
+
+        <div class="rounded-xl border border-border bg-muted/20 p-4">
+          <div class="grid gap-3 sm:grid-cols-2">
+            <div>
+              <div class="text-xs text-muted-foreground">任务ID</div>
+              <div class="font-mono text-sm">{{ celeryTaskId || '-' }}</div>
+            </div>
+            <div>
+              <div class="text-xs text-muted-foreground">账号</div>
+              <div class="text-sm break-all">{{ celeryEmail || '-' }}</div>
+            </div>
+            <div>
+              <div class="text-xs text-muted-foreground">state</div>
+              <Badge variant="outline" class="rounded-full">{{ celeryState || '-' }}</Badge>
+            </div>
+            <div>
+              <div class="text-xs text-muted-foreground">trace_file</div>
+              <div class="font-mono text-xs break-all">{{ traceFile || '-' }}</div>
+            </div>
+          </div>
+
+          <div class="mt-4 flex flex-wrap justify-end gap-2">
+            <Button variant="outline" size="sm" :disabled="celeryStatusLoading" @click="refreshCeleryStatus">
+              <Loader2 v-if="celeryStatusLoading" class="mr-2 h-4 w-4 animate-spin" />
+              刷新状态
+            </Button>
+            <Button size="sm" :disabled="traceUnavailable" @click="reloadTrace">重载日志</Button>
+          </div>
+
+          <Accordion type="single" collapsible class="mt-4">
+            <AccordionItem value="status">
+              <AccordionTrigger>状态详情</AccordionTrigger>
+              <AccordionContent>
+                <pre class="mt-2 max-h-[200px] overflow-auto rounded-md border border-border bg-background p-3 text-xs">{{ celeryStatusText }}</pre>
+              </AccordionContent>
+            </AccordionItem>
+          </Accordion>
+        </div>
+
+        <div class="my-4 h-px w-full bg-border" />
+
+        <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div class="flex items-center gap-3">
+            <div class="flex items-center gap-2">
+              <Switch :checked="traceFollowLatest" @update:checked="traceFollowLatest = $event" />
+              <span class="text-sm">跟随最新</span>
+            </div>
+            <span class="text-xs text-muted-foreground">向上滚动加载历史；滚动离开底部会自动停止跟随</span>
+          </div>
+          <div class="flex items-center justify-end gap-2">
+            <Button variant="outline" size="sm" :disabled="traceUnavailable" @click="copyTrace">复制</Button>
+            <Button variant="outline" size="sm" :disabled="traceUnavailable" @click="clearTrace">清空</Button>
+          </div>
+        </div>
+
+        <div
+          v-if="traceUnavailable"
+          class="mt-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700"
+        >
+          trace 接口暂不可用，仅展示状态信息。
+        </div>
+
+        <div
+          ref="traceScrollRef"
+          class="h-[520px] overflow-auto rounded-xl border border-border bg-slate-950 p-3 text-slate-100"
+          @scroll="onTraceScroll"
+        >
+          <div
+            v-if="traceLoadingOlder"
+            class="sticky top-0 z-10 -mx-3 -mt-3 mb-3 border-b border-slate-700/40 bg-slate-950/80 px-3 py-2 text-xs text-slate-100/90 backdrop-blur"
+          >
+            加载更早日志...
+          </div>
+          <div
+            v-else-if="traceHasMoreBackward"
+            class="sticky top-0 z-10 -mx-3 -mt-3 mb-3 border-b border-slate-700/40 bg-slate-950/60 px-3 py-2 text-xs text-slate-100/60 backdrop-blur"
+          >
+            继续上滑加载更早日志
+          </div>
+
+          <div class="font-mono text-xs leading-relaxed whitespace-pre-wrap break-words">
+            <div
+              v-for="ln in traceLines"
+              :key="ln.id"
+              class="py-[1px]"
+              :class="ln.isJson ? 'text-slate-300/60' : ''"
+            >{{ ln.text }}</div>
           </div>
         </div>
       </DialogContent>
@@ -669,7 +814,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, inject, onMounted, onUnmounted, provide, reactive, ref, type Ref } from 'vue'
+import { computed, inject, nextTick, onMounted, onUnmounted, provide, reactive, ref, watch, type Ref } from 'vue'
 import { ElMessage, ElMessageBox } from '@/lib/element'
 import {
   Armchair,
@@ -691,6 +836,12 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
+import {
+  Accordion,
+  AccordionContent,
+  AccordionItem,
+  AccordionTrigger,
+} from '@/components/ui/accordion'
 import {
   Dialog,
   DialogContent,
@@ -721,6 +872,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
+import { Switch } from '@/components/ui/switch'
 
 import { getCloudMailConfigs, type CloudMailConfig } from '@/api/email'
 import type { GptBusinessAccount, GptBusinessAccountsResponse } from '@/api/gpt_business'
@@ -1045,6 +1197,13 @@ const toggleExpand = (id: number) => {
 
 const motherDialogVisible = ref(false)
 const childDialogVisible = ref(false)
+const accountDetailDialogVisible = ref(false)
+const accountDetailData = ref<GptBusinessAccount | null>(null)
+
+const openAccountDetail = (account: GptBusinessAccount) => {
+  accountDetailData.value = account
+  accountDetailDialogVisible.value = true
+}
 
 const activeMother = ref<MotherRow | null>(null)
 
@@ -1226,6 +1385,13 @@ const getGeekezActionLabel = (account: GptBusinessAccount) => {
   return account.geekez_profile_exists ? '打开环境' : '创建环境'
 }
 
+const getEnvStatusClass = (exists: boolean | undefined) => {
+  if (exists) {
+    return 'bg-emerald-100 text-emerald-700 border-emerald-200 dark:bg-emerald-900/30 dark:text-emerald-400 dark:border-emerald-800'
+  }
+  return 'bg-slate-100 text-slate-500 border-slate-200 dark:bg-slate-800 dark:text-slate-400 dark:border-slate-700'
+}
+
 type StatusBadge = { key: string; text: string; class: string }
 
 const getAccountStatusBadges = (account: any): StatusBadge[] => {
@@ -1233,59 +1399,48 @@ const getAccountStatusBadges = (account: any): StatusBadge[] => {
 
   const accountType = String(account?.type || '')
   const isChild = accountType === 'child'
+  const isMother = accountType === 'mother'
 
   const registerStatus = String(account?.register_status || 'not_started')
   const loginStatus = String(account?.login_status || 'not_started')
-  const poolStatus = String(account?.pool_status || '')
-  const teamJoinStatus = String(account?.team_join_status || '')
+  const teamJoinStatus = String(account?.team_join_status || 'not_started')
+  const poolStatus = String(account?.pool_status || 'not_started')
+  const teamStatus = String(account?.team_status || 'not_started')
 
   const push = (key: string, text: string, cls: string) => {
     badges.push({ key, text, class: cls })
   }
 
-  const mapCommon = (prefix: string, status: string, labels: Record<string, string>) => {
-    const text = labels[status] || labels.not_started
-    const clsMap: Record<string, string> = {
-      success: 'bg-emerald-100 text-emerald-700 border-emerald-200 dark:bg-emerald-900/30 dark:text-emerald-400 dark:border-emerald-800',
-      running: 'bg-sky-100 text-sky-700 border-sky-200 dark:bg-sky-900/30 dark:text-sky-400 dark:border-sky-800',
-      failed: 'bg-rose-100 text-rose-700 border-rose-200 dark:bg-rose-900/30 dark:text-rose-400 dark:border-rose-800',
-      not_started: 'bg-slate-100 text-slate-600 border-slate-200 dark:bg-slate-800 dark:text-slate-400 dark:border-slate-700'
-    }
-    push(prefix, text, clsMap[status] || clsMap.not_started)
+  const clsMap: Record<string, string> = {
+    success: 'bg-emerald-100 text-emerald-700 border-emerald-200 dark:bg-emerald-900/30 dark:text-emerald-400 dark:border-emerald-800',
+    running: 'bg-sky-100 text-sky-700 border-sky-200 dark:bg-sky-900/30 dark:text-sky-400 dark:border-sky-800',
+    failed: 'bg-rose-100 text-rose-700 border-rose-200 dark:bg-rose-900/30 dark:text-rose-400 dark:border-rose-800',
+    not_started: 'bg-slate-100 text-slate-600 border-slate-200 dark:bg-slate-800 dark:text-slate-400 dark:border-slate-700'
   }
 
-  mapCommon('register', registerStatus, {
-    success: '已注册',
-    running: '注册中',
-    failed: '注册失败',
-    not_started: '未注册'
-  })
-
-  mapCommon('login', loginStatus, {
-    success: '已登录',
-    running: '登录中',
-    failed: '登录失败',
-    not_started: '未登录'
-  })
-
-  // 入池状态（母号/子号都展示）
-  if (poolStatus) {
-    mapCommon('pool', poolStatus, {
-      success: '已入池',
-      running: '入池中',
-      failed: '入池失败',
-      not_started: '未入池'
-    })
+  const mapStatus = (prefix: string, status: string, label: string) => {
+    push(prefix, label, clsMap[status] || clsMap.not_started)
   }
 
-  // 子号：入队状态
-  if (isChild && teamJoinStatus) {
-    mapCommon('join', teamJoinStatus, {
-      success: '已入队',
-      running: '入队中',
-      failed: '入队失败',
-      not_started: '未入队'
-    })
+  // 顺序：创建(已在外部) -> 注册 -> 登录 -> 入队 -> 入池
+
+  // 2. 注册状态
+  mapStatus('register', registerStatus, '注册')
+
+  // 3. 登录状态
+  mapStatus('login', loginStatus, '登录')
+
+  // 4. 入队状态（子号显示）
+  if (isChild) {
+    mapStatus('join', teamJoinStatus, '入队')
+  }
+
+  // 5. 入池状态（母号/子号都展示）
+  mapStatus('pool', poolStatus, '入池')
+
+  // 6. 母号：team 状态
+  if (isMother) {
+    mapStatus('team', teamStatus, 'Team')
   }
 
   return badges
@@ -1318,6 +1473,8 @@ type TaskRow = {
   mother_id?: string
   created_at?: string
   error?: string
+  source?: string
+  celery_task_id?: string | number
 }
 
 type TaskArtifact = { name: string; download_url: string }
@@ -1335,6 +1492,339 @@ const currentLogTask = ref<TaskRow | null>(null)
 const currentLogFilename = ref('run.log')
 const currentLogDownloadUrl = ref('')
 const taskLogText = ref('')
+const currentSteps = ref<Array<{ title: string; time: string }>>([])
+const currentLogExtras = ref<string[]>([])
+const activeStep = ref(0)
+
+const showCeleryDialog = ref(false)
+const celeryTaskId = ref('')
+const celeryEmail = ref('')
+const celeryState = ref('')
+const celeryMeta = ref<any>(null)
+const celeryResult = ref<any>(null)
+const celeryError = ref('')
+const celeryTraceback = ref('')
+const celeryStatusLoading = ref(false)
+
+type TraceLine = { id: number; text: string; isJson: boolean }
+
+const traceLines = ref<TraceLine[]>([])
+const traceHasMoreBackward = ref(false)
+const traceCursorBackward = ref<number | null>(null)
+const traceCursorForward = ref<number | null>(null)
+const traceFollowLatest = ref(true)
+const traceLoadingOlder = ref(false)
+const tracePollingTimer = ref<number | null>(null)
+let tracePollingInFlight = false
+const traceFile = ref('')
+const traceSize = ref(0)
+const traceScrollRef = ref<HTMLElement | null>(null)
+const traceUnavailable = ref(false)
+const traceUnavailableNotified = ref(false)
+let traceLineSeq = 0
+
+const celeryDialogTitle = computed(() => {
+  const id = celeryTaskId.value ? `#${celeryTaskId.value}` : ''
+  const mail = celeryEmail.value ? ` - ${celeryEmail.value}` : ''
+  return `Celery 任务日志 ${id}${mail}`
+})
+
+const celeryStatusText = computed(() => {
+  const parts: string[] = []
+  if (celeryState.value) parts.push(`state: ${celeryState.value}`)
+  if (celeryMeta.value) parts.push(`meta: ${JSON.stringify(celeryMeta.value, null, 2)}`)
+  if (celeryResult.value) parts.push(`result: ${JSON.stringify(celeryResult.value, null, 2)}`)
+  if (celeryError.value) parts.push(`error: ${celeryError.value}`)
+  if (celeryTraceback.value) parts.push(`traceback: ${celeryTraceback.value}`)
+  return parts.length ? parts.join('\n') : '暂无状态信息'
+})
+
+const stopTracePolling = () => {
+  if (tracePollingTimer.value) {
+    window.clearInterval(tracePollingTimer.value)
+    tracePollingTimer.value = null
+  }
+  tracePollingInFlight = false
+}
+
+const startTracePolling = () => {
+  stopTracePolling()
+  tracePollingTimer.value = window.setInterval(async () => {
+    if (!showCeleryDialog.value) return
+    if (!traceFollowLatest.value) return
+    if (traceUnavailable.value) return
+    if (tracePollingInFlight) return
+    tracePollingInFlight = true
+    try {
+      await fetchTraceForward()
+    } finally {
+      tracePollingInFlight = false
+    }
+  }, 1000)
+}
+
+watch(traceFollowLatest, (v) => {
+  if (!showCeleryDialog.value) return
+  if (v) startTracePolling()
+  else stopTracePolling()
+})
+
+watch(showCeleryDialog, (v) => {
+  if (v) {
+    if (traceFollowLatest.value) startTracePolling()
+  } else {
+    stopTracePolling()
+  }
+})
+
+const markTraceUnavailable = (message?: string) => {
+  traceUnavailable.value = true
+  stopTracePolling()
+  if (!traceUnavailableNotified.value) {
+    ElMessage.warning(message || 'trace 接口不可用')
+    traceUnavailableNotified.value = true
+  }
+}
+
+const refreshCeleryStatus = async () => {
+  if (!celeryTaskId.value) return
+  celeryStatusLoading.value = true
+  try {
+    const res = await gptBusinessApi.getCeleryTask(celeryTaskId.value)
+    celeryState.value = res?.state || ''
+    celeryMeta.value = res?.meta || null
+    celeryResult.value = res?.result || null
+    celeryError.value = res?.error || ''
+    celeryTraceback.value = res?.traceback || ''
+  } catch (e: any) {
+    ElMessage.error(e?.response?.data?.detail || e?.message || '查询任务状态失败')
+  } finally {
+    celeryStatusLoading.value = false
+  }
+}
+
+const normalizeTraceLines = (raw: string[]): TraceLine[] => {
+  const out: TraceLine[] = []
+  for (const t of raw || []) {
+    const text = String(t ?? '')
+    if (!text) continue
+    out.push({
+      id: ++traceLineSeq,
+      text,
+      isJson: text.trim().startsWith('{')
+    })
+  }
+  return out
+}
+
+const fetchTraceBackward = async (opts?: { initial?: boolean }) => {
+  if (!celeryTaskId.value || traceUnavailable.value) return
+  if (traceLoadingOlder.value) return
+  traceLoadingOlder.value = true
+
+  const initial = Boolean(opts?.initial)
+  const scrollEl = traceScrollRef.value
+  const prevHeight = scrollEl?.scrollHeight || 0
+  const prevTop = scrollEl?.scrollTop || 0
+
+  try {
+    const params: any = {
+      direction: 'backward',
+      limit_bytes: 262144
+    }
+    if (celeryEmail.value) params.email = celeryEmail.value
+    if (!initial && traceCursorBackward.value !== null) {
+      params.cursor = traceCursorBackward.value
+    }
+
+    const res = await gptBusinessApi.trace(celeryTaskId.value, params)
+    traceFile.value = res?.trace_file || traceFile.value
+    traceSize.value = typeof res?.size === 'number' ? res.size : traceSize.value
+    traceHasMoreBackward.value = Boolean(res?.has_more)
+    traceCursorBackward.value = typeof res?.cursor_out === 'number' ? res.cursor_out : traceCursorBackward.value
+
+    if (initial) {
+      traceCursorForward.value = traceSize.value
+    }
+
+    const newLines = normalizeTraceLines(Array.isArray(res?.lines) ? res.lines : [])
+    if (newLines.length > 0) {
+      traceLines.value = [...newLines, ...traceLines.value]
+    }
+
+    await nextTick()
+
+    if (scrollEl) {
+      if (initial) {
+        scrollEl.scrollTop = scrollEl.scrollHeight
+      } else {
+        const newHeight = scrollEl.scrollHeight
+        scrollEl.scrollTop = newHeight - prevHeight + prevTop
+      }
+    }
+  } catch (e: any) {
+    markTraceUnavailable(e?.response?.data?.detail || e?.message || '读取 trace 日志失败')
+  } finally {
+    traceLoadingOlder.value = false
+  }
+}
+
+const fetchTraceForward = async () => {
+  if (!celeryTaskId.value || traceUnavailable.value) return
+  const cursor = traceCursorForward.value
+  const params: any = {
+    direction: 'forward',
+    limit_bytes: 262144
+  }
+  if (celeryEmail.value) params.email = celeryEmail.value
+  if (typeof cursor === 'number') params.cursor = cursor
+
+  try {
+    const res = await gptBusinessApi.trace(celeryTaskId.value, params)
+    traceFile.value = res?.trace_file || traceFile.value
+    traceSize.value = typeof res?.size === 'number' ? res.size : traceSize.value
+    traceCursorForward.value = typeof res?.cursor_out === 'number' ? res.cursor_out : traceCursorForward.value
+
+    const raw = Array.isArray(res?.lines) ? res.lines : []
+    if (raw.length === 0) return
+    const newLines = normalizeTraceLines(raw)
+    if (newLines.length === 0) return
+
+    traceLines.value = [...traceLines.value, ...newLines]
+    await nextTick()
+
+    const el = traceScrollRef.value
+    if (el && traceFollowLatest.value) {
+      el.scrollTop = el.scrollHeight
+    }
+  } catch {
+    markTraceUnavailable('读取 trace 日志失败')
+  }
+}
+
+const clearTrace = () => {
+  traceLines.value = []
+}
+
+const copyTrace = async () => {
+  try {
+    const text = traceLines.value.map(x => x.text).join('\n')
+    await navigator.clipboard.writeText(text)
+    ElMessage.success('已复制')
+  } catch {
+    ElMessage.warning('复制失败（浏览器限制）')
+  }
+}
+
+const onTraceScroll = async () => {
+  const el = traceScrollRef.value
+  if (!el) return
+
+  if (el.scrollTop <= 0 && traceHasMoreBackward.value) {
+    await fetchTraceBackward({ initial: false })
+  }
+
+  const distanceToBottom = el.scrollHeight - (el.scrollTop + el.clientHeight)
+  if (distanceToBottom > 80 && traceFollowLatest.value) {
+    traceFollowLatest.value = false
+  }
+}
+
+const reloadTrace = async () => {
+  traceLines.value = []
+  traceHasMoreBackward.value = false
+  traceCursorBackward.value = null
+  traceCursorForward.value = null
+  traceFile.value = ''
+  traceSize.value = 0
+  traceLineSeq = 0
+  traceUnavailable.value = false
+  traceUnavailableNotified.value = false
+  await fetchTraceBackward({ initial: true })
+}
+
+const openCeleryTask = async (taskId: string) => {
+  if (!taskId) return
+  stopTracePolling()
+
+  celeryTaskId.value = taskId
+  celeryEmail.value = String(tasksDrawerAccount.value?.email || '').trim()
+  celeryState.value = ''
+  celeryMeta.value = null
+  celeryResult.value = null
+  celeryError.value = ''
+  celeryTraceback.value = ''
+  traceUnavailable.value = false
+  traceUnavailableNotified.value = false
+
+  showCeleryDialog.value = true
+  await refreshCeleryStatus()
+  await reloadTrace()
+  startTracePolling()
+}
+
+const onCeleryDialogClosed = () => {
+  stopTracePolling()
+}
+
+const getFallbackSteps = (taskType?: string) => {
+  const map: Record<string, string[]> = {
+    self_register: ['创建账号', '初始化环境', '完成处理'],
+    auto_invite: ['准备邀请', '发送邀请', '完成处理'],
+    sub2api_sink: ['准备入池', '推送任务', '完成处理']
+  }
+  return map[taskType || ''] || ['任务开始', '执行中', '任务完成']
+}
+
+const parseLogDetails = (logStr: string, taskType?: string) => {
+  const stepRegex = /步骤\s*(\d+)\s*\/\s*(\d+)\s*:\s*(.*)/g
+  const extraRegex = /增项:\s*(.*)/g
+  const stepsMap = new Map<number, string>()
+  let maxStep = 0
+  let totalSteps = 0
+  let match
+
+  while ((match = stepRegex.exec(logStr)) !== null) {
+    const stepNum = Number(match[1])
+    const total = Number(match[2])
+    const title = String(match[3] || '').trim()
+    if (Number.isFinite(stepNum)) {
+      maxStep = Math.max(maxStep, stepNum)
+      if (title) stepsMap.set(stepNum, title)
+    }
+    if (Number.isFinite(total)) {
+      totalSteps = Math.max(totalSteps, total)
+    }
+  }
+
+  if (!totalSteps) totalSteps = maxStep
+
+  const steps: Array<{ title: string; time: string }> = []
+  if (totalSteps > 0) {
+    for (let i = 1; i <= totalSteps; i += 1) {
+      steps.push({ title: stepsMap.get(i) || `步骤 ${i}`, time: '' })
+    }
+  } else if (stepsMap.size > 0) {
+    const sorted = Array.from(stepsMap.entries()).sort((a, b) => a[0] - b[0])
+    for (const [, title] of sorted) {
+      steps.push({ title: title || '步骤', time: '' })
+    }
+  }
+
+  if (steps.length === 0) {
+    const fallback = getFallbackSteps(taskType)
+    fallback.forEach(title => steps.push({ title, time: '' }))
+  }
+
+  const extras: string[] = []
+  while ((match = extraRegex.exec(logStr)) !== null) {
+    const text = String(match[1] || '').trim()
+    if (text && !extras.includes(text)) extras.push(text)
+  }
+
+  const active = steps.length > 0 ? Math.min(Math.max(maxStep - 1, 0), steps.length - 1) : 0
+  return { steps, extras, active }
+}
 
 const viewTasks = async (mother: MotherRow) => {
   tasksDrawerAccount.value = mother
@@ -1375,15 +1865,26 @@ const loadTaskLog = async (task: TaskRow) => {
   taskLogText.value = ''
   currentLogFilename.value = 'run.log'
   currentLogDownloadUrl.value = ''
+  currentSteps.value = []
+  currentLogExtras.value = []
+  activeStep.value = 0
   try {
     const res = await gptBusinessApi.getTaskLog(task.id, { tail: 2000 })
     currentLogFilename.value = res?.filename || 'run.log'
     currentLogDownloadUrl.value = res?.download_url || ''
-    taskLogText.value = res?.text || ''
+    const logStr = res?.text || ''
+    taskLogText.value = logStr
+    const parsed = parseLogDetails(logStr, task.type)
+    currentSteps.value = parsed.steps
+    currentLogExtras.value = parsed.extras
+    activeStep.value = parsed.active
   } catch (e: any) {
     ElMessage.error(e?.response?.data?.detail || e?.message || '获取日志失败')
     taskLogText.value = ''
     currentLogDownloadUrl.value = ''
+    currentSteps.value = []
+    currentLogExtras.value = []
+    activeStep.value = 0
   } finally {
     taskLogLoading.value = false
   }
@@ -1512,5 +2013,6 @@ onUnmounted(() => {
   window.removeEventListener('gpt-view-tasks', handleViewTasks)
   window.removeEventListener('gpt-open-sub2api-sink', handleOpenSub2apiSink)
   window.removeEventListener('keydown', handleKeydown)
+  stopTracePolling()
 })
 </script>

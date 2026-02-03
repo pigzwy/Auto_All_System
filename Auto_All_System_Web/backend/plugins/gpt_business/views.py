@@ -41,6 +41,7 @@ from .storage import (
     update_settings,
 )
 from .tasks import auto_invite_task, invite_only_task, self_register_task, sub2api_sink_task
+from .trace_cleanup import cleanup_trace_files, get_trace_cleanup_settings
 
 
 def _mask_secret(value: str) -> str:
@@ -272,6 +273,55 @@ class SettingsViewSet(ViewSet):
             timeout=timeout,
         )
         return Response({"success": bool(ok), "message": msg, "target_key": target_key or ""})
+
+    @action(detail=False, methods=["get", "post"], url_path="trace-cleanup")
+    def trace_cleanup(self, request):
+        settings = get_settings()
+        payload = request.data if isinstance(request.data, dict) else {}
+        query = request.query_params
+
+        def _pick_int(key: str):
+            if key in payload:
+                val = payload.get(key)
+            else:
+                val = query.get(key)
+            if val is None:
+                return None
+            try:
+                return int(val)
+            except Exception:
+                return None
+
+        overrides: dict[str, int | str] = {}
+        for key in ["max_age_days", "max_total_size_mb", "max_files", "min_keep_files"]:
+            v = _pick_int(key)
+            if v is not None:
+                overrides[key] = v
+
+        pattern = payload.get("pattern") or query.get("pattern")
+        if pattern:
+            overrides["pattern"] = str(pattern)
+
+        apply_flag = payload.get("apply") if request.method == "POST" else None
+        apply = False
+        if request.method == "POST" and apply_flag is not None:
+            apply = str(apply_flag).lower() in ["1", "true", "yes"]
+
+        result = cleanup_trace_files(settings, dry_run=not apply, overrides=overrides)
+        effective_settings = get_trace_cleanup_settings(settings)
+        if overrides:
+            if "max_age_days" in overrides:
+                effective_settings["max_age_days"] = int(overrides["max_age_days"])
+            if "max_total_size_mb" in overrides:
+                effective_settings["max_total_size_mb"] = int(overrides["max_total_size_mb"])
+            if "max_files" in overrides:
+                effective_settings["max_files"] = int(overrides["max_files"])
+            if "min_keep_files" in overrides:
+                effective_settings["min_keep_files"] = int(overrides["min_keep_files"])
+            if "pattern" in overrides:
+                effective_settings["pattern"] = str(overrides["pattern"])
+
+        return Response({"applied": apply, "settings": effective_settings, **result})
 
     @action(detail=False, methods=["post"], url_path="crs/test")
     def crs_test(self, request):
@@ -888,6 +938,28 @@ class AccountsViewSet(ViewSet):
 
     def destroy(self, request, pk=None):
         account_id = str(pk)
+        
+        # 先获取账号信息，以便删除 geekez 环境
+        settings = get_settings()
+        acc = find_account(settings, account_id)
+        
+        # 尝试删除 geekez 环境（如果存在）
+        if isinstance(acc, dict):
+            email = str(acc.get("email") or "").strip()
+            if email:
+                try:
+                    from apps.integrations.browser_base import BrowserType, get_browser_manager
+                    manager = get_browser_manager()
+                    api = manager.get_api(BrowserType.GEEKEZ)
+                    if api.health_check():
+                        # 尝试删除新格式 profile (gpt_{email})
+                        profile_name_new = f"gpt_{email}"
+                        api.delete_profile(profile_name_new)
+                        # 尝试删除旧格式 profile ({email})
+                        api.delete_profile(email)
+                except Exception:
+                    pass  # 静默失败，不阻止账号删除
+        
         ok = delete_account(account_id)
         if not ok:
             return Response({"detail": "Not found"}, status=status.HTTP_404_NOT_FOUND)
@@ -1078,6 +1150,132 @@ class CeleryTaskViewSet(ViewSet):
         result = AsyncResult(task_id)
         result.revoke(terminate=False)
         return Response({"status": "cancelled"})
+
+    @action(detail=True, methods=["get"], url_path="trace")
+    def trace(self, request, pk=None):
+        if not pk:
+            return Response({"error": "task_id required"}, status=status.HTTP_400_BAD_REQUEST)
+
+        settings = get_settings()
+        task_id = str(pk)
+        matched_task: dict[str, Any] | None = None
+        for t in list_tasks(settings):
+            if str(t.get("celery_task_id") or "") == task_id:
+                matched_task = t
+                break
+
+        if not matched_task:
+            return Response({"error": "task not found"}, status=status.HTTP_404_NOT_FOUND)
+
+        record_id = str(matched_task.get("id") or "").strip()
+        if not record_id:
+            return Response({"error": "task record missing"}, status=status.HTTP_404_NOT_FOUND)
+
+        filename = str(request.query_params.get("filename") or "run.log")
+        email = (request.query_params.get("email") or "").strip()
+        if not email:
+            mother_id = str(matched_task.get("mother_id") or "").strip()
+            if mother_id:
+                mother = find_account(settings, mother_id)
+                if isinstance(mother, dict):
+                    email = str(mother.get("email") or "").strip()
+
+        safe_email = email.replace("@", "_").replace(".", "_") if email else ""
+        direction = (request.query_params.get("direction") or "backward").strip()
+        if direction not in ("backward", "forward"):
+            direction = "backward"
+
+        try:
+            limit_bytes = int(request.query_params.get("limit_bytes") or 262144)
+        except Exception:
+            limit_bytes = 262144
+        limit_bytes = max(4096, min(limit_bytes, 1024 * 1024))
+
+        cursor_raw = request.query_params.get("cursor")
+        cursor_in: int | None
+        try:
+            cursor_in = int(cursor_raw) if cursor_raw is not None else None
+        except Exception:
+            cursor_in = None
+
+        base_dir = Path(getattr(django_settings, "BASE_DIR", "."))
+        trace_dir = (base_dir / "logs" / "trace").resolve()
+        if safe_email:
+            trace_rel = Path("logs") / "trace" / f"trace_{task_id}_{safe_email}.log"
+        else:
+            trace_rel = Path("logs") / "trace" / f"trace_{task_id}.log"
+
+        trace_abs = (base_dir / trace_rel).resolve()
+        try:
+            trace_abs.relative_to(trace_dir)
+        except Exception:
+            return Response({"error": "invalid trace path"}, status=status.HTTP_400_BAD_REQUEST)
+
+        file_path: Path | None = None
+        trace_file = str(trace_rel)
+        if trace_abs.exists() and trace_abs.is_file():
+            file_path = trace_abs
+        else:
+            media_root = Path(str(getattr(django_settings, "MEDIA_ROOT", "")))
+            job_dir = media_root / "gpt_business" / "jobs" / record_id
+            log_path = job_dir / filename
+            if log_path.exists() and log_path.is_file():
+                try:
+                    log_path.relative_to(media_root)
+                except Exception:
+                    return Response({"error": "invalid trace path"}, status=status.HTTP_400_BAD_REQUEST)
+                file_path = log_path
+                trace_file = str(Path("gpt_business") / "jobs" / record_id / filename)
+            else:
+                return Response(
+                    {
+                        "error": "trace file not found",
+                        "trace_file": trace_file,
+                        "run_log": str(Path("gpt_business") / "jobs" / record_id / filename),
+                    },
+                    status=status.HTTP_404_NOT_FOUND,
+                )
+
+        size = os.path.getsize(file_path)
+        if direction == "backward":
+            end = size if cursor_in is None else max(0, min(cursor_in, size))
+            start = max(0, end - limit_bytes)
+            with open(file_path, "rb") as f:
+                f.seek(start)
+                data = f.read(end - start)
+            text = data.decode("utf-8", errors="ignore")
+            lines = text.splitlines()
+            if start > 0 and lines:
+                lines = lines[1:]
+            cursor_out = start
+            has_more = start > 0
+        else:
+            start = 0 if cursor_in is None else max(0, min(cursor_in, size))
+            end = min(size, start + limit_bytes)
+            with open(file_path, "rb") as f:
+                f.seek(start)
+                data = f.read(end - start)
+            text = data.decode("utf-8", errors="ignore")
+            lines = text.splitlines()
+            cursor_out = end
+            has_more = end < size
+
+        if len(lines) > 5000:
+            lines = lines[-5000:] if direction == "backward" else lines[:5000]
+
+        return Response(
+            {
+                "task_id": task_id,
+                "direction": direction,
+                "trace_file": trace_file,
+                "email": email,
+                "cursor_in": cursor_in,
+                "cursor_out": cursor_out,
+                "has_more": has_more,
+                "size": size,
+                "lines": lines,
+            }
+        )
 
 
 class StatisticsViewSet(ViewSet):

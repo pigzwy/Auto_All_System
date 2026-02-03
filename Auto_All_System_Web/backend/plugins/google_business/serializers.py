@@ -3,7 +3,7 @@ Google Business插件序列化器
 """
 
 from rest_framework import serializers
-from apps.integrations.google_accounts.models import GoogleAccount, AccountGroup
+from apps.integrations.google_accounts.models import GoogleAccount
 from .models import (
     GoogleBusinessConfig,
     BusinessTaskLog,
@@ -12,33 +12,6 @@ from .models import (
     GoogleTaskAccount,
 )
 from .utils import mask_card_number
-
-
-# ==================== 账号分组相关 ====================
-
-
-class AccountGroupSerializer(serializers.ModelSerializer):
-    """账号分组序列化器"""
-
-    class Meta:
-        model = AccountGroup
-        fields = [
-            "id",
-            "name",
-            "description",
-            "account_count",
-            "created_at",
-            "updated_at",
-        ]
-        read_only_fields = ["id", "account_count", "created_at", "updated_at"]
-
-
-class AccountGroupCreateSerializer(serializers.ModelSerializer):
-    """创建账号分组序列化器"""
-
-    class Meta:
-        model = AccountGroup
-        fields = ["name", "description"]
 
 
 # ==================== Google账号相关 ====================
@@ -90,20 +63,12 @@ class GoogleAccountSerializer(serializers.ModelSerializer):
         read_only_fields = ["id", "created_at", "updated_at"]
 
     def get_group_id(self, obj: GoogleAccount):
-        """获取分组ID（兼容迁移前后）"""
-        try:
-            group = getattr(obj, "group", None)
-            return group.id if group else None
-        except Exception:
-            return None
+        """获取分组ID（已废弃，返回分组名称作为ID）"""
+        return getattr(obj, "group_name", "") or None
 
     def get_group_name(self, obj: GoogleAccount):
-        """获取分组名称（兼容迁移前后）"""
-        try:
-            group = getattr(obj, "group", None)
-            return group.name if group else None
-        except Exception:
-            return None
+        """获取分组名称"""
+        return getattr(obj, "group_name", "") or None
 
     def get_google_one_status(self, obj: GoogleAccount):
         meta = getattr(obj, "metadata", None) or {}

@@ -17,7 +17,7 @@ import os
 import logging
 import requests
 
-from apps.integrations.google_accounts.models import GoogleAccount, AccountGroup
+from apps.integrations.google_accounts.models import GoogleAccount
 from .models import GoogleTask, GoogleCardInfo, GoogleTaskAccount, GoogleBusinessConfig
 from .serializers import (
     GoogleAccountSerializer,
@@ -32,8 +32,6 @@ from .serializers import (
     GoogleBusinessConfigSerializer,
     StatisticsSerializer,
     PricingInfoSerializer,
-    AccountGroupSerializer,
-    AccountGroupCreateSerializer,
 )
 from .utils import EncryptionUtil, calculate_task_cost, upsert_geekez_profile_meta
 
@@ -294,10 +292,14 @@ class GoogleAccountViewSet(viewsets.ModelViewSet):
         if search:
             queryset = queryset.filter(email__icontains=search)
 
-        # 过滤分组
-        group = self.request.query_params.get("group")
-        if group:
-            queryset = queryset.filter(group_id=group)
+        # 过滤分组（使用 group_name 字符串字段）
+        group_name = self.request.query_params.get("group_name")
+        if group_name is not None:
+            if group_name == '':
+                # 空字符串表示未分组
+                queryset = queryset.filter(Q(group_name='') | Q(group_name__isnull=True))
+            else:
+                queryset = queryset.filter(group_name=group_name)
 
         # 过滤派生类型标签（前端展示用：无资格/未绑卡/成功）
         type_tag = self.request.query_params.get(
@@ -909,72 +911,21 @@ class GoogleAccountViewSet(viewsets.ModelViewSet):
             "format": "email----password----recovery----secret",
             "match_browser": true,
             "overwrite_existing": false,
-            "group_name": "售后",  // 可选，分组名称前缀
-            "group_id": 1  // 可选，已存在的分组ID
+            "group_name": "售后"  // 可选，分组名称
         }
         """
-        from apps.integrations.google_accounts.models import AccountGroup
-
         serializer = GoogleAccountImportSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
 
         accounts_data = serializer.validated_data["accounts"]
         match_browser = serializer.validated_data["match_browser"]
         overwrite_existing = serializer.validated_data["overwrite_existing"]
-        group_name_prefix = serializer.validated_data.get("group_name", "")
-        group_id = serializer.validated_data.get("group_id")
+        group_name = serializer.validated_data.get("group_name", "")
 
         imported_count = 0
         skipped_count = 0
         errors = []
         accounts_list = []
-
-        # 处理分组
-        account_group = None
-        if group_id:
-            # 使用已存在的分组
-            try:
-                account_group = AccountGroup.objects.get(
-                    id=group_id, owner_user=request.user
-                )
-            except AccountGroup.DoesNotExist:
-                return Response(
-                    {"error": f"分组ID {group_id} 不存在"},
-                    status=status.HTTP_400_BAD_REQUEST,
-                )
-        else:
-            # 检查 group 字段是否存在（兼容迁移前）
-            group_field_exists = False
-            try:
-                GoogleAccount._meta.get_field("group")
-                group_field_exists = True
-            except Exception:
-                pass
-
-            if group_field_exists:
-                # 创建新分组，先预计算账号数量
-                valid_account_count = 0
-                for line in accounts_data:
-                    parts = None
-                    for separator in ["----", "---", "--", "|", "\t"]:
-                        if separator in line:
-                            parts = line.split(separator)
-                            break
-                    if parts and len(parts) >= 2 and "@" in parts[0]:
-                        valid_account_count += 1
-
-                if valid_account_count > 0:
-                    # 生成分组名称
-                    group_full_name = AccountGroup.generate_default_name(
-                        prefix=group_name_prefix if group_name_prefix else None,
-                        count=valid_account_count,
-                    )
-                    account_group = AccountGroup.objects.create(
-                        name=group_full_name,
-                        description=f"批量导入 {valid_account_count} 个账号",
-                        owner_user=request.user,
-                        account_count=0,  # 稍后更新
-                    )
 
         # 如果需要匹配浏览器，获取所有浏览器窗口
         # 需求：导入账号后，先按邮箱名在 Geekez 环境查已有 profile，存在则复用 profile_id，避免重复创建。
@@ -1051,9 +1002,9 @@ class GoogleAccountViewSet(viewsets.ModelViewSet):
                         if secret:
                             existing.two_fa_secret = EncryptionUtil.encrypt(secret)
                             existing.two_fa_enabled = True
-                        # 兼容迁移前后：只有 group 字段存在时才设置
-                        if account_group and hasattr(existing, "group"):
-                            existing.group = account_group
+                        # 更新分组名称
+                        if group_name:
+                            existing.group_name = group_name
                         existing.save()
                         account_obj = existing
                         accounts_list.append(existing)
@@ -1072,15 +1023,8 @@ class GoogleAccountViewSet(viewsets.ModelViewSet):
                         if secret
                         else "",
                         "two_fa_enabled": bool(secret),
+                        "group_name": group_name,
                     }
-                    # 兼容迁移前后：只有 group 字段存在时才添加
-                    if account_group:
-                        try:
-                            # 检查模型是否有 group 字段
-                            GoogleAccount._meta.get_field("group")
-                            create_kwargs["group"] = account_group
-                        except Exception:
-                            pass
 
                     account = GoogleAccount.objects.create(**create_kwargs)
                     account_obj = account
@@ -1106,10 +1050,6 @@ class GoogleAccountViewSet(viewsets.ModelViewSet):
                 errors.append(f"Error processing {line}: {str(e)}")
                 logger.error(f"Import account error: {e}", exc_info=True)
 
-        # 更新分组的账号数量
-        if account_group:
-            account_group.update_account_count()
-
         return Response(
             {
                 "success": True,
@@ -1117,13 +1057,7 @@ class GoogleAccountViewSet(viewsets.ModelViewSet):
                 "skipped_count": skipped_count,
                 "errors": errors,
                 "accounts": GoogleAccountSerializer(accounts_list, many=True).data,
-                "group": {
-                    "id": account_group.id,
-                    "name": account_group.name,
-                    "account_count": account_group.account_count,
-                }
-                if account_group
-                else None,
+                "group_name": group_name,
             }
         )
 
@@ -2115,147 +2049,4 @@ class SubscriptionViewSet(viewsets.ViewSet):
         return FileResponse(open(file_path, "rb"), content_type="image/png")
 
 
-# ==================== 账号分组管理 ====================
-
-
-class AccountGroupViewSet(viewsets.ModelViewSet):
-    """
-    账号分组管理
-
-    提供分组的增删改查功能
-    """
-
-    permission_classes = [IsAuthenticated]
-    serializer_class = AccountGroupSerializer
-
-    def get_queryset(self):
-        return AccountGroup.objects.filter(owner_user=self.request.user)
-
-    def perform_create(self, serializer):
-        serializer.save(owner_user=self.request.user)
-
-    def get_serializer_class(self):
-        if self.action == "create":
-            return AccountGroupCreateSerializer
-        return AccountGroupSerializer
-
-    @action(detail=True, methods=["get"])
-    def accounts(self, request, pk=None):
-        """
-        获取分组下的所有账号
-
-        GET /api/v1/plugins/google-business/groups/{id}/accounts/
-        """
-        group = self.get_object()
-        accounts = GoogleAccount.objects.filter(group=group)
-
-        # 支持分页
-        page = self.paginate_queryset(accounts)
-        if page is not None:
-            serializer = GoogleAccountSerializer(page, many=True)
-            return self.get_paginated_response(serializer.data)
-
-        serializer = GoogleAccountSerializer(accounts, many=True)
-        return Response(serializer.data)
-
-    @action(detail=True, methods=["post"])
-    def add_accounts(self, request, pk=None):
-        """
-        将账号添加到分组
-
-        POST /api/v1/plugins/google-business/groups/{id}/add_accounts/
-        {
-            "account_ids": [1, 2, 3]
-        }
-        """
-        group = self.get_object()
-        account_ids = request.data.get("account_ids", [])
-
-        if not account_ids:
-            return Response(
-                {"error": "请提供账号ID列表"}, status=status.HTTP_400_BAD_REQUEST
-            )
-
-        # 更新账号的分组
-        updated = GoogleAccount.objects.filter(
-            id__in=account_ids, owner_user=request.user
-        ).update(group=group)
-
-        # 更新分组的账号数量
-        group.update_account_count()
-
-        return Response(
-            {
-                "success": True,
-                "updated_count": updated,
-                "group": AccountGroupSerializer(group).data,
-            }
-        )
-
-    @action(detail=True, methods=["post"])
-    def remove_accounts(self, request, pk=None):
-        """
-        将账号从分组中移除
-
-        POST /api/v1/plugins/google-business/groups/{id}/remove_accounts/
-        {
-            "account_ids": [1, 2, 3]
-        }
-        """
-        group = self.get_object()
-        account_ids = request.data.get("account_ids", [])
-
-        if not account_ids:
-            return Response(
-                {"error": "请提供账号ID列表"}, status=status.HTTP_400_BAD_REQUEST
-            )
-
-        # 移除账号的分组（设为 null）
-        updated = GoogleAccount.objects.filter(
-            id__in=account_ids, group=group, owner_user=request.user
-        ).update(group=None)
-
-        # 更新分组的账号数量
-        group.update_account_count()
-
-        return Response(
-            {
-                "success": True,
-                "removed_count": updated,
-                "group": AccountGroupSerializer(group).data,
-            }
-        )
-
-    @action(detail=False, methods=["get"])
-    def list_with_counts(self, request):
-        """
-        获取所有分组及其账号数量
-
-        GET /api/v1/plugins/google-business/groups/list_with_counts/
-        """
-        groups = self.get_queryset().annotate(actual_count=Count("accounts"))
-
-        result = []
-        for group in groups:
-            data = AccountGroupSerializer(group).data
-            data["actual_count"] = group.actual_count
-            result.append(data)
-
-        # 添加"未分组"的统计
-        ungrouped_count = GoogleAccount.objects.filter(
-            owner_user=request.user, group__isnull=True
-        ).count()
-
-        result.append(
-            {
-                "id": None,
-                "name": "未分组",
-                "description": "未分配到任何分组的账号",
-                "account_count": ungrouped_count,
-                "actual_count": ungrouped_count,
-                "created_at": None,
-                "updated_at": None,
-            }
-        )
-
-        return Response(result)
+# ==================== 账号分组管理（已废弃，使用 group_name 字符串字段替代） ====================

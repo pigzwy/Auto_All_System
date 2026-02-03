@@ -15,7 +15,6 @@ from .views import (
     BrowserManagementViewSet,
     SecurityViewSet,
     SubscriptionViewSet,
-    AccountGroupViewSet,
 )
 
 # 创建路由器
@@ -23,7 +22,6 @@ router = DefaultRouter()
 
 # 注册ViewSets（RESTful风格）
 router.register(r"accounts", GoogleAccountViewSet, basename="google-account")
-router.register(r"groups", AccountGroupViewSet, basename="google-group")
 router.register(r"cards", GoogleCardInfoViewSet, basename="google-card")
 router.register(r"tasks", GoogleTaskViewSet, basename="google-task")
 router.register(r"celery-tasks", CeleryTaskViewSet, basename="google-celery-task")
