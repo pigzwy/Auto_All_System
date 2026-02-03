@@ -338,16 +338,34 @@ def process_single_account(
                         )
                         needs_login = step2_needed or step3_needed or step4_needed or step5_needed or needs_security
 
+                        account_updates: Dict[str, Any] = {}
+
+                        def append_note(note: str) -> None:
+                            current = (account.notes or "").strip()
+                            if note in current:
+                                return
+                            updated = f"{current}\n{note}".strip() if current else note
+                            account_updates["notes"] = updated
+
                         # 主流程（6步）
                         # 1. 登录账号
                         if needs_login:
                             task_logger.info(f"[Account {account_id}] 步骤 1/6: 登录账号")
                             login_service = GoogleLoginService()
                             login_result = await login_service.login(
-                                page, account_info, task_logger
+                                page, account_info, task_logger, exit_on_captcha=True
                             )
                             if not login_result.get("success"):
-                                raise Exception(f"登录失败: {login_result.get('error')}")
+                                error_msg = login_result.get("error") or "登录失败"
+                                if "机器人验证" in error_msg or "验证码" in error_msg:
+                                    append_note("检测到机器人验证，已退出")
+                                if "手机号验证" in error_msg or "phone" in error_msg:
+                                    append_note("需要手机号验证，需绑卡")
+                                return {
+                                    "success": False,
+                                    "message": f"登录失败: {error_msg}",
+                                    "account_updates": account_updates,
+                                }
                         else:
                             task_logger.info(
                                 f"[Account {account_id}] 步骤 1/6: 已完成，跳过"
@@ -373,7 +391,6 @@ def process_single_account(
                             )
 
                         # 3. 检查学生资格（会获取 SheerID 链接/或判定已验证）
-                        account_updates: Dict[str, Any] = {}
                         status = google_one_status
                         link = sheerid_link_snapshot
 

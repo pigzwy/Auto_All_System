@@ -549,6 +549,15 @@
                       >
                         日志
                       </Button>
+                      <Button
+                        v-if="task.id && ['running', 'pending'].includes(task.status || '')"
+                        variant="outline"
+                        size="xs"
+                        class="h-6 border-destructive/40 text-destructive hover:bg-destructive/10"
+                        @click.stop="cancelTask(task.id)"
+                      >
+                        中断
+                      </Button>
                     </div>
                   </TableCell>
                 </TableRow>
@@ -1894,6 +1903,18 @@ const viewTaskLog = async (task: TaskRow) => {
   if (!task?.id) return
   taskLogDialogVisible.value = true
   await loadTaskLog(task)
+}
+
+const cancelTask = async (taskId: string) => {
+  try {
+    await gptBusinessApi.cancelTask(taskId)
+    ElMessage.success('任务已中断')
+    if (tasksDrawerAccount.value) {
+      await viewTasks(tasksDrawerAccount.value)
+    }
+  } catch (e: any) {
+    ElMessage.error(e?.response?.data?.detail || e?.message || '中断任务失败')
+  }
 }
 
 const reloadTaskLog = async () => {

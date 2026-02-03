@@ -66,6 +66,7 @@ class GoogleLoginService(BaseBrowserService):
         page: Page,
         account_info: Dict[str, Any],
         task_logger: Optional[TaskLogger] = None,
+        exit_on_captcha: bool = False,
     ) -> Dict[str, Any]:
         """
         执行Google账号登录 (健壮版本)
@@ -104,6 +105,7 @@ class GoogleLoginService(BaseBrowserService):
                 account_info,
                 log_callback=(task_logger.info if task_logger else None),
                 max_captcha_wait=self.CAPTCHA_WAIT_TIMEOUT,
+                exit_on_captcha=exit_on_captcha,
             )
             if ok:
                 return {"success": True, "message": msg}

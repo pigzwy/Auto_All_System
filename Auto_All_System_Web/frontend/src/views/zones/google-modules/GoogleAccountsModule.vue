@@ -103,6 +103,7 @@
                 </TableHead>
                 <TableHead class="w-20">ID</TableHead>
                 <TableHead class="min-w-[260px]">邮箱</TableHead>
+                <TableHead class="min-w-[220px]">备注</TableHead>
                 <TableHead class="min-w-[320px]">进度</TableHead>
                 <TableHead class="w-24">n-2fa</TableHead>
                 <TableHead class="w-28">环境</TableHead>
@@ -113,7 +114,7 @@
 
             <TableBody>
               <TableRow v-if="loading">
-                <TableCell colspan="9" class="py-10">
+                <TableCell colspan="10" class="py-10">
                   <div class="flex items-center justify-center gap-2 text-sm text-muted-foreground">
                     <Loader2Icon class="h-4 w-4 animate-spin" />
                     加载中...
@@ -122,7 +123,7 @@
               </TableRow>
 
               <TableRow v-else-if="accounts.length === 0">
-                <TableCell colspan="9" class="py-10 text-center text-sm text-muted-foreground">
+                <TableCell colspan="10" class="py-10 text-center text-sm text-muted-foreground">
                   暂无数据
                 </TableCell>
               </TableRow>
@@ -153,6 +154,15 @@
                   >
                     {{ row.email }}
                   </button>
+                </TableCell>
+
+                <TableCell>
+                  <span
+                    class="block max-w-[280px] truncate text-xs text-muted-foreground"
+                    :title="row.notes || ''"
+                  >
+                    {{ row.notes || '-' }}
+                  </span>
                 </TableCell>
 
                 <TableCell>
@@ -626,14 +636,25 @@
                     </TableCell>
                     <TableCell class="text-muted-foreground">{{ formatDate(row.created_at) }}</TableCell>
                     <TableCell class="text-right">
-                      <Button
-                        variant="link"
-                        size="xs"
-                        class="h-auto p-0"
-                        @click="row.source === 'google' ? viewTaskLog(row.google_task_id) : openCeleryTask(String(row.celery_task_id), selectedAccount?.email)"
-                      >
-                        日志
-                      </Button>
+                      <div class="flex items-center justify-end gap-2">
+                        <Button
+                          variant="link"
+                          size="xs"
+                          class="h-auto p-0"
+                          @click="row.source === 'google' ? viewTaskLog(row.google_task_id) : openCeleryTask(String(row.celery_task_id), selectedAccount?.email)"
+                        >
+                          日志
+                        </Button>
+                        <Button
+                          v-if="row.source === 'google' && row.google_task_id && ['running', 'pending'].includes(row.status)"
+                          variant="outline"
+                          size="xs"
+                          class="h-6 border-destructive/40 text-destructive hover:bg-destructive/10"
+                          @click.stop="cancelTask(row.google_task_id)"
+                        >
+                          中断
+                        </Button>
+                      </div>
                     </TableCell>
                   </TableRow>
 
@@ -1830,6 +1851,18 @@ const viewTaskLog = async (taskId: number) => {
     showLogDialog.value = true
   } catch (e) {
     ElMessage.error('获取日志失败')
+  }
+}
+
+const cancelTask = async (taskId: number) => {
+  try {
+    await googleTasksApi.cancelTask(taskId)
+    ElMessage.success('任务已中断')
+    if (selectedAccount.value) {
+      await viewTasks(selectedAccount.value)
+    }
+  } catch (e: any) {
+    ElMessage.error('中断任务失败: ' + (e.message || '未知错误'))
   }
 }
 

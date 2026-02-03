@@ -4338,6 +4338,34 @@ print('Health Check:', api.health_check())
 
 ---
 
+## 12. GPT 业务插件 API
+
+### 12.1 任务与账号
+
+- `GET /api/v1/plugins/gpt-business/tasks/` 任务列表
+- `GET /api/v1/plugins/gpt-business/tasks/{id}/` 任务详情
+- `POST /api/v1/plugins/gpt-business/accounts/{mother_id}/self_register/`
+- `POST /api/v1/plugins/gpt-business/accounts/{mother_id}/auto_invite/`
+- `POST /api/v1/plugins/gpt-business/accounts/{mother_id}/sub2api_sink/`
+
+### 12.2 Celery 状态与 Trace
+
+- `GET /api/v1/plugins/gpt-business/celery-tasks/{task_id}/` 状态/结果
+- `GET /api/v1/plugins/gpt-business/celery-tasks/{task_id}/trace/?email=<email>`
+  - 可选参数: `direction`(backward/forward) `cursor` `limit_bytes` `filename`
+
+### 12.3 Trace 清理
+
+- `GET /api/v1/plugins/gpt-business/settings/trace-cleanup/` (dry-run)
+- `POST /api/v1/plugins/gpt-business/settings/trace-cleanup/` (apply)
+
+请求示例:
+```json
+{ "apply": true, "max_age_days": 7, "max_total_size_mb": 1024 }
+```
+
+返回字段包含: `total_files` `deleted_files` `freed_bytes` `trace_dir` `settings`
+
 ## 📋 附录E: 快速参考卡片
 
 ### E.1 核心原则
@@ -4403,4 +4431,3 @@ docker-compose exec backend printenv | grep BITBROWSER
 **文档版本**: 1.2.0  
 **最后更新**: 2026-01-19  
 **维护者**: Auto All System Team
-

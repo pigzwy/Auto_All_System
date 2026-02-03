@@ -480,12 +480,37 @@ S2A_GROUP_IDS = [1, 2]  # 或 S2A_GROUP_NAMES = ["group1", "group2"]
 每个任务会生成：
 - `run.log` - 完整执行日志
 - `*.png` - 每个关键步骤的截图
+ - `logs/trace/trace_<celery_task_id>_<email>.log` - 实时 trace（json line + human line）
 
 自动入池（Sub2API Sink）额外产物：
 - `sub2api_sink_result.json` - ok/skip/fail 统计与每个子号的原因
 - `oauth_<email>_<attempt>_<ts>.png` - S2A OAuth 模式授权失败时的截图（文件名已做安全字符处理）
 
 存储路径: `MEDIA_ROOT/gpt_business/jobs/{task_id}/`
+
+trace 文件路径: `backend/logs/trace/trace_<celery_task_id>_<email>.log`
+
+### 5.3 Trace 清理策略
+
+默认策略（可通过 `PluginState.settings.trace_cleanup` 覆盖）：
+
+- `max_age_days`: 7
+- `max_total_size_mb`: 1024
+- `max_files`: 2000
+- `min_keep_files`: 20
+- `pattern`: `trace_*.log`
+
+清理顺序：超期 -> 超数量 -> 超容量（总量上限）
+
+触发方式：
+
+- 管理命令（默认 dry-run）：
+  - `python manage.py cleanup_trace`
+  - `python manage.py cleanup_trace --apply`
+- 后端接口：
+  - `GET /api/v1/plugins/gpt-business/settings/trace-cleanup/`（dry-run）
+  - `POST /api/v1/plugins/gpt-business/settings/trace-cleanup/`，body 传 `{"apply": true}`
+- 定时任务：Celery beat 每天 03:30 执行（可用 `GPT_TRACE_CLEANUP_ENABLED=false` 关闭）
 
 ---
 

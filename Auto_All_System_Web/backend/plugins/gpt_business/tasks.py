@@ -23,9 +23,127 @@ from django.utils import timezone
 
 from .legacy_runner import prepare_artifacts
 from .storage import add_account, find_account, get_settings, list_accounts, patch_account, patch_task
+from .trace_cleanup import cleanup_trace_files
 
 
 logger = logging.getLogger(__name__)
+
+
+def _safe_email_for_trace(email: str | None) -> str:
+    return (email or "").replace("@", "_").replace(".", "_")
+
+
+def _mask_secret(value: str, prefix: int = 4, suffix: int = 4) -> str:
+    v = (value or "").replace(" ", "").strip()
+    if not v:
+        return ""
+    if len(v) <= prefix + suffix:
+        return "***"
+    return f"{v[:prefix]}***{v[-suffix:]}"
+
+
+class SensitiveDataFilter:
+    PATTERNS = [
+        (
+            re.compile(r'password["\']?\s*[:=]\s*["\']([^"\']+)["\']', re.IGNORECASE),
+            r'password="***"',
+        ),
+        (
+            re.compile(r'secret["\']?\s*[:=]\s*["\']([^"\']+)["\']', re.IGNORECASE),
+            r'secret="***"',
+        ),
+        (
+            re.compile(r'card_number["\']?\s*[:=]\s*["\']([^"\']+)["\']', re.IGNORECASE),
+            r'card_number="****"',
+        ),
+        (
+            re.compile(r'cvv["\']?\s*[:=]\s*["\']([^"\']+)["\']', re.IGNORECASE),
+            r'cvv="***"',
+        ),
+        (re.compile(r"\d{13,19}"), r"****-****-****-****"),
+    ]
+
+    @staticmethod
+    def filter(message: str) -> str:
+        for pattern, replacement in SensitiveDataFilter.PATTERNS:
+            message = pattern.sub(replacement, message)
+        return message
+
+
+def _get_trace_file(celery_task_id: str | None, email: str | None) -> Path | None:
+    celery_task_id = str(celery_task_id or "").strip()
+    safe_email = _safe_email_for_trace(email)
+    if not celery_task_id and not safe_email:
+        return None
+
+    base_dir = Path(getattr(django_settings, "BASE_DIR", "."))
+    trace_dir = base_dir / "logs" / "trace"
+    trace_dir.mkdir(parents=True, exist_ok=True)
+
+    if celery_task_id and safe_email:
+        filename = f"trace_{celery_task_id}_{safe_email}.log"
+    elif celery_task_id:
+        filename = f"trace_{celery_task_id}.log"
+    else:
+        filename = f"trace_{safe_email}.log"
+
+    return trace_dir / filename
+
+
+def _context_prefix(kind: str | None, celery_task_id: str | None, email: str | None) -> str:
+    parts: list[str] = []
+    if kind:
+        parts.append(kind)
+    if celery_task_id:
+        parts.append(f"celery={celery_task_id}")
+    if email:
+        parts.append(email)
+    if not parts:
+        return ""
+    return "[" + "][".join(parts) + "] "
+
+
+def _append_trace_line(
+    celery_task_id: str | None,
+    email: str | None,
+    message: str,
+    *,
+    step: str = "task",
+    action: str = "log",
+    level: str = "info",
+    kind: str = "gpt",
+    mask_secret: bool = False,
+) -> None:
+    try:
+        trace_file = _get_trace_file(celery_task_id, email)
+        if not trace_file:
+            return
+
+        ts = timezone.now().isoformat()
+        safe_message = str(message).replace("\r", " ").rstrip("\n")
+        if mask_secret:
+            safe_message = _mask_secret(safe_message)
+        safe_message = SensitiveDataFilter.filter(safe_message)
+        payload = {
+            "ts": ts,
+            "level": level,
+            "step": step,
+            "action": action,
+            "message": safe_message,
+            "celery_task_id": str(celery_task_id or ""),
+            "email": str(email or ""),
+            "kind": kind,
+        }
+        json_line = json.dumps(payload, ensure_ascii=True, separators=(",", ":"))
+        prefix = _context_prefix(kind, str(celery_task_id or ""), str(email or ""))
+        human = f"[{ts}] {prefix}{step}/{action}: {safe_message}\n"
+
+        trace_file.parent.mkdir(parents=True, exist_ok=True)
+        with trace_file.open("a", encoding="utf-8", errors="ignore") as f:
+            f.write(json_line + "\n")
+            f.write(human)
+    except Exception:
+        pass
 
 
 def _get_available_card_for_checkout() -> dict[str, Any] | None:
@@ -217,6 +335,9 @@ class ChatGPTTeamClient:
 
 @shared_task(bind=True)
 def invite_only_task(self, record_id: str):
+    celery_task_id = str(self.request.id or "")
+    trace_email = ""
+    trace_email = ""
     patch_task(
         record_id,
         {
@@ -252,6 +373,18 @@ def invite_only_task(self, record_id: str):
         if not team_cfg:
             raise RuntimeError(f"Team not found: {team_name}")
 
+        trace_email = str(team_cfg.get("owner_email") or "").strip()
+
+        def _trace(action: str, msg: str, level: str = "info") -> None:
+            _append_trace_line(
+                celery_task_id,
+                trace_email,
+                msg,
+                step="invite_only",
+                action=action,
+                level=level,
+            )
+
         api_base = str(gptmail_cfg.get("api_base") or "").strip()
         api_key = str(gptmail_cfg.get("api_key") or "").strip()
         if not api_base or not api_key:
@@ -265,6 +398,8 @@ def invite_only_task(self, record_id: str):
             count_int = 4
 
         gptmail = GPTMailClient(api_base, api_key)
+
+        _trace("start", f"invite_only start team_name={team_name} count={count_int}")
 
         created: list[dict[str, str]] = []
         for _ in range(count_int):
@@ -289,6 +424,11 @@ def invite_only_task(self, record_id: str):
             emails=[x["email"] for x in created],
         )
 
+        _trace(
+            "done",
+            f"invite_only done invited={len(invite_result.get('success') or [])} failed={len(invite_result.get('failed') or [])}",
+        )
+
         result = {
             "team_name": team_name,
             "account_id": account_id,
@@ -308,6 +448,14 @@ def invite_only_task(self, record_id: str):
         return result
     except Exception as exc:
         logger.exception("gpt_business invite_only_task failed")
+        _append_trace_line(
+            celery_task_id,
+            trace_email,
+            f"invite_only failed: {exc}",
+            step="invite_only",
+            action="error",
+            level="error",
+        )
         patch_task(
             record_id,
             {
@@ -328,6 +476,7 @@ def _get_task_record(settings: dict[str, Any], record_id: str) -> dict[str, Any]
 
 @shared_task(bind=True)
 def legacy_run_task(self, record_id: str):
+    celery_task_id = str(self.request.id or "")
     patch_task(
         record_id,
         {
@@ -338,6 +487,14 @@ def legacy_run_task(self, record_id: str):
     )
 
     err = "legacy_run 已停用：不再支持外部仓库挂载/子进程执行，请使用母号维度的自动开通/自动邀请/自动入池"
+    _append_trace_line(
+        celery_task_id,
+        None,
+        f"legacy_run failed: {err}",
+        step="legacy_run",
+        action="error",
+        level="error",
+    )
     patch_task(
         record_id,
         {
@@ -417,6 +574,9 @@ def self_register_task(self, record_id: str):
         },
     )
 
+    celery_task_id = str(self.request.id or "")
+    trace_email = ""
+
     mother_id: str = ""
     job_dir: Path | None = None
 
@@ -438,6 +598,8 @@ def self_register_task(self, record_id: str):
         password = str(mother.get("account_password") or "").strip()
         if not email or not password:
             raise RuntimeError("Mother account missing email/account_password")
+
+        trace_email = email
 
         media_root = Path(str(getattr(django_settings, "MEDIA_ROOT", "")))
         if not str(media_root):
@@ -464,6 +626,13 @@ def self_register_task(self, record_id: str):
             artifacts.log_file.parent.mkdir(parents=True, exist_ok=True)
             with artifacts.log_file.open("a", encoding="utf-8") as fp:
                 fp.write(f"[{ts}] {line}\n")
+            _append_trace_line(
+                celery_task_id,
+                trace_email,
+                line,
+                step="self_register",
+                action="log",
+            )
 
         _log(f"self_register start mother_id={mother_id} email={email}")
 
@@ -713,6 +882,14 @@ def self_register_task(self, record_id: str):
         return result
     except Exception as exc:
         logger.exception("gpt_business self_register_task failed")
+        _append_trace_line(
+            celery_task_id,
+            trace_email,
+            f"self_register failed: {exc}",
+            step="self_register",
+            action="error",
+            level="error",
+        )
         try:
             if mother_id:
                 patch_account(
@@ -756,6 +933,8 @@ def self_register_task(self, record_id: str):
 
 @shared_task(bind=True)
 def auto_invite_task(self, record_id: str):
+    celery_task_id = str(self.request.id or "")
+    trace_email = ""
     patch_task(
         record_id,
         {
@@ -784,6 +963,8 @@ def auto_invite_task(self, record_id: str):
         if not email or not password:
             raise RuntimeError("Mother account missing email/account_password")
 
+        trace_email = email
+
         media_root = Path(str(getattr(django_settings, "MEDIA_ROOT", "")))
         if not str(media_root):
             raise RuntimeError("MEDIA_ROOT is not configured")
@@ -797,6 +978,13 @@ def auto_invite_task(self, record_id: str):
                 artifacts.log_file.parent.mkdir(parents=True, exist_ok=True)
                 with artifacts.log_file.open("a", encoding="utf-8") as f:
                     f.write(f"[{ts}] {msg}\n")
+                _append_trace_line(
+                    celery_task_id,
+                    trace_email,
+                    msg,
+                    step="auto_invite",
+                    action="log",
+                )
             except Exception:
                 pass
 
@@ -1544,6 +1732,14 @@ def auto_invite_task(self, record_id: str):
         return result
     except Exception as exc:
         logger.exception("gpt_business auto_invite_task failed")
+        _append_trace_line(
+            celery_task_id,
+            trace_email,
+            f"auto_invite failed: {exc}",
+            step="auto_invite",
+            action="error",
+            level="error",
+        )
         patch_task(
             record_id,
             {
@@ -1557,6 +1753,8 @@ def auto_invite_task(self, record_id: str):
 
 @shared_task(bind=True)
 def sub2api_sink_task(self, record_id: str):
+    celery_task_id = str(self.request.id or "")
+    trace_email = ""
     patch_task(
         record_id,
         {
@@ -1579,6 +1777,8 @@ def sub2api_sink_task(self, record_id: str):
         mother = find_account(settings, mother_id)
         if not isinstance(mother, dict) or str(mother.get("type")) != "mother":
             raise RuntimeError("Mother account not found")
+
+        trace_email = str(mother.get("email") or "").strip()
 
         s2a_target_key = str(task_record.get("s2a_target_key") or "").strip()
         pool_mode = str(task_record.get("pool_mode") or "").strip() or "crs_sync"
@@ -1700,6 +1900,13 @@ def sub2api_sink_task(self, record_id: str):
                 safe = str(msg).replace("\r", " ").rstrip("\n")
                 with artifacts.log_file.open("a", encoding="utf-8") as fp:
                     fp.write(f"[{ts}] {safe}\n")
+                _append_trace_line(
+                    celery_task_id,
+                    trace_email,
+                    safe,
+                    step="sub2api_sink",
+                    action="log",
+                )
             except Exception:
                 # Never fail the task due to logging
                 pass
@@ -2256,6 +2463,14 @@ def sub2api_sink_task(self, record_id: str):
         return result
     except Exception as exc:
         logger.exception("gpt_business sub2api_sink_task failed")
+        _append_trace_line(
+            celery_task_id,
+            trace_email,
+            f"sub2api_sink failed: {exc}",
+            step="sub2api_sink",
+            action="error",
+            level="error",
+        )
 
         try:
             media_root = Path(str(getattr(django_settings, "MEDIA_ROOT", "")))
@@ -2279,4 +2494,20 @@ def sub2api_sink_task(self, record_id: str):
                 "error": str(exc),
             },
         )
+
+
+@shared_task(name="gpt_business.cleanup_trace")
+def cleanup_trace_task():
+    settings = get_settings()
+    try:
+        result = cleanup_trace_files(settings, dry_run=False)
+        logger.info(
+            "gpt_business trace cleanup finished: deleted=%s freed=%s",
+            result.get("deleted_files"),
+            result.get("freed_bytes"),
+        )
+        return {"success": True, **result}
+    except Exception as exc:
+        logger.exception("gpt_business cleanup_trace_task failed")
+        return {"success": False, "error": str(exc)}
         raise

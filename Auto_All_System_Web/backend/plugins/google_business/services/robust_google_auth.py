@@ -144,8 +144,38 @@ async def detect_error_message(page: Page) -> Optional[str]:
         return None
 
 
+async def detect_phone_verification(page: Page) -> bool:
+    """
+    检测是否需要手机号验证
+
+    Returns:
+        True=检测到手机号验证, False=未检测到
+    """
+    indicators = [
+        'text="Enter a phone number to get a text message with a verification code"',
+        'text="Enter a phone number"',
+        'text="phone number"',
+        'text="请输入手机号"',
+        'text="输入手机号"',
+        'text="短信验证码"',
+        'text="发送验证码"',
+    ]
+
+    try:
+        for indicator in indicators:
+            locator = page.locator(indicator)
+            if await locator.count() > 0 and await locator.first.is_visible():
+                return True
+        return False
+    except Exception:
+        return False
+
+
 async def wait_for_password_input(
-    page: Page, max_wait_seconds: int = 120, log_callback=None
+    page: Page,
+    max_wait_seconds: int = 120,
+    log_callback=None,
+    exit_on_captcha: bool = False,
 ) -> Tuple[bool, str]:
     """
     等待密码输入框出现（支持人工过验证）
@@ -179,8 +209,17 @@ async def wait_for_password_input(
         if error_msg:
             return False, f"登录错误: {error_msg}"
 
+        # 检测手机号验证
+        if await detect_phone_verification(page):
+            if log_callback:
+                log_callback("⚠️ 检测到手机号验证，退出等待")
+            return False, "需要手机号验证"
+
         # 检测机器人验证
         if await detect_captcha(page):
+            if exit_on_captcha:
+                log("⚠️ 检测到机器人验证，退出等待")
+                return False, "检测到机器人验证"
             if not captcha_warned:
                 log("⚠️ 检测到机器人验证，请手动完成验证...")
                 captcha_warned = True
@@ -207,6 +246,7 @@ async def robust_google_login(
     account_info: Dict[str, Any],
     log_callback=None,
     max_captcha_wait: int = 120,
+    exit_on_captcha: bool = False,
 ) -> Tuple[bool, str]:
     """
     健壮的 Google 登录函数
@@ -285,7 +325,10 @@ async def robust_google_login(
         # ========== 3. 等待密码框（支持人工过验证）==========
         log("等待密码输入框...")
         password_ready, wait_msg = await wait_for_password_input(
-            page, max_wait_seconds=max_captcha_wait, log_callback=log_callback
+            page,
+            max_wait_seconds=max_captcha_wait,
+            log_callback=log_callback,
+            exit_on_captcha=exit_on_captcha,
         )
 
         if not password_ready:
@@ -330,8 +373,14 @@ async def robust_google_login(
             if error_msg:
                 return False, f"登录失败: {error_msg}"
 
+            # B2. 检测手机号验证
+            if await detect_phone_verification(page):
+                return False, "需要手机号验证"
+
             # C. 检测机器人验证
             if await detect_captcha(page):
+                if exit_on_captcha:
+                    return False, "检测到机器人验证"
                 log("⚠️ 检测到验证码，等待人工处理...")
                 await asyncio.sleep(5)
                 continue

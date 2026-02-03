@@ -105,8 +105,24 @@ export const gptBusinessApi = {
     })
   },
 
+  cancelTask(taskId: string): Promise<{ status: string }> {
+    return request.post(`/plugins/gpt-business/tasks/${taskId}/cancel/`)
+  },
+
   getCeleryTask(celeryTaskId: string): Promise<any> {
     return request.get(`/plugins/gpt-business/celery-tasks/${celeryTaskId}/`)
+  },
+
+  trace(
+    celeryTaskId: string,
+    params: {
+      email?: string
+      direction?: 'backward' | 'forward'
+      limit_bytes?: number
+      cursor?: number
+    }
+  ): Promise<any> {
+    return request.get(`/plugins/gpt-business/celery-tasks/${celeryTaskId}/trace/`, { params })
   },
 
   listAccounts(): Promise<GptBusinessAccountsResponse> {

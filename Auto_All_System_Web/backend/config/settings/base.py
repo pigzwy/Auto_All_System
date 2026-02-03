@@ -8,6 +8,8 @@ import sys
 from pathlib import Path
 from datetime import timedelta
 
+from celery.schedules import crontab
+
 # Build paths
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
 
@@ -243,6 +245,17 @@ CELERY_RESULT_SERIALIZER = "json"
 CELERY_TIMEZONE = TIME_ZONE
 CELERY_TASK_TRACK_STARTED = True
 CELERY_TASK_TIME_LIMIT = 30 * 60  # 30分钟超时
+
+_GPT_TRACE_CLEANUP_ENABLED = os.getenv("GPT_TRACE_CLEANUP_ENABLED", "true").lower() in ["1", "true", "yes"]
+if _GPT_TRACE_CLEANUP_ENABLED:
+    CELERY_BEAT_SCHEDULE = {
+        "gpt_business_trace_cleanup": {
+            "task": "plugins.gpt_business.tasks.cleanup_trace_task",
+            "schedule": crontab(hour=3, minute=30),
+        }
+    }
+else:
+    CELERY_BEAT_SCHEDULE = {}
 
 # 加密密钥（用于敏感数据加密）
 ENCRYPTION_KEY = os.getenv("ENCRYPTION_KEY", "your-encryption-key-change-in-production")
