@@ -103,17 +103,17 @@
                 </TableHead>
                 <TableHead class="w-20">ID</TableHead>
                 <TableHead class="min-w-[260px]">邮箱</TableHead>
-                <TableHead class="w-44">分组</TableHead>
-                <TableHead class="w-52">New-2FA</TableHead>
-                <TableHead class="w-40">Geek</TableHead>
-                <TableHead class="w-20 text-center">绑卡</TableHead>
+                <TableHead class="min-w-[320px]">进度</TableHead>
+                <TableHead class="w-24">n-2fa</TableHead>
+                <TableHead class="w-28">环境</TableHead>
                 <TableHead class="w-44">创建时间</TableHead>
+                <TableHead class="w-28 text-right">操作</TableHead>
               </TableRow>
             </TableHeader>
 
             <TableBody>
               <TableRow v-if="loading">
-                <TableCell colspan="8" class="py-10">
+                <TableCell colspan="9" class="py-10">
                   <div class="flex items-center justify-center gap-2 text-sm text-muted-foreground">
                     <Loader2Icon class="h-4 w-4 animate-spin" />
                     加载中...
@@ -122,7 +122,7 @@
               </TableRow>
 
               <TableRow v-else-if="accounts.length === 0">
-                <TableCell colspan="8" class="py-10 text-center text-sm text-muted-foreground">
+                <TableCell colspan="9" class="py-10 text-center text-sm text-muted-foreground">
                   暂无数据
                 </TableCell>
               </TableRow>
@@ -156,42 +156,56 @@
                 </TableCell>
 
                 <TableCell>
-                  <Badge v-if="row.group_name" variant="outline" class="rounded-full">
-                    {{ row.group_name }}
-                  </Badge>
-                  <span v-else class="text-xs text-muted-foreground">未分组</span>
-                </TableCell>
-
-                <TableCell>
-                  <div class="flex flex-col items-start gap-1">
-                    <code v-if="row.new_2fa_display || row.new_2fa" class="rounded bg-muted px-2 py-1 font-mono text-xs">
-                      {{ format2fa(row.new_2fa_display || row.new_2fa) }}
-                    </code>
-                    <span v-else class="text-xs text-muted-foreground">-</span>
-                    <span v-if="row.new_2fa_updated_at" class="text-xs text-muted-foreground">
-                      {{ formatDate(row.new_2fa_updated_at) }}
+                  <div class="flex flex-wrap items-center gap-1">
+                    <span
+                      v-for="(step, index) in getMainFlowProgress(row)"
+                      :key="`${row.id}-${index}`"
+                      class="inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-medium"
+                      :class="step.done ? 'border-emerald-500/40 bg-emerald-500/15 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400' : 'border-muted-foreground/20 bg-muted/30 text-muted-foreground'"
+                      :title="`${index + 1}. ${step.label}`"
+                    >
+                      {{ step.label }}
                     </span>
                   </div>
                 </TableCell>
 
                 <TableCell>
-                  <div class="flex flex-col items-start gap-1">
-                    <Badge :variant="row.geekez_profile_exists ? 'default' : 'secondary'" class="rounded-full">
-                      {{ row.geekez_profile_exists ? '已创建' : '未创建' }}
-                    </Badge>
-                    <Badge v-if="row.geekez_env" variant="outline" class="rounded-full">
-                      已打开 {{ row.geekez_env.debug_port || '' }}
-                    </Badge>
-                  </div>
+                  <button
+                    v-if="row.new_2fa_display || row.new_2fa"
+                    type="button"
+                    class="inline-flex items-center justify-center rounded-md p-1.5 text-primary hover:bg-primary/10 transition-colors"
+                    title="查看 2FA"
+                    @click.stop="open2faDialog(row)"
+                  >
+                    <KeyRound class="h-4 w-4" />
+                  </button>
+                  <span v-else class="text-xs text-muted-foreground">-</span>
                 </TableCell>
 
-                <TableCell class="text-center">
-                  <CheckCircle2 v-if="row.card_bound" class="inline-block h-5 w-5 text-emerald-600" />
-                  <XCircle v-else class="inline-block h-5 w-5 text-muted-foreground" />
+                <TableCell>
+                  <Button
+                    :variant="row.geekez_profile_exists ? 'default' : 'outline'"
+                    size="xs"
+                    class="h-7"
+                    :class="row.geekez_profile_exists 
+                      ? 'bg-emerald-600 hover:bg-emerald-700 text-white' 
+                      : 'border-violet-300 text-violet-600 hover:bg-violet-50 hover:text-violet-700 dark:border-violet-700 dark:text-violet-400 dark:hover:bg-violet-950'"
+                    @click.stop="launchGeekez(row)"
+                  >
+                    {{ row.geekez_profile_exists ? '打开' : '创建' }}
+                  </Button>
                 </TableCell>
 
                 <TableCell class="text-muted-foreground">
                   {{ formatDate(row.created_at) }}
+                </TableCell>
+
+                <TableCell class="text-right">
+                  <div class="flex items-center justify-end gap-1">
+                    <Button variant="ghost" size="xs" class="text-blue-600 hover:text-blue-700 hover:bg-blue-50 dark:text-blue-400 dark:hover:text-blue-300 dark:hover:bg-blue-950" @click.stop="editAccount(row)">编辑</Button>
+                    <Button variant="ghost" size="xs" class="text-amber-600 hover:text-amber-700 hover:bg-amber-50 dark:text-amber-400 dark:hover:text-amber-300 dark:hover:bg-amber-950" @click.stop="openTasksDrawer(row)">任务</Button>
+                    <Button variant="ghost" size="xs" class="text-destructive hover:text-destructive hover:bg-destructive/10" @click.stop="deleteAccount(row)">删除</Button>
+                  </div>
                 </TableCell>
               </TableRow>
             </TableBody>
@@ -425,6 +439,25 @@
               <Badge variant="secondary" class="rounded-full">
                 {{ selectedAccount.status_display || selectedAccount.status }}
               </Badge>
+            </div>
+          </div>
+
+          <div class="space-y-2 sm:col-span-2">
+            <div class="text-xs text-muted-foreground">主线进度</div>
+            <div class="flex flex-wrap gap-2">
+              <div
+                v-for="(step, index) in getMainFlowProgress(selectedAccount)"
+                :key="`detail-${index}`"
+                class="inline-flex items-center gap-2 rounded-full border px-2.5 py-1 text-xs"
+                :class="step.done ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-700' : 'border-muted-foreground/20 bg-muted/20 text-muted-foreground'"
+              >
+                <span class="inline-flex h-5 w-5 items-center justify-center rounded-full border text-[11px] font-semibold"
+                  :class="step.done ? 'border-emerald-500/40 bg-emerald-500/15 text-emerald-700' : 'border-muted-foreground/30 bg-muted/30 text-muted-foreground'"
+                >
+                  {{ index + 1 }}
+                </span>
+                <span>{{ step.label }}</span>
+              </div>
             </div>
           </div>
 
@@ -807,6 +840,15 @@
         <div class="grid gap-4 py-2">
           <div class="flex items-center justify-between">
             <div>
+              <div class="text-sm font-medium">运行模式</div>
+              <div class="text-xs text-muted-foreground">默认续跑：已完成步骤会跳过</div>
+            </div>
+            <Switch :checked="oneClickForm.force_rerun" @update:checked="oneClickForm.force_rerun = $event" />
+          </div>
+          <div class="text-xs text-muted-foreground">开启强制重跑后，会忽略已完成状态并重新执行</div>
+
+          <div class="flex items-center justify-between">
+            <div>
               <div class="text-sm font-medium">增项：修改 2FA</div>
               <div class="text-xs text-muted-foreground">开启后会执行安全更新步骤</div>
             </div>
@@ -833,7 +875,7 @@
       <DialogContent class="sm:max-w-[560px]">
         <DialogHeader>
           <DialogTitle>SheerID 批量验证</DialogTitle>
-          <DialogDescription>填写学生信息后执行验证流程</DialogDescription>
+          <DialogDescription>主线步骤 4：学生验证</DialogDescription>
         </DialogHeader>
 
         <div class="grid gap-4 py-2">
@@ -863,7 +905,7 @@
       <DialogContent class="sm:max-w-[560px]">
         <DialogHeader>
           <DialogTitle>自动绑卡</DialogTitle>
-          <DialogDescription>将自动从卡池中分配卡片进行绑定</DialogDescription>
+          <DialogDescription>主线步骤 5：订阅服务（自动绑卡）</DialogDescription>
         </DialogHeader>
 
         <Alert class="mb-4" variant="destructive">
@@ -927,10 +969,47 @@
 
     <!-- 订阅验证选项 -->
     <Dialog v-model:open="showVerifySubDialog">
+
+    <!-- 2FA 详情弹窗 -->
+    <Dialog v-model:open="show2faDialog">
+      <DialogContent class="sm:max-w-[400px]">
+        <DialogHeader>
+          <DialogTitle>2FA 信息</DialogTitle>
+          <DialogDescription>{{ current2faAccount?.email }}</DialogDescription>
+        </DialogHeader>
+        <div class="grid gap-4 py-4">
+          <div class="grid gap-2">
+            <label class="text-sm font-medium text-muted-foreground">2FA 密钥</label>
+            <div class="flex items-center gap-2">
+              <code class="flex-1 rounded bg-muted px-3 py-2 font-mono text-sm break-all">
+                {{ format2fa(current2faAccount?.new_2fa_display || current2faAccount?.new_2fa || '') }}
+              </code>
+              <Button
+                v-if="current2faAccount?.new_2fa_display || current2faAccount?.new_2fa"
+                variant="outline"
+                size="sm"
+                @click="copy2fa(current2faAccount)"
+              >
+                复制
+              </Button>
+            </div>
+          </div>
+          <div v-if="current2faAccount?.new_2fa_updated_at" class="grid gap-2">
+            <label class="text-sm font-medium text-muted-foreground">更新时间</label>
+            <div class="text-sm">{{ formatDate(current2faAccount.new_2fa_updated_at) }}</div>
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" @click="show2faDialog = false">关闭</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+
+    <!-- 订阅验证选项 -->
       <DialogContent class="sm:max-w-[520px]">
         <DialogHeader>
           <DialogTitle>验证订阅状态</DialogTitle>
-          <DialogDescription>可选开启截图保存</DialogDescription>
+          <DialogDescription>主线步骤 5：订阅服务（校验状态，可选截图）</DialogDescription>
         </DialogHeader>
 
         <div class="flex items-center justify-between py-2">
@@ -962,6 +1041,7 @@ import {
   Monitor as MonitorIcon,
   Users,
   XCircle,
+  KeyRound,
 } from 'lucide-vue-next'
 
 import { Badge } from '@/components/ui/badge'
@@ -1002,7 +1082,7 @@ import {
 } from '@/components/ui/table'
 import { 
   googleAccountsApi, googleTasksApi, googleSecurityApi, 
-  googleSubscriptionApi, googleCeleryTasksApi, googleGroupsApi 
+  googleSubscriptionApi, googleCeleryTasksApi 
 } from '@/api/google'
 import type { GoogleAccount } from '@/types'
 
@@ -1021,7 +1101,7 @@ const selectedAccount = ref<GoogleAccount | null>(null)
 const importText = ref('')
 const filterType = ref('all')
 const filterGroup = ref('all')
-const groupList = ref<Array<{id: number | null, name: string, account_count: number}>>([])
+const groupList = ref<Array<{id: string, name: string}>>([])
 const selectedAccounts = ref<GoogleAccount[]>([])
 
 const totalPages = computed(() => {
@@ -1135,6 +1215,66 @@ const showBindCardDialog = ref(false)
 const showRecoveryEmailDialog = ref(false)
 const showVerifySubDialog = ref(false)
 const showOneClickDialog = ref(false)
+const show2faDialog = ref(false)
+const current2faAccount = ref<GoogleAccount | null>(null)
+
+const open2faDialog = (account: GoogleAccount) => {
+  current2faAccount.value = account
+  show2faDialog.value = true
+}
+
+const copy2fa = async (account: GoogleAccount | null) => {
+  if (!account) return
+  const text = account.new_2fa_display || account.new_2fa || ''
+  if (!text) return
+  try {
+    await navigator.clipboard.writeText(text)
+    ElMessage.success('已复制 2FA')
+  } catch {
+    ElMessage.error('复制失败')
+  }
+}
+
+const launchGeekez = async (account: GoogleAccount) => {
+  try {
+    await googleAccountsApi.launchGeekez(account.id)
+    ElMessage.success(account.geekez_profile_exists ? '正在打开环境...' : '正在创建环境...')
+    await fetchAccounts()
+  } catch (e: any) {
+    ElMessage.error('操作失败: ' + e.message)
+  }
+}
+
+const editAccount = (account: GoogleAccount) => {
+  editForm.id = account.id
+  editForm.email = account.email || ''
+  editForm.password = ''
+  editForm.recovery_email = account.recovery_email || ''
+  editForm.secret_key = account.secret_key || ''
+  editForm.notes = account.notes || ''
+  showEditDialog.value = true
+}
+
+const deleteAccount = async (account: GoogleAccount) => {
+  try {
+    await ElMessageBox.confirm(`确定删除账号 ${account.email}？`, '删除确认', {
+      confirmButtonText: '删除',
+      cancelButtonText: '取消',
+      type: 'warning'
+    })
+    await googleAccountsApi.deleteAccount(account.id)
+    ElMessage.success('删除成功')
+    await fetchAccounts()
+  } catch (e: any) {
+    if (e !== 'cancel' && e?.message !== 'cancel') {
+      ElMessage.error('删除失败: ' + e.message)
+    }
+  }
+}
+
+const openTasksDrawer = (account: GoogleAccount) => {
+  viewTasks(account)
+}
 
 // Data for dialogs
 const drawerLoading = ref(false)
@@ -1242,6 +1382,7 @@ const bindCardForm = reactive({
 })
 
 const oneClickForm = reactive({
+  force_rerun: false,
   security_change_2fa: false,
   security_new_recovery_email: ''
 })
@@ -1306,9 +1447,9 @@ const fetchAccounts = async () => {
     }
     if (filterGroup.value && filterGroup.value !== 'all') {
       if (filterGroup.value === 'ungrouped') {
-        params.group = 'null' // 未分组
+        params.group_name = '' // 未分组（空字符串）
       } else {
-        params.group = filterGroup.value
+        params.group_name = filterGroup.value
       }
     }
     
@@ -1335,17 +1476,34 @@ const fetchAccounts = async () => {
 
 const fetchGroups = async () => {
   try {
-    const response = await googleGroupsApi.getGroups()
-    if (Array.isArray(response)) {
-      // 过滤掉"未分组"项（前端自己处理）
-      groupList.value = response.filter((g: any) => g.id !== null)
-    } else if (response.data && Array.isArray(response.data)) {
-      groupList.value = response.data.filter((g: any) => g.id !== null)
-    } else {
-      groupList.value = []
+    // 从账号列表中提取唯一的 group_name 值
+    const response = await googleAccountsApi.getAccounts({ page_size: 9999 })
+    const allAccounts = Array.isArray(response) ? response : (response.results || [])
+    
+    // 提取唯一的非空 group_name
+    const uniqueGroups = [...new Set(
+      allAccounts
+        .map((acc: any) => acc.group_name)
+        .filter((name: string) => name && name.trim())
+    )].sort()
+    
+    // 转换为下拉选项格式
+    groupList.value = uniqueGroups.map((name: string) => ({
+      id: name,
+      name: name
+    }))
+    
+    // 如果当前筛选的分组不存在了，重置为全部
+    if (
+      filterGroup.value !== 'all' &&
+      filterGroup.value !== 'ungrouped' &&
+      !uniqueGroups.includes(filterGroup.value)
+    ) {
+      filterGroup.value = 'all'
     }
   } catch (error) {
     console.error('获取分组列表失败:', error)
+    groupList.value = []
   }
 }
 
@@ -1383,6 +1541,11 @@ const submitOneClickTask = async () => {
   }
 
   const config: any = {}
+  if (oneClickForm.force_rerun) {
+    config.force_rerun = true
+  } else {
+    config.resume = true
+  }
   if (oneClickForm.security_change_2fa) {
     config.security_change_2fa = true
   }
@@ -1959,6 +2122,61 @@ const handleImportAccounts = async () => {
 const viewAccount = (account: GoogleAccount) => {
   selectedAccount.value = account
   showViewDialog.value = true
+}
+
+const MAIN_FLOW_STEPS = [
+  '登录账号',
+  '打开 Google One',
+  '检查学生资格',
+  '学生验证',
+  '订阅服务',
+  '完成处理'
+]
+
+const getMainFlowProgress = (account?: GoogleAccount | null) => {
+  if (!account) {
+    return MAIN_FLOW_STEPS.map(label => ({ label, done: false }))
+  }
+
+  const status = String(account.status || '').toLowerCase()
+  const googleOneStatus = String(account.google_one_status || '').toLowerCase()
+  const geminiStatus = String(account.gemini_status || '').toLowerCase()
+
+  const statusEligible = ['link_ready', 'verified', 'subscribed', 'ineligible']
+  const googleOneEligible = ['link_ready', 'verified', 'subscribed', 'ineligible']
+
+  const hasVerify = Boolean(account.sheerid_verified)
+  const hasEligibility =
+    statusEligible.includes(status) ||
+    googleOneEligible.includes(googleOneStatus) ||
+    Boolean(account.sheerid_link) ||
+    hasVerify
+
+  const hasOpenOne = hasEligibility || Boolean(googleOneStatus)
+
+  const hasLogin =
+    Boolean(account.last_login_at) ||
+    ['logged_in', ...statusEligible].includes(status) ||
+    hasOpenOne ||
+    hasVerify ||
+    Boolean(account.card_bound)
+
+  const hasSubscribe =
+    Boolean(account.card_bound) ||
+    Boolean(account.subscribed) ||
+    googleOneStatus === 'subscribed' ||
+    ['active', 'subscribed'].includes(geminiStatus)
+
+  const hasComplete = hasSubscribe
+
+  return [
+    { label: MAIN_FLOW_STEPS[0], done: hasLogin },
+    { label: MAIN_FLOW_STEPS[1], done: hasOpenOne },
+    { label: MAIN_FLOW_STEPS[2], done: hasEligibility },
+    { label: MAIN_FLOW_STEPS[3], done: hasVerify },
+    { label: MAIN_FLOW_STEPS[4], done: hasSubscribe },
+    { label: MAIN_FLOW_STEPS[5], done: hasComplete }
+  ]
 }
 
 const getGeminiStatusText = (status: string) => {

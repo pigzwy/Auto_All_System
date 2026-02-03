@@ -18,45 +18,76 @@
         <!-- 分隔线 -->
         <div class="h-8 w-px bg-border/50" />
 
-        <!-- 统一功能入口 -->
-        <div class="flex flex-wrap items-center gap-1.5">
-          <DropdownMenu>
-            <DropdownMenuTrigger as-child>
-              <Button variant="outline" size="sm" class="gap-2">
-                自动化
-                <ChevronDown class="h-4 w-4 opacity-70" />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="start" class="w-44">
-              <DropdownMenuItem :disabled="selectedCount === 0" @select="openOneClickDialog">
-                一键全自动
-              </DropdownMenuItem>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem :disabled="loading" @select="refreshAccounts">
-                刷新
-              </DropdownMenuItem>
-              <DropdownMenuItem @select="openAddDialog">添加账号</DropdownMenuItem>
-              <DropdownMenuItem @select="openImportDialog">批量导入</DropdownMenuItem>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem @select="handleExport('csv')">导出 CSV</DropdownMenuItem>
-              <DropdownMenuItem @select="handleExport('txt')">导出 TXT</DropdownMenuItem>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem :disabled="selectedCount !== 1" @select="handleLaunchGeekez">
-                {{ geekezActionLabel }}
-              </DropdownMenuItem>
-              <DropdownMenuItem :disabled="selectedCount !== 1" @select="handleEdit">编辑</DropdownMenuItem>
-              <DropdownMenuItem :disabled="selectedCount !== 1" @select="handleViewTasks">日志</DropdownMenuItem>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem class="text-destructive" :disabled="selectedCount === 0" @select="handleBulkDelete">
-                批量删除
-              </DropdownMenuItem>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem :disabled="selectedCount === 0" @select="handleSecurityCommand('change_2fa')">安全设置：修改 2FA</DropdownMenuItem>
-              <DropdownMenuItem :disabled="selectedCount === 0" @select="handleSecurityCommand('change_recovery')">安全设置：修改辅助邮箱</DropdownMenuItem>
-              <DropdownMenuItem :disabled="selectedCount === 0" @select="handleSecurityCommand('get_backup_codes')">安全设置：获取备份码</DropdownMenuItem>
-              <DropdownMenuItem :disabled="selectedCount === 0" @select="handleSecurityCommand('one_click_update')">安全设置：一键安全更新</DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
+        <!-- 功能操作栏 -->
+        <div class="flex flex-wrap items-center gap-4">
+          <!-- 基础操作 -->
+          <div class="flex items-center gap-2">
+            <Button variant="outline" size="sm" class="gap-2" :disabled="loading" @click="refreshAccounts">
+              <RefreshCcw class="h-4 w-4" :class="{ 'animate-spin': loading }" />
+              刷新
+            </Button>
+          </div>
+
+          <!-- 分隔线 -->
+          <div class="h-8 w-px bg-border/50" />
+
+          <!-- 自动化操作组 -->
+          <div class="flex items-center gap-1.5">
+            <span class="mr-2 text-xs font-medium text-muted-foreground">自动化</span>
+            <Button size="sm" class="gap-2 bg-emerald-600 hover:bg-emerald-700 text-white" :disabled="selectedCount === 0" @click="openOneClickDialog">
+              <Wand2 class="h-4 w-4" />
+              一键全自动
+            </Button>
+
+            <DropdownMenu>
+              <DropdownMenuTrigger as-child>
+                <Button variant="secondary" size="sm" class="gap-2 bg-violet-600 hover:bg-violet-700 text-white" :disabled="selectedCount === 0">
+                  <Shield class="h-4 w-4" />
+                  安全设置
+                  <ChevronDown class="h-4 w-4 opacity-70" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start" class="w-44">
+                <DropdownMenuItem @select="handleSecurityCommand('change_2fa')">修改 2FA</DropdownMenuItem>
+                <DropdownMenuItem @select="handleSecurityCommand('change_recovery')">修改辅助邮箱</DropdownMenuItem>
+                <DropdownMenuItem @select="handleSecurityCommand('get_backup_codes')">获取备份码</DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem @select="handleSecurityCommand('one_click_update')">一键安全更新</DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
+
+          <!-- 分隔线 -->
+          <div class="h-8 w-px bg-border/50" />
+
+          <!-- 批量操作 -->
+          <div class="flex items-center gap-2">
+            <Button size="sm" class="gap-2" @click="openAddDialog">
+              <Plus class="h-4 w-4" />
+              添加账号
+            </Button>
+            <Button variant="secondary" size="sm" class="gap-2" @click="openImportDialog">
+              <Upload class="h-4 w-4" />
+              批量导入
+            </Button>
+            <DropdownMenu>
+              <DropdownMenuTrigger as-child>
+                <Button variant="outline" size="sm" class="gap-2">
+                  <Download class="h-4 w-4" />
+                  导出
+                  <ChevronDown class="h-4 w-4 opacity-70" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start" class="w-36">
+                <DropdownMenuItem @select="handleExport('csv')">导出 CSV</DropdownMenuItem>
+                <DropdownMenuItem @select="handleExport('txt')">导出 TXT</DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+            <Button variant="outline" size="sm" class="gap-2 border-red-500/50 text-red-600 hover:bg-red-50 hover:text-red-700 dark:text-red-400 dark:hover:bg-red-950" :disabled="selectedCount === 0" @click="handleBulkDelete">
+              <Trash2 class="h-4 w-4" />
+              批量删除
+            </Button>
+          </div>
         </div>
       </template>
     </ZoneHeader>
@@ -69,9 +100,16 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, provide, computed } from 'vue'
+import { ref, onMounted, onUnmounted, provide } from 'vue'
 import {
   ChevronDown,
+  Download,
+  Plus,
+  RefreshCcw,
+  Shield,
+  Trash2,
+  Upload,
+  Wand2,
   X,
 } from 'lucide-vue-next'
 import { Button } from '@/components/ui/button'
@@ -89,12 +127,6 @@ const accountsModuleRef = ref<InstanceType<typeof GoogleAccountsModule> | null>(
 
 const loading = ref(false)
 const selectedCount = ref(0)
-const selectedAccount = ref<any>(null)
-
-const geekezActionLabel = computed(() => {
-  if (!selectedAccount.value) return '打开环境'
-  return selectedAccount.value.geekez_profile_exists ? '打开环境' : '创建环境'
-})
 
 provide('loading', loading)
 provide('selectedCount', selectedCount)
@@ -131,22 +163,9 @@ const handleBulkDelete = () => {
   window.dispatchEvent(new CustomEvent('google-bulk-delete'))
 }
 
-const handleLaunchGeekez = () => {
-  window.dispatchEvent(new CustomEvent('google-launch-geekez'))
-}
-
-const handleEdit = () => {
-  window.dispatchEvent(new CustomEvent('google-edit-account'))
-}
-
-const handleViewTasks = () => {
-  window.dispatchEvent(new CustomEvent('google-view-tasks'))
-}
-
 const handleSelectionChanged = ((e: CustomEvent) => {
-  const { count, account } = e.detail || {}
+  const { count } = e.detail || {}
   selectedCount.value = count || 0
-  selectedAccount.value = account || null
 }) as EventListener
 
 onMounted(() => {
