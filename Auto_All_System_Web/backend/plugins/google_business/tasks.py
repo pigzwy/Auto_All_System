@@ -291,113 +291,213 @@ def process_single_account(
                     elif task_type == "one_click":
                         task_logger.info(f"[Account {account_id}] 执行一键到底任务...")
 
+                        meta = account.metadata or {}
+                        google_one_status = str(meta.get("google_one_status") or "").lower()
+                        gemini_status = str(account.gemini_status or "").lower()
+                        sheerid_link_snapshot = account.sheerid_link or ""
+
+                        force_rerun = bool(
+                            config.get("force_rerun")
+                            or config.get("force")
+                            or config.get("rerun")
+                        )
+                        resume_mode = bool(config.get("resume", True)) and not force_rerun
+
+                        has_link_status = google_one_status in [
+                            "link_ready",
+                            "verified",
+                            "subscribed",
+                            "ineligible",
+                        ]
+                        has_open_one = has_link_status or bool(sheerid_link_snapshot) or bool(account.sheerid_verified)
+                        has_eligibility = has_link_status or bool(sheerid_link_snapshot) or bool(account.sheerid_verified)
+                        has_verify = bool(account.sheerid_verified) or google_one_status in ["verified", "subscribed"]
+                        has_subscribe = bool(account.card_bound) or gemini_status == "active" or google_one_status == "subscribed"
+                        is_ineligible = google_one_status == "ineligible"
+
+                        step2_needed = True
+                        step3_needed = True
+                        step4_needed = True
+                        step5_needed = True
+
+                        if resume_mode:
+                            step2_needed = not has_open_one
+                            step3_needed = not has_eligibility
+                            step4_needed = not has_verify
+                            step5_needed = not has_subscribe
+
+                        if is_ineligible:
+                            step4_needed = False
+                            step5_needed = False
+
+                        needs_security = bool(
+                            config.get("security_change_2fa")
+                            or config.get("security_new_recovery_email")
+                            or config.get("new_recovery_email")
+                            or config.get("new_email")
+                        )
+                        needs_login = step2_needed or step3_needed or step4_needed or step5_needed or needs_security
+
                         # 主流程（6步）
                         # 1. 登录账号
-                        task_logger.info(f"[Account {account_id}] 步骤 1/6: 登录账号")
-                        login_service = GoogleLoginService()
-                        login_result = await login_service.login(
-                            page, account_info, task_logger
-                        )
-                        if not login_result.get("success"):
-                            raise Exception(f"登录失败: {login_result.get('error')}")
+                        if needs_login:
+                            task_logger.info(f"[Account {account_id}] 步骤 1/6: 登录账号")
+                            login_service = GoogleLoginService()
+                            login_result = await login_service.login(
+                                page, account_info, task_logger
+                            )
+                            if not login_result.get("success"):
+                                raise Exception(f"登录失败: {login_result.get('error')}")
+                        else:
+                            task_logger.info(
+                                f"[Account {account_id}] 步骤 1/6: 已完成，跳过"
+                            )
 
                         # 2. 打开 Google One
-                        task_logger.info(
-                            f"[Account {account_id}] 步骤 2/6: 打开 Google One"
-                        )
-                        try:
-                            await page.goto(
-                                "https://one.google.com/about/plans/ai-premium/student",
-                                wait_until="networkidle",
+                        if step2_needed:
+                            task_logger.info(
+                                f"[Account {account_id}] 步骤 2/6: 打开 Google One"
                             )
-                            await asyncio.sleep(1)
-                        except Exception:
-                            # 不强依赖该跳转；后续 link_service 会自己导航
-                            pass
+                            try:
+                                await page.goto(
+                                    "https://one.google.com/about/plans/ai-premium/student",
+                                    wait_until="networkidle",
+                                )
+                                await asyncio.sleep(1)
+                            except Exception:
+                                # 不强依赖该跳转；后续 link_service 会自己导航
+                                pass
+                        else:
+                            task_logger.info(
+                                f"[Account {account_id}] 步骤 2/6: 已完成，跳过"
+                            )
 
                         # 3. 检查学生资格（会获取 SheerID 链接/或判定已验证）
-                        task_logger.info(
-                            f"[Account {account_id}] 步骤 3/6: 检查学生资格"
-                        )
-                        link_service = GoogleOneLinkService()
-                        (
-                            status,
-                            link,
-                            message,
-                        ) = await link_service.get_verification_link(
-                            page, account_info, task_logger
-                        )
-                        if status not in ["link_ready", "verified"]:
-                            raise Exception(f"获取链接失败: {message}")
-
                         account_updates: Dict[str, Any] = {}
+                        status = google_one_status
+                        link = sheerid_link_snapshot
+
+                        if step4_needed and not link:
+                            step3_needed = True
+
+                        if step3_needed:
+                            task_logger.info(
+                                f"[Account {account_id}] 步骤 3/6: 检查学生资格"
+                            )
+                            link_service = GoogleOneLinkService()
+                            (
+                                status,
+                                link,
+                                message,
+                            ) = await link_service.get_verification_link(
+                                page, account_info, task_logger
+                            )
+                            if status not in [
+                                "link_ready",
+                                "verified",
+                                "subscribed",
+                                "ineligible",
+                            ]:
+                                raise Exception(f"获取链接失败: {message}")
+                        else:
+                            task_logger.info(
+                                f"[Account {account_id}] 步骤 3/6: 已完成，跳过"
+                            )
+
                         if link:
                             account_updates["sheerid_link"] = link
 
-                        # 4. 学生验证（如果需要）
-                        if status == "link_ready" and link:
+                        if status == "ineligible":
                             task_logger.info(
-                                f"[Account {account_id}] 步骤 4/6: 学生验证"
+                                f"[Account {account_id}] 学生资格不符合，跳过后续验证/订阅"
                             )
-                            verify_service = SheerIDVerifyService(
-                                api_key=config.get("api_key")
-                            )
-                            verification_id = (
-                                SheerIDVerifyService.extract_verification_id(link)
-                            )
-                            if verification_id:
-                                results = verify_service.verify_batch(
-                                    [verification_id],
-                                    callback=lambda vid, msg: task_logger.info(msg),
-                                    task_logger=task_logger,
+                            step4_needed = False
+                            step5_needed = False
+
+                        # 4. 学生验证（如果需要）
+                        if step4_needed:
+                            if status in ["verified", "subscribed"]:
+                                task_logger.info(
+                                    f"[Account {account_id}] 步骤 4/6: 已完成，跳过"
                                 )
-                                verify_result = results.get(verification_id, {})
-                                if verify_result.get("status") == "success":
-                                    account_updates["sheerid_verified"] = True
-                                else:
-                                    task_logger.warning(
-                                        f"[Account {account_id}] 验证未成功: {verify_result.get('message')}"
+                            elif link:
+                                task_logger.info(
+                                    f"[Account {account_id}] 步骤 4/6: 学生验证"
+                                )
+                                verify_service = SheerIDVerifyService(
+                                    api_key=config.get("api_key")
+                                )
+                                verification_id = (
+                                    SheerIDVerifyService.extract_verification_id(link)
+                                )
+                                if verification_id:
+                                    results = verify_service.verify_batch(
+                                        [verification_id],
+                                        callback=lambda vid, msg: task_logger.info(msg),
+                                        task_logger=task_logger,
                                     )
+                                    verify_result = results.get(verification_id, {})
+                                    if verify_result.get("status") == "success":
+                                        account_updates["sheerid_verified"] = True
+                                    else:
+                                        task_logger.warning(
+                                            f"[Account {account_id}] 验证未成功: {verify_result.get('message')}"
+                                        )
+                            else:
+                                task_logger.info(
+                                    f"[Account {account_id}] 步骤 4/6: 跳过（无验证链接）"
+                                )
+                        else:
+                            task_logger.info(f"[Account {account_id}] 步骤 4/6: 跳过")
 
                         # 5. 订阅服务（绑卡订阅）
-                        task_logger.info(f"[Account {account_id}] 步骤 5/6: 订阅服务")
-                        bind_service = GoogleOneBindCardService()
-                        card = _select_card_for_task(task=task, config=config)
-                        card_info = {
-                            "number": card.card_number,
-                            "exp_month": str(card.expiry_month).zfill(2),
-                            "exp_year": str(card.expiry_year),
-                            "cvv": card.cvv,
-                        }
-
-                        ok = False
+                        ok = True
                         message = ""
-                        try:
-                            ok, message = await bind_service.bind_and_subscribe(
-                                page, card_info, account_info, task_logger
+                        card_last4 = ""
+                        if step5_needed:
+                            task_logger.info(
+                                f"[Account {account_id}] 步骤 5/6: 订阅服务"
                             )
-                        finally:
-                            _mark_card_used(
-                                card=card,
-                                user=task.user,
-                                success=ok,
-                                purpose="google_one_one_click",
+                            bind_service = GoogleOneBindCardService()
+                            card = _select_card_for_task(task=task, config=config)
+                            card_info = {
+                                "number": card.card_number,
+                                "exp_month": str(card.expiry_month).zfill(2),
+                                "exp_year": str(card.expiry_year),
+                                "cvv": card.cvv,
+                            }
+
+                            try:
+                                ok, message = await bind_service.bind_and_subscribe(
+                                    page, card_info, account_info, task_logger
+                                )
+                            finally:
+                                _mark_card_used(
+                                    card=card,
+                                    user=task.user,
+                                    success=ok,
+                                    purpose="google_one_one_click",
+                                )
+
+                            card_last4 = card.card_number[-4:] if card.card_number else ""
+                        else:
+                            task_logger.info(
+                                f"[Account {account_id}] 步骤 5/6: 已完成，跳过"
                             )
 
-                        suffix = (
-                            f" (****{card.card_number[-4:]})"
-                            if card.card_number
-                            else ""
+                        suffix = f" (****{card_last4})" if card_last4 else ""
+                        base_message = (
+                            f"一键到底任务完成: {message}{suffix}"
+                            if step5_needed
+                            else "一键全自动续跑完成（已跳过完成步骤）"
                         )
                         result = {
                             "success": ok,
-                            "message": f"一键到底任务完成: {message}{suffix}",
-                            "card_last4": card.card_number[-4:]
-                            if card.card_number
-                            else "",
+                            "message": base_message,
+                            "card_last4": card_last4,
                             "account_updates": {
                                 **account_updates,
-                                **({"card_bound": True} if ok else {}),
+                                **({"card_bound": True} if ok and step5_needed else {}),
                             },
                         }
 
@@ -973,6 +1073,13 @@ def security_change_2fa_task(
                 "totp_secret": totp_secret,
             }
 
+            metadata = account.metadata or {}
+            profile_id = None
+            if isinstance(metadata, dict):
+                geekez_profile = metadata.get("geekez_profile")
+                if isinstance(geekez_profile, dict):
+                    profile_id = geekez_profile.get("profile_id")
+
             self.update_state(
                 state="PROGRESS",
                 meta={
@@ -985,12 +1092,32 @@ def security_change_2fa_task(
             # 重要：Playwright 对象绑定 event loop，必须在同一个 asyncio.run() 生命周期内
             # 完成 acquire -> login -> action -> release，避免跨 loop 使用导致挂死。
             async def run_all():
-                instance = await browser_pool.acquire_by_email(
-                    email=account.email,
-                    task_id=str(self.request.id),
-                    account_info=account_info,
-                    browser_type=bt,
-                )
+                instance = None
+                used_profile_id = None
+
+                if profile_id:
+                    instance = await browser_pool.acquire_by_profile_id(
+                        profile_id=str(profile_id),
+                        task_id=str(self.request.id),
+                        browser_type=bt,
+                    )
+                    if instance:
+                        used_profile_id = str(profile_id)
+                    else:
+                        task_logger.event(
+                            step="browser",
+                            action="acquire",
+                            level="warning",
+                            message=f"failed to acquire by profile_id: {profile_id}, fallback to email",
+                        )
+
+                if not instance:
+                    instance = await browser_pool.acquire_by_email(
+                        email=account.email,
+                        task_id=str(self.request.id),
+                        account_info=account_info,
+                        browser_type=bt,
+                    )
                 if not instance or not instance.page:
                     task_logger.event(
                         step="browser",
@@ -1056,16 +1183,27 @@ def security_change_2fa_task(
                     )
                 finally:
                     try:
-                        await asyncio.wait_for(
-                            asyncio.shield(
-                                browser_pool.release_by_email(
-                                    account.email,
-                                    browser_type=bt,
-                                    close=True,
-                                )
-                            ),
-                            timeout=30,
-                        )
+                        if used_profile_id:
+                            await asyncio.wait_for(
+                                asyncio.shield(
+                                    browser_pool.release(
+                                        used_profile_id,
+                                        close=True,
+                                    )
+                                ),
+                                timeout=30,
+                            )
+                        else:
+                            await asyncio.wait_for(
+                                asyncio.shield(
+                                    browser_pool.release_by_email(
+                                        account.email,
+                                        browser_type=bt,
+                                        close=True,
+                                    )
+                                ),
+                                timeout=30,
+                            )
                     except Exception:
                         logger.warning(
                             "Failed to release browser instance (2fa)",

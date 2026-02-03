@@ -396,6 +396,61 @@ class BrowserPool:
             )
             return None
 
+    async def acquire_by_profile_id(
+        self,
+        profile_id: str,
+        task_id: str,
+        browser_type: Optional[BrowserType] = None,
+        wait_seconds: int = 15,
+    ) -> Optional[BrowserInstance]:
+        """
+        通过 Profile ID 获取浏览器实例
+
+        Args:
+            profile_id: Geekez/BitBrowser 的 Profile ID
+            task_id: 任务ID
+            browser_type: 浏览器类型 (可选, 默认使用系统默认)
+            wait_seconds: 等待获取实例的秒数
+
+        Returns:
+            BrowserInstance: 浏览器实例
+        """
+        if not profile_id:
+            return None
+
+        try:
+            bt = browser_type or self.browser_manager._default_type
+            api = self.browser_manager.get_api(bt)
+
+            launch_info = api.launch_profile(str(profile_id))
+            if not launch_info:
+                self.logger.error(f"Failed to launch browser for profile {profile_id}")
+                return None
+
+            ws_endpoint = launch_info.ws_endpoint or launch_info.cdp_endpoint
+            for _ in range(max(1, int(wait_seconds))):
+                inst = await self.acquire(
+                    browser_id=str(profile_id),
+                    ws_endpoint=ws_endpoint,
+                    task_id=task_id,
+                    browser_type=bt,
+                )
+                if inst and inst.page:
+                    return inst
+                await asyncio.sleep(1)
+
+            self.logger.warning(
+                f"Failed to acquire browser instance for profile {profile_id} after {wait_seconds}s. pool_stats={self.get_pool_stats()}"
+            )
+            return None
+
+        except Exception as e:
+            self.logger.error(
+                f"Error acquiring browser for profile {profile_id}: {e}",
+                exc_info=True,
+            )
+            return None
+
     async def release_by_email(
         self,
         email: str,
