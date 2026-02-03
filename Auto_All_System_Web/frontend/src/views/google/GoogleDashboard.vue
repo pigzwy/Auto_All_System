@@ -49,7 +49,7 @@
 
     <!-- 统计卡片 -->
     <div class="grid grid-cols-1 gap-5 sm:grid-cols-2 md:grid-cols-4">
-      <div class="relative overflow-hidden rounded-xl bg-gradient-to-br from-indigo-500 to-fuchsia-500 p-5 text-white shadow-sm">
+      <div class="relative overflow-hidden rounded-xl bg-gradient-to-br from-sky-500 to-emerald-500 p-5 text-white shadow-sm">
         <div class="flex items-center justify-between">
           <div>
             <div class="text-3xl font-bold leading-none">{{ statistics.total_accounts }}</div>
@@ -59,7 +59,7 @@
         </div>
       </div>
 
-      <div class="relative overflow-hidden rounded-xl bg-gradient-to-br from-emerald-500 to-cyan-400 p-5 text-white shadow-sm">
+      <div class="relative overflow-hidden rounded-xl bg-gradient-to-br from-emerald-500 to-teal-400 p-5 text-white shadow-sm">
         <div class="flex items-center justify-between">
           <div>
             <div class="text-3xl font-bold leading-none">{{ statistics.status_breakdown.subscribed || 0 }}</div>
@@ -69,7 +69,7 @@
         </div>
       </div>
 
-      <div class="relative overflow-hidden rounded-xl bg-gradient-to-br from-sky-500 to-cyan-400 p-5 text-white shadow-sm">
+      <div class="relative overflow-hidden rounded-xl bg-gradient-to-br from-amber-500 to-orange-400 p-5 text-white shadow-sm">
         <div class="flex items-center justify-between">
           <div>
             <div class="text-3xl font-bold leading-none">{{ statistics.today_tasks }}</div>
@@ -92,7 +92,7 @@
 
     <!-- 状态分布和最近活动 -->
     <div class="grid grid-cols-1 gap-5 md:grid-cols-2">
-      <Card class="shadow-sm">
+      <Card class="shadow-sm border-border/80 bg-background/80">
         <CardHeader class="pb-3">
           <CardTitle class="text-base">账号状态分布</CardTitle>
         </CardHeader>
@@ -114,7 +114,7 @@
         </CardContent>
       </Card>
 
-      <Card class="shadow-sm">
+      <Card class="shadow-sm border-border/80 bg-background/80">
         <CardHeader class="pb-3">
           <CardTitle class="text-base">最近活动</CardTitle>
         </CardHeader>
@@ -145,7 +145,7 @@
     </div>
 
     <!-- 快速操作 -->
-    <Card class="shadow-sm">
+      <Card class="shadow-sm border-border/80 bg-background/80">
       <CardHeader class="pb-3">
         <CardTitle class="text-base">快速操作</CardTitle>
       </CardHeader>

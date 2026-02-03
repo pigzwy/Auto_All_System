@@ -1,13 +1,13 @@
 <template>
   <div class="space-y-6 p-5">
-    <Card class="shadow-sm">
+    <Card class="shadow-sm border-border/80 bg-background/80">
       <CardContent class="px-4 py-3">
         <PageHeader @back="$router.push('/admin/google-business')" content="卡信息管理" />
       </CardContent>
     </Card>
 
     <!--搜索和操作 -->
-    <Card class="shadow-sm">
+    <Card class="shadow-sm border-border/80 bg-background/80">
       <CardContent class="space-y-4 p-6">
         <SimpleForm :inline="true" :model="searchForm">
         <SimpleFormItem label="搜索">
@@ -64,25 +64,25 @@
 
     <!-- 统计卡片 -->
     <div class="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-4">
-      <Card class="shadow-sm transition-shadow hover:shadow-md">
+      <Card class="shadow-sm transition-shadow hover:shadow-md border-border/80 bg-background/80">
         <CardContent class="p-6 text-center">
           <div class="text-3xl font-bold leading-none text-foreground">{{ cardStats.total || 0 }}</div>
           <div class="mt-2 text-sm text-muted-foreground">总卡片数</div>
         </CardContent>
       </Card>
-      <Card class="shadow-sm transition-shadow hover:shadow-md">
+      <Card class="shadow-sm transition-shadow hover:shadow-md border-border/80 bg-background/80">
         <CardContent class="p-6 text-center">
           <div class="text-3xl font-bold leading-none text-emerald-600">{{ cardStats.active || 0 }}</div>
           <div class="mt-2 text-sm text-muted-foreground">可用卡片</div>
         </CardContent>
       </Card>
-      <Card class="shadow-sm transition-shadow hover:shadow-md">
+      <Card class="shadow-sm transition-shadow hover:shadow-md border-border/80 bg-background/80">
         <CardContent class="p-6 text-center">
           <div class="text-3xl font-bold leading-none text-rose-600">{{ cardStats.inactive || 0 }}</div>
           <div class="mt-2 text-sm text-muted-foreground">禁用卡片</div>
         </CardContent>
       </Card>
-      <Card class="shadow-sm transition-shadow hover:shadow-md">
+      <Card class="shadow-sm transition-shadow hover:shadow-md border-border/80 bg-background/80">
         <CardContent class="p-6 text-center">
           <div class="text-3xl font-bold leading-none text-amber-600">{{ cardStats.times_used || 0 }}</div>
           <div class="mt-2 text-sm text-muted-foreground">总使用次数</div>
@@ -91,7 +91,7 @@
     </div>
 
     <!-- 卡片列表 -->
-    <Card class="shadow-sm">
+    <Card class="shadow-sm border-border/80 bg-background/80">
       <CardHeader class="pb-3">
         <CardTitle class="text-base">卡片列表</CardTitle>
       </CardHeader>

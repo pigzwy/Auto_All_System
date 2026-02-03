@@ -1,20 +1,20 @@
 <template>
-  <div class="relative min-h-screen overflow-hidden bg-muted/30">
+  <div class="relative min-h-screen overflow-hidden bg-gradient-to-br from-muted/40 via-background to-muted/60">
     <div
       aria-hidden="true"
-      class="pointer-events-none absolute inset-0 bg-gradient-to-br from-indigo-500/15 via-sky-500/10 to-fuchsia-500/15"
+      class="pointer-events-none absolute inset-0 bg-gradient-to-br from-sky-500/15 via-emerald-500/10 to-amber-500/15"
     />
     <div
       aria-hidden="true"
-      class="pointer-events-none absolute -top-28 -right-24 h-80 w-80 rounded-full bg-primary/15 blur-3xl"
+      class="pointer-events-none absolute -top-28 -right-24 h-80 w-80 rounded-full bg-sky-400/20 blur-3xl"
     />
     <div
       aria-hidden="true"
-      class="pointer-events-none absolute -bottom-28 -left-24 h-80 w-80 rounded-full bg-secondary/40 blur-3xl"
+      class="pointer-events-none absolute -bottom-28 -left-24 h-80 w-80 rounded-full bg-amber-400/25 blur-3xl"
     />
 
     <div class="relative flex min-h-screen items-center justify-center p-6">
-      <Card class="w-full max-w-md overflow-hidden rounded-2xl border border-border bg-card text-card-foreground shadow-xl">
+      <Card class="w-full max-w-md overflow-hidden rounded-2xl border border-border/80 bg-card text-card-foreground shadow-2xl">
         <CardHeader>
           <div class="flex items-start gap-3">
             <div class="flex h-10 w-10 items-center justify-center rounded-xl bg-primary/10 font-semibold text-primary">
@@ -66,7 +66,7 @@
               <p v-if="errors.password" class="text-xs text-rose-600">{{ errors.password }}</p>
             </div>
 
-            <Button type="submit" class="w-full gap-2" :disabled="loading">
+            <Button type="submit" class="h-11 w-full gap-2" :disabled="loading">
               <Loading v-if="loading" class="h-4 w-4 animate-spin" />
               登录
             </Button>

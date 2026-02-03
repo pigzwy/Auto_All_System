@@ -1,6 +1,6 @@
 <template>
   <div class="space-y-6 p-5">
-    <Card class="shadow-sm">
+    <Card class="shadow-sm border-border/80 bg-background/80">
       <CardContent class="px-4 py-3">
         <PageHeader @back="$router.push('/admin/google-business/tasks')" :content="`任务详情 #${taskId}`" />
       </CardContent>
@@ -8,7 +8,7 @@
 
     <div class="space-y-6">
       <div v-loading="loading">
-        <Card class="shadow-sm">
+        <Card class="shadow-sm border-border/80 bg-background/80">
           <CardHeader class="pb-3">
             <div class="flex items-center justify-between gap-4">
               <CardTitle class="text-base">任务信息</CardTitle>
@@ -91,7 +91,7 @@
       </div>
 
       <!-- 任务账号列表 -->
-      <Card class="shadow-sm">
+      <Card class="shadow-sm border-border/80 bg-background/80">
         <CardHeader class="pb-3">
           <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <CardTitle class="text-base">任务账号列表</CardTitle>
@@ -172,7 +172,7 @@
       </Card>
 
       <!-- 任务日志 -->
-      <Card class="shadow-sm">
+      <Card class="shadow-sm border-border/80 bg-background/80">
         <CardHeader class="pb-3">
           <div class="flex items-center justify-between gap-4">
             <CardTitle class="text-base">任务日志</CardTitle>

@@ -5,7 +5,7 @@
       <p class="mt-1 text-sm text-muted-foreground">用于审计关键操作、排查异常行为。</p>
     </div>
 
-    <Card class="shadow-sm">
+    <Card class="shadow-sm border-border/80 bg-background/80">
       <CardContent class="space-y-4 p-6">
         <div class="flex flex-wrap items-end gap-4">
           <div class="grid gap-2">

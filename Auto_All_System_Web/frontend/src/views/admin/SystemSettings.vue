@@ -3,12 +3,12 @@
     <h1 class="text-2xl font-semibold text-foreground">系统设置</h1>
 
     <div class="grid grid-cols-1 gap-5 lg:grid-cols-2">
-      <Card class="shadow-sm">
+      <Card class="shadow-sm border-border/80 bg-background/80">
         <CardHeader class="pb-3">
           <CardTitle class="text-base">基本设置</CardTitle>
         </CardHeader>
         <CardContent>
-          <SimpleForm label-width="120px">
+          <SimpleForm :model="settings" label-width="120px">
             <SimpleFormItem label="系统名称">
               <TextInput v-model="settings.systemName" />
             </SimpleFormItem>
@@ -27,12 +27,12 @@
         </CardContent>
       </Card>
 
-      <Card class="shadow-sm">
+      <Card class="shadow-sm border-border/80 bg-background/80">
         <CardHeader class="pb-3">
           <CardTitle class="text-base">安全设置</CardTitle>
         </CardHeader>
         <CardContent>
-          <SimpleForm label-width="120px">
+          <SimpleForm :model="settings" label-width="120px">
             <SimpleFormItem label="密码强度">
               <SelectNative v-model="settings.passwordStrength">
                 <SelectOption label="低" value="low" />
@@ -56,12 +56,12 @@
     </div>
 
     <div class="grid grid-cols-1 gap-5 lg:grid-cols-2">
-      <Card class="shadow-sm">
+      <Card class="shadow-sm border-border/80 bg-background/80">
         <CardHeader class="pb-3">
           <CardTitle class="text-base">支付设置</CardTitle>
         </CardHeader>
         <CardContent v-loading="paymentLoading">
-          <SimpleForm label-width="120px">
+          <SimpleForm :model="settings" label-width="120px">
             <SimpleFormItem 
               v-for="config in paymentConfigs" 
               :key="config.id" 
@@ -80,12 +80,12 @@
         </CardContent>
       </Card>
 
-      <Card class="shadow-sm">
+      <Card class="shadow-sm border-border/80 bg-background/80">
         <CardHeader class="pb-3">
           <CardTitle class="text-base">邮件设置</CardTitle>
         </CardHeader>
         <CardContent>
-          <SimpleForm label-width="120px">
+          <SimpleForm :model="settings" label-width="120px">
             <SimpleFormItem label="SMTP服务器">
               <TextInput v-model="settings.smtpHost" />
             </SimpleFormItem>

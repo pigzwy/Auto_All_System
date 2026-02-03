@@ -4,12 +4,12 @@
       <h1 class="text-2xl font-semibold text-foreground">个人资料</h1>
     </div>
 
-    <Card class="bg-card text-card-foreground">
+    <Card class="bg-card text-card-foreground shadow-sm border-border/80">
       <CardHeader>
         <CardTitle>基本信息</CardTitle>
       </CardHeader>
       <CardContent>
-        <form @submit.prevent="handleUpdateProfile" class="space-y-4 max-w-lg">
+        <form @submit.prevent="handleUpdateProfile" class="space-y-4 max-w-lg rounded-xl border border-border/80 bg-background/70 p-4">
           <div class="grid gap-2">
             <label class="text-sm font-medium">用户名</label>
             <Input v-model="form.username" disabled />
@@ -31,12 +31,12 @@
       </CardContent>
     </Card>
 
-    <Card class="bg-card text-card-foreground">
+    <Card class="bg-card text-card-foreground shadow-sm border-border/80">
       <CardHeader>
         <CardTitle>修改密码</CardTitle>
       </CardHeader>
       <CardContent>
-        <form @submit.prevent="handleChangePassword" class="space-y-4 max-w-lg">
+        <form @submit.prevent="handleChangePassword" class="space-y-4 max-w-lg rounded-xl border border-border/80 bg-background/70 p-4">
           <div class="grid gap-2">
             <label class="text-sm font-medium">旧密码</label>
             <Input v-model="pwdForm.old_password" type="password" autocomplete="current-password" />

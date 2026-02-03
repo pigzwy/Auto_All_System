@@ -4,7 +4,7 @@
 
     <!-- 概览统计 -->
     <div class="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-4">
-      <Card v-for="stat in overviewStats" :key="stat.title" class="shadow-sm transition-shadow hover:shadow-md">
+      <Card v-for="stat in overviewStats" :key="stat.title" class="shadow-sm transition-shadow hover:shadow-md border-border/80 bg-background/80">
         <CardContent class="p-6">
           <div class="flex items-center gap-4">
             <div class="flex h-16 w-16 items-center justify-center rounded-xl" :class="stat.iconClass">
@@ -24,7 +24,7 @@
 
     <!-- 图表区域 -->
     <div class="grid grid-cols-1 gap-5 lg:grid-cols-2">
-      <Card class="shadow-sm transition-shadow hover:shadow-md">
+      <Card class="shadow-sm transition-shadow hover:shadow-md border-border/80 bg-background/80">
         <CardHeader class="pb-3">
           <CardTitle class="text-base">用户增长趋势</CardTitle>
         </CardHeader>
@@ -37,7 +37,7 @@
         </CardContent>
       </Card>
 
-      <Card class="shadow-sm transition-shadow hover:shadow-md">
+      <Card class="shadow-sm transition-shadow hover:shadow-md border-border/80 bg-background/80">
         <CardHeader class="pb-3">
           <CardTitle class="text-base">任务完成率</CardTitle>
         </CardHeader>
@@ -52,7 +52,7 @@
     </div>
 
     <div class="grid grid-cols-1 gap-5 lg:grid-cols-2">
-      <Card class="shadow-sm transition-shadow hover:shadow-md">
+      <Card class="shadow-sm transition-shadow hover:shadow-md border-border/80 bg-background/80">
         <CardHeader class="pb-3">
           <CardTitle class="text-base">收入统计</CardTitle>
         </CardHeader>
@@ -65,7 +65,7 @@
         </CardContent>
       </Card>
 
-      <Card class="shadow-sm transition-shadow hover:shadow-md">
+      <Card class="shadow-sm transition-shadow hover:shadow-md border-border/80 bg-background/80">
         <CardHeader class="pb-3">
           <CardTitle class="text-base">专区使用分布</CardTitle>
         </CardHeader>
@@ -93,7 +93,7 @@ const overviewStats = ref([
     trend: '↑ 8.5%',
     trendClass: 'text-emerald-600',
     icon: User,
-    iconClass: 'bg-gradient-to-br from-indigo-500 to-fuchsia-500 text-white'
+    iconClass: 'bg-gradient-to-br from-sky-500 to-emerald-500 text-white'
   },
   {
     title: '今日任务数',
@@ -101,7 +101,7 @@ const overviewStats = ref([
     trend: '↑ 12.3%',
     trendClass: 'text-emerald-600',
     icon: List,
-    iconClass: 'bg-gradient-to-br from-emerald-500 to-cyan-400 text-white'
+    iconClass: 'bg-gradient-to-br from-emerald-500 to-teal-400 text-white'
   },
   {
     title: '今日收入',

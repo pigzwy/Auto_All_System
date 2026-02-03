@@ -1,6 +1,6 @@
 <template>
   <div class="space-y-6">
-    <Card class="bg-card text-card-foreground">
+    <Card class="bg-gradient-to-br from-background to-muted/20 text-card-foreground shadow-sm border-border/80">
       <CardHeader>
         <CardTitle class="text-3xl">💰 账户充值</CardTitle>
         <CardDescription class="text-base flex items-center gap-2">
@@ -11,7 +11,7 @@
 
     <div class="grid gap-6 md:grid-cols-3">
       <div class="md:col-span-2 space-y-6">
-        <Card class="bg-card text-card-foreground">
+        <Card class="bg-card text-card-foreground shadow-sm border-border/80">
           <CardHeader>
             <CardTitle>充值金额</CardTitle>
           </CardHeader>
@@ -20,8 +20,8 @@
               <div
                 v-for="amount in amountOptions"
                 :key="amount"
-                class="relative flex flex-col items-center justify-center p-6 border-2 rounded-lg cursor-pointer transition-all hover:-translate-y-1 hover:shadow-md"
-                :class="selectedAmount === amount ? 'border-primary bg-primary/5' : 'border-border bg-card hover:border-primary/50'"
+                class="relative flex flex-col items-center justify-center rounded-2xl border-2 bg-background/70 p-6 transition-all hover:-translate-y-1 hover:shadow-md cursor-pointer"
+                :class="selectedAmount === amount ? 'border-primary bg-primary/5 shadow-md' : 'border-border hover:border-primary/50 hover:bg-primary/5'"
                 @click="selectedAmount = amount; customAmount = undefined"
               >
                 <div class="text-2xl font-bold">¥{{ amount }}</div>
@@ -51,8 +51,8 @@
                 <div
                   v-for="method in availablePaymentMethods"
                   :key="method.gateway"
-                  class="flex flex-col items-center justify-center p-4 border-2 rounded-lg cursor-pointer transition-all"
-                  :class="selectedPayment === method.gateway ? 'border-primary bg-primary/5' : 'border-border hover:border-primary/50'"
+                  class="flex flex-col items-center justify-center rounded-xl border-2 bg-background/70 p-4 transition-all hover:-translate-y-0.5 hover:shadow-sm cursor-pointer"
+                  :class="selectedPayment === method.gateway ? 'border-primary bg-primary/5 shadow-sm' : 'border-border hover:border-primary/50 hover:bg-primary/5'"
                   @click="selectedPayment = method.gateway"
                 >
                   <div class="text-3xl mb-2">{{ method.icon }}</div>
@@ -61,7 +61,7 @@
               </div>
             </div>
 
-            <div v-if="selectedPayment === 'card_code'" class="mt-6 p-4 bg-muted/30 rounded-lg">
+            <div v-if="selectedPayment === 'card_code'" class="mt-6 rounded-xl border border-border/80 bg-gradient-to-br from-muted/30 via-background to-muted/10 p-4">
               <div class="space-y-2">
                 <label class="text-sm font-medium">充值卡密</label>
                 <div class="relative">
@@ -83,7 +83,7 @@
       </div>
 
       <div class="space-y-6">
-        <Card class="bg-card text-card-foreground">
+        <Card class="bg-gradient-to-br from-background to-muted/20 text-card-foreground shadow-sm border-border/80">
           <CardHeader>
             <CardTitle>订单信息</CardTitle>
           </CardHeader>
@@ -104,7 +104,7 @@
 
             <Button
               size="lg"
-              class="w-full mt-4"
+              class="mt-4 h-11 w-full"
               :disabled="!canSubmit"
               @click="handleRecharge"
             >
@@ -112,7 +112,7 @@
               立即充值
             </Button>
 
-            <div class="mt-6 p-4 bg-amber-500/10 rounded-lg border border-amber-500/20">
+            <div class="mt-6 rounded-xl border border-amber-500/20 bg-amber-500/10 p-4">
               <div class="flex gap-2">
                 <Info class="h-5 w-5 text-amber-600 shrink-0" />
                 <div>
@@ -129,7 +129,7 @@
           </CardContent>
         </Card>
 
-        <Card class="bg-card text-card-foreground">
+        <Card class="bg-card text-card-foreground shadow-sm border-border/80">
           <CardHeader>
             <CardTitle>充值记录</CardTitle>
           </CardHeader>
@@ -138,7 +138,7 @@
               <div v-for="record in rechargeHistory" :key="record.id" class="relative pl-6">
                 <div class="absolute -left-[21px] top-1 h-3 w-3 rounded-full border-2 border-primary bg-background"></div>
                 <div class="text-sm text-muted-foreground mb-1">{{ formatDate(record.created_at) }}</div>
-                <div class="flex items-center justify-between p-3 rounded-lg border border-border bg-muted/20">
+                <div class="flex items-center justify-between rounded-lg border border-border bg-background/70 p-3 shadow-sm">
                   <span class="font-medium">充值 ¥{{ record.amount }}</span>
                   <Badge variant="default" class="bg-emerald-600 hover:bg-emerald-700">已完成</Badge>
                 </div>

@@ -6,7 +6,7 @@
 
     <!-- 余额卡片 -->
     <div class="grid gap-6 md:grid-cols-2">
-      <Card class="bg-card text-card-foreground">
+      <Card class="bg-gradient-to-br from-background to-muted/20 text-card-foreground shadow-sm border-border/80">
         <CardHeader>
           <CardTitle>账户余额</CardTitle>
         </CardHeader>
@@ -21,7 +21,7 @@
         </CardContent>
       </Card>
 
-      <Card class="bg-card text-card-foreground">
+      <Card class="bg-gradient-to-br from-background to-muted/20 text-card-foreground shadow-sm border-border/80">
         <CardHeader>
           <CardTitle>冻结余额</CardTitle>
         </CardHeader>
@@ -35,7 +35,7 @@
     </div>
 
     <!-- 交易记录 -->
-    <Card class="bg-card text-card-foreground">
+    <Card class="bg-card text-card-foreground shadow-sm border-border/80">
       <CardHeader>
         <div class="flex items-center justify-between">
           <CardTitle>交易记录</CardTitle>
@@ -63,7 +63,7 @@
           </Select>
         </div>
 
-        <div class="overflow-x-auto rounded-xl border border-border">
+        <div class="overflow-x-auto rounded-xl border border-border bg-background/70 shadow-sm">
           <Table>
             <TableHeader>
               <TableRow>

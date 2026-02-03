@@ -1,8 +1,8 @@
 <template>
-  <div class="flex h-screen w-full bg-muted/30 text-foreground">
+  <div class="flex h-screen w-full bg-gradient-to-br from-muted/30 via-background to-muted/40 text-foreground">
     <!-- 侧边栏 -->
     <aside
-      class="flex flex-col bg-slate-950 text-slate-100 shadow-lg transition-all duration-200"
+      class="flex flex-col bg-gradient-to-b from-slate-950 via-slate-950 to-slate-900 text-slate-100 shadow-lg transition-all duration-200"
       :class="isSidebarCollapsed ? 'w-16' : 'w-64'"
     >
       <!-- Logo -->
@@ -113,7 +113,7 @@
           <RouterLink
             v-if="userStore.user?.is_staff"
             to="/admin"
-            class="mx-2 my-1 mt-6 flex items-center gap-3 rounded-lg bg-gradient-to-r from-indigo-500 to-fuchsia-500 px-3 py-2 text-sm font-bold text-white shadow-sm shadow-indigo-500/20 transition-colors hover:from-indigo-400 hover:to-fuchsia-400"
+            class="mx-2 my-1 mt-6 flex items-center gap-3 rounded-lg bg-gradient-to-r from-sky-500 to-emerald-500 px-3 py-2 text-sm font-semibold text-white shadow-sm shadow-sky-500/20 transition-colors hover:from-sky-400 hover:to-emerald-400"
             :class="isSidebarCollapsed ? 'justify-center' : 'justify-start'"
           >
             <Setting class="h-4 w-4 shrink-0" />
@@ -140,11 +140,11 @@
     <!-- 主内容区 -->
     <div class="flex-1 flex flex-col overflow-hidden">
       <!-- 顶部导航栏 -->
-      <header class="h-16 bg-background border-b border-border flex items-center justify-between px-6 shadow-sm z-10">
+      <header class="sticky top-0 z-20 flex h-16 items-center justify-between border-b border-border/80 bg-background/85 px-6 shadow-sm backdrop-blur">
         <div class="flex items-center gap-2">
           <button
             type="button"
-            class="inline-flex h-9 w-9 items-center justify-center rounded-md border border-border bg-background text-muted-foreground transition-colors hover:bg-muted"
+            class="inline-flex h-9 w-9 items-center justify-center rounded-md border border-border bg-background text-muted-foreground shadow-sm transition-colors hover:bg-muted"
             @click="isSidebarCollapsed = !isSidebarCollapsed"
             :title="isSidebarCollapsed ? '展开侧边栏' : '收起侧边栏'"
           >
@@ -163,7 +163,7 @@
           <!-- 通知铃铛 (示例) -->
           <button type="button" class="relative flex h-8 w-8 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted">
             <Bell class="h-4 w-4" />
-            <span class="absolute top-1.5 right-1.5 w-2 h-2 bg-red-500 rounded-full border border-white"></span>
+            <span class="absolute right-1.5 top-1.5 h-2 w-2 rounded-full border border-background bg-red-500"></span>
 
           </button>
 
@@ -173,15 +173,15 @@
                 type="button"
                 class="flex items-center gap-2 rounded-lg px-2 py-1 transition-colors hover:bg-muted"
               >
-                <Avatar size="sm" class="h-8 w-8 bg-blue-100 text-blue-600 border border-blue-200">
+                <Avatar size="sm" class="h-8 w-8 border border-primary/20 bg-primary/10 text-primary">
                   <AvatarImage v-if="userStore.user?.avatar" :src="userStore.user.avatar" alt="" />
-                  <AvatarFallback class="bg-blue-100 text-blue-600">{{ userStore.user?.username?.[0]?.toUpperCase() }}</AvatarFallback>
+                  <AvatarFallback class="bg-primary/10 text-primary">{{ userStore.user?.username?.[0]?.toUpperCase() }}</AvatarFallback>
                 </Avatar>
                 <div class="hidden md:flex flex-col items-start">
-                  <span class="text-sm font-medium text-gray-700 leading-none">{{ userStore.user?.username }}</span>
-                  <span class="mt-1 text-xs text-gray-400">余额: ¥{{ userStore.user?.balance || '0.00' }}</span>
+                  <span class="text-sm font-medium leading-none text-foreground">{{ userStore.user?.username }}</span>
+                  <span class="mt-1 text-xs text-muted-foreground">余额: ¥{{ userStore.user?.balance || '0.00' }}</span>
                 </div>
-                <ArrowDown class="h-4 w-4 text-gray-400" />
+                <ArrowDown class="h-4 w-4 text-muted-foreground" />
               </button>
             </DropdownMenuTrigger>
 
@@ -210,7 +210,7 @@
       </header>
 
       <!-- 内容区域 -->
-      <main class="flex-1 overflow-auto bg-muted/20 p-6">
+      <main class="flex-1 overflow-auto bg-gradient-to-br from-muted/30 via-background to-muted/10 p-6">
         <div class="max-w-7xl mx-auto">
           <router-view v-slot="{ Component }">
             <Transition

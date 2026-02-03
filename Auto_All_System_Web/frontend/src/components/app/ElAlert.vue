@@ -1,5 +1,5 @@
 <template>
-  <div class="rounded-lg border border-border bg-muted/10 p-4">
+  <div class="rounded-xl border border-border/80 bg-gradient-to-br from-muted/20 via-background to-muted/10 p-4">
     <div class="text-sm text-foreground">
       <slot name="title">
         <strong v-if="title">{{ title }}</strong>

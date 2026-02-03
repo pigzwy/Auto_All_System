@@ -12,7 +12,7 @@
       <Card class="shadow-sm transition-shadow hover:shadow-md">
         <CardContent class="p-6">
           <div class="flex items-center gap-4">
-            <div class="flex h-12 w-12 items-center justify-center rounded-xl bg-gradient-to-br from-indigo-500 to-fuchsia-500 text-white shadow-sm">
+            <div class="flex h-12 w-12 items-center justify-center rounded-xl bg-gradient-to-br from-sky-500 to-emerald-500 text-white shadow-sm">
               <Icon :size="22"><User /></Icon>
             </div>
             <div class="min-w-0">
@@ -26,7 +26,7 @@
       <Card class="shadow-sm transition-shadow hover:shadow-md">
         <CardContent class="p-6">
           <div class="flex items-center gap-4">
-            <div class="flex h-12 w-12 items-center justify-center rounded-xl bg-gradient-to-br from-emerald-500 to-sky-500 text-white shadow-sm">
+            <div class="flex h-12 w-12 items-center justify-center rounded-xl bg-gradient-to-br from-amber-500 to-orange-500 text-white shadow-sm">
               <Icon :size="22"><List /></Icon>
             </div>
             <div class="min-w-0">
@@ -40,7 +40,7 @@
       <Card class="shadow-sm transition-shadow hover:shadow-md">
         <CardContent class="p-6">
           <div class="flex items-center gap-4">
-            <div class="flex h-12 w-12 items-center justify-center rounded-xl bg-gradient-to-br from-amber-500 to-orange-500 text-white shadow-sm">
+            <div class="flex h-12 w-12 items-center justify-center rounded-xl bg-gradient-to-br from-emerald-500 to-teal-500 text-white shadow-sm">
               <Icon :size="22"><Money /></Icon>
             </div>
             <div class="min-w-0">
@@ -54,7 +54,7 @@
       <Card class="shadow-sm transition-shadow hover:shadow-md">
         <CardContent class="p-6">
           <div class="flex items-center gap-4">
-            <div class="flex h-12 w-12 items-center justify-center rounded-xl bg-gradient-to-br from-cyan-500 to-emerald-500 text-white shadow-sm">
+            <div class="flex h-12 w-12 items-center justify-center rounded-xl bg-gradient-to-br from-cyan-500 to-sky-500 text-white shadow-sm">
               <Icon :size="22"><CreditCard /></Icon>
             </div>
             <div class="min-w-0">
@@ -76,11 +76,11 @@
           </div>
         </CardHeader>
         <CardContent>
-          <div class="h-[300px]">
-            <div class="flex h-full items-center justify-center rounded-xl border border-border bg-muted/30 text-sm text-muted-foreground">
-              用户增长图表
+            <div class="h-[300px]">
+              <div class="flex h-full items-center justify-center rounded-xl border border-border bg-gradient-to-br from-muted/40 via-background to-muted/10 text-sm text-muted-foreground">
+                用户增长图表
+              </div>
             </div>
-          </div>
         </CardContent>
       </Card>
 
@@ -92,17 +92,17 @@
           </div>
         </CardHeader>
         <CardContent>
-          <div class="h-[300px]">
-            <div class="flex h-full items-center justify-center rounded-xl border border-border bg-muted/30 text-sm text-muted-foreground">
-              任务完成率图表
+            <div class="h-[300px]">
+              <div class="flex h-full items-center justify-center rounded-xl border border-border bg-gradient-to-br from-muted/40 via-background to-muted/10 text-sm text-muted-foreground">
+                任务完成率图表
+              </div>
             </div>
-          </div>
         </CardContent>
       </Card>
     </div>
 
     <!-- 快速操作 -->
-    <Card class="shadow-sm">
+    <Card class="shadow-sm border-border/80 bg-background/80">
       <CardHeader>
         <div class="flex items-center justify-between">
           <CardTitle class="text-base">快速操作</CardTitle>
@@ -115,7 +115,7 @@
             v-for="action in quickActions"
             :key="action.name"
             type="button"
-            class="group w-full rounded-xl border border-border bg-background/60 p-4 text-left shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md"
+            class="group w-full rounded-2xl border border-border bg-background/70 p-4 text-left shadow-sm transition-all hover:-translate-y-0.5 hover:border-primary/30 hover:bg-primary/5 hover:shadow-md"
             @click="handleAction(action.route)"
           >
             <div class="flex items-center gap-3">
@@ -135,7 +135,7 @@
     </Card>
 
     <!-- 最近活动 -->
-    <Card class="shadow-sm">
+    <Card class="shadow-sm border-border/80 bg-background/80">
       <CardHeader>
         <div class="flex items-center justify-between">
           <CardTitle class="text-base">最近活动</CardTitle>

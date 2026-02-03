@@ -19,7 +19,7 @@
     </div>
 
     <!-- 筛选和搜索 -->
-    <Card class="shadow-sm">
+    <Card class="shadow-sm border-border/80 bg-background/80">
       <CardContent class="p-5">
         <div class="grid grid-cols-1 gap-4 md:grid-cols-12">
           <div class="md:col-span-3">
@@ -64,7 +64,7 @@
     </Card>
 
     <!-- 数据表格 -->
-    <Card class="shadow-sm">
+    <Card class="shadow-sm border-border/80 bg-background/80">
       <CardHeader class="pb-3">
         <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <CardTitle class="text-base">账号列表</CardTitle>

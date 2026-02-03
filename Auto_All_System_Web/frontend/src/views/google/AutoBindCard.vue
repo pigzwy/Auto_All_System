@@ -1,6 +1,6 @@
 <template>
   <div class="space-y-6 p-5">
-    <Card class="shadow-sm">
+    <Card class="shadow-sm border-border/80 bg-background/80">
       <CardHeader>
         <div class="flex items-center justify-between gap-4">
           <div class="flex items-center gap-2">
@@ -85,28 +85,28 @@
 
         <!-- 统计信息 -->
         <div class="grid grid-cols-2 gap-4 sm:grid-cols-4">
-          <div class="rounded-xl border border-border bg-background/60 p-4 shadow-sm">
+          <div class="rounded-xl border border-border bg-background/70 p-4 shadow-sm">
             <Statistic title="可用卡片" :value="stats.availableCards">
               <template #prefix>
                 <Icon><Tickets /></Icon>
               </template>
             </Statistic>
           </div>
-          <div class="rounded-xl border border-border bg-background/60 p-4 shadow-sm">
+          <div class="rounded-xl border border-border bg-background/70 p-4 shadow-sm">
             <Statistic title="已验证账号" :value="stats.verifiedAccounts">
               <template #prefix>
                 <Icon><User /></Icon>
               </template>
             </Statistic>
           </div>
-          <div class="rounded-xl border border-border bg-background/60 p-4 shadow-sm">
+          <div class="rounded-xl border border-border bg-background/70 p-4 shadow-sm">
             <Statistic title="待绑卡" :value="stats.pendingBindCard">
               <template #prefix>
                 <Icon><Clock /></Icon>
               </template>
             </Statistic>
           </div>
-          <div class="rounded-xl border border-border bg-background/60 p-4 shadow-sm">
+          <div class="rounded-xl border border-border bg-background/70 p-4 shadow-sm">
             <Statistic title="已订阅" :value="stats.subscribed">
               <template #prefix>
                 <Icon><CircleCheck /></Icon>

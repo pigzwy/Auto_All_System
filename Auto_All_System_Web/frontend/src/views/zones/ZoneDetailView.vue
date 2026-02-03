@@ -1,6 +1,6 @@
 <template>
   <div v-loading="loading" class="space-y-6">
-    <Card class="shadow-sm">
+    <Card class="shadow-sm border-border/80 bg-gradient-to-br from-background to-muted/20">
       <CardContent class="px-4 py-3">
         <PageHeader @back="$router.back()">
           <template #content>
@@ -10,7 +10,7 @@
       </CardContent>
     </Card>
 
-    <Card v-if="zone" class="shadow-sm">
+    <Card v-if="zone" class="shadow-sm border-border/80 bg-gradient-to-br from-background to-muted/20">
       <CardContent class="p-6">
         <div class="space-y-3">
           <div>
@@ -20,10 +20,10 @@
 
           <div class="flex flex-wrap items-center gap-3">
             <Badge variant="secondary" class="rounded-full">{{ zone.category }}</Badge>
-            <span class="inline-flex items-center gap-2 rounded-full border border-border bg-muted/30 px-3 py-1 text-sm">
+            <span class="inline-flex items-center gap-2 rounded-full border border-border bg-muted/20 px-3 py-1 text-sm">
               基础价格 <span class="font-semibold text-emerald-600">¥{{ zone.base_price }}</span>
             </span>
-            <span class="inline-flex items-center gap-2 rounded-full border border-border bg-muted/30 px-3 py-1 text-sm">
+            <span class="inline-flex items-center gap-2 rounded-full border border-border bg-muted/20 px-3 py-1 text-sm">
               最低余额 <span class="font-semibold text-amber-600">¥{{ zone.min_balance }}</span>
             </span>
           </div>
@@ -31,7 +31,7 @@
       </CardContent>
     </Card>
 
-    <Card class="shadow-sm">
+    <Card class="shadow-sm border-border/80 bg-background/80">
       <CardHeader class="pb-3">
         <div class="flex items-center justify-between">
           <CardTitle class="text-base">专区配置</CardTitle>
@@ -54,14 +54,14 @@
       </CardContent>
     </Card>
 
-    <Card class="shadow-sm">
+    <Card class="shadow-sm border-border/80 bg-gradient-to-br from-background to-muted/20">
       <CardHeader class="pb-3">
         <CardTitle class="text-base">创建任务</CardTitle>
       </CardHeader>
       <CardContent>
           <div class="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
             <p class="text-sm text-muted-foreground">从当前专区快速创建一个新任务。</p>
-            <Button variant="success" type="button" @click="handleCreateTask">
+            <Button variant="success" type="button" class="gap-2" @click="handleCreateTask">
               <Icon><Plus /></Icon>
               创建新任务
             </Button>

@@ -21,12 +21,12 @@
       </TabsList>
 
       <TabsContent value="my" class="mt-4">
-        <Card class="bg-card text-card-foreground">
+        <Card class="bg-card text-card-foreground shadow-sm">
           <CardContent class="p-0">
-            <div class="overflow-x-auto rounded-xl border border-border">
+            <div class="overflow-x-auto rounded-xl border border-border bg-background/70 shadow-sm">
               <Table>
                 <TableHeader>
-                  <TableRow>
+                  <TableRow class="bg-muted/40">
                     <TableHead class="w-20">ID</TableHead>
                     <TableHead class="min-w-[200px]">卡号</TableHead>
                     <TableHead class="w-32">持卡人</TableHead>
@@ -48,7 +48,7 @@
                       </div>
                     </TableCell>
                   </TableRow>
-                  <TableRow v-else v-for="row in myCards" :key="row.id" class="hover:bg-muted/20">
+                  <TableRow v-else v-for="row in myCards" :key="row.id" class="hover:bg-muted/30">
                     <TableCell class="font-mono text-xs text-muted-foreground">#{{ row.id }}</TableCell>
                     <TableCell class="font-mono font-medium">{{ row.masked_card_number }}</TableCell>
                     <TableCell>{{ row.card_holder || '-' }}</TableCell>
@@ -84,12 +84,12 @@
       </TabsContent>
 
       <TabsContent value="public" class="mt-4">
-        <Card class="bg-card text-card-foreground">
+        <Card class="bg-card text-card-foreground shadow-sm">
           <CardContent class="p-0">
-            <div class="overflow-x-auto rounded-xl border border-border">
+            <div class="overflow-x-auto rounded-xl border border-border bg-background/70 shadow-sm">
               <Table>
                 <TableHeader>
-                  <TableRow>
+                  <TableRow class="bg-muted/40">
                     <TableHead class="w-20">ID</TableHead>
                     <TableHead class="min-w-[180px]">卡类型/银行</TableHead>
                     <TableHead class="w-24">状态</TableHead>
@@ -107,7 +107,7 @@
                       </div>
                     </TableCell>
                   </TableRow>
-                  <TableRow v-else v-for="row in publicCards" :key="row.id" class="hover:bg-muted/20">
+                  <TableRow v-else v-for="row in publicCards" :key="row.id" class="hover:bg-muted/30">
                     <TableCell class="font-mono text-xs text-muted-foreground">#{{ row.id }}</TableCell>
                     <TableCell>
                       <div class="flex items-center gap-2">
@@ -139,7 +139,7 @@
 
     <!-- 添加虚拟卡对话框 -->
     <Dialog v-model:open="showCreateDialog">
-      <DialogContent class="sm:max-w-[500px]">
+      <DialogContent class="sm:max-w-[500px] bg-card/95">
         <DialogHeader>
           <DialogTitle>添加虚拟卡</DialogTitle>
         </DialogHeader>
@@ -203,7 +203,7 @@
 
     <!-- 批量导入对话框 -->
     <Dialog v-model:open="showImportDialog">
-      <DialogContent class="sm:max-w-[700px]">
+      <DialogContent class="sm:max-w-[700px] bg-card/95">
         <DialogHeader>
           <DialogTitle>批量导入虚拟卡</DialogTitle>
         </DialogHeader>

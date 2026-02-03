@@ -1,6 +1,6 @@
 <template>
   <div class="space-y-6 p-5">
-    <Card class="shadow-sm">
+    <Card class="shadow-sm border-border/80 bg-background/80">
       <CardHeader>
         <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div>

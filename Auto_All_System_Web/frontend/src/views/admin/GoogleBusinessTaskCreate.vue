@@ -1,12 +1,12 @@
 <template>
   <div class="space-y-6 p-5">
-    <Card class="shadow-sm">
+    <Card class="shadow-sm border-border/80 bg-background/80">
       <CardContent class="px-4 py-3">
         <PageHeader @back="$router.push('/admin/google-business/tasks')" content="创建任务" />
       </CardContent>
     </Card>
 
-    <Card class="shadow-sm">
+    <Card class="shadow-sm border-border/80 bg-background/80">
       <CardContent class="p-6">
         <SimpleForm :model="form" :rules="rules" ref="formRef" label-width="120px">
         <!-- 任务类型 -->

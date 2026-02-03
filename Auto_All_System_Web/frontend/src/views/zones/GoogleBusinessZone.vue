@@ -41,7 +41,7 @@
 
             <DropdownMenu>
               <DropdownMenuTrigger as-child>
-                <Button variant="secondary" size="sm" class="gap-2 bg-violet-600 hover:bg-violet-700 text-white" :disabled="selectedCount === 0">
+                <Button variant="secondary" size="sm" class="gap-2 bg-slate-800 hover:bg-slate-900 text-white" :disabled="selectedCount === 0">
                   <Shield class="h-4 w-4" />
                   安全设置
                   <ChevronDown class="h-4 w-4 opacity-70" />

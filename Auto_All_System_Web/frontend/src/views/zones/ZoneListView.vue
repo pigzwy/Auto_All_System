@@ -7,7 +7,7 @@
       </div>
     </div>
 
-    <div class="rounded-xl border border-border bg-card text-card-foreground shadow-sm p-6 space-y-10">
+    <div class="rounded-2xl border border-border/80 bg-gradient-to-br from-background to-muted/30 p-6 text-card-foreground shadow-sm space-y-10">
       <!-- 业务专区 -->
       <section class="space-y-4">
         <div class="flex items-center justify-between">
@@ -18,7 +18,7 @@
         <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5">
           <button
             type="button"
-            class="group relative w-full text-left rounded-2xl border border-border bg-background/60 p-5 shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md"
+            class="group relative w-full text-left rounded-2xl border border-border bg-background/70 p-5 shadow-sm transition-all hover:-translate-y-0.5 hover:border-emerald-500/30 hover:bg-emerald-500/5 hover:shadow-md"
             @click="openGoogleZone"
           >
             <Badge variant="outline" class="absolute right-4 top-4 rounded-full bg-emerald-500/10 text-emerald-700">HOT</Badge>
@@ -35,7 +35,7 @@
               </div>
             </div>
 
-            <div class="mt-4 grid grid-cols-2 gap-3 rounded-xl border border-border/60 bg-muted/30 p-3">
+            <div class="mt-4 grid grid-cols-2 gap-3 rounded-xl border border-border/60 bg-gradient-to-br from-muted/30 via-background to-muted/10 p-3">
               <div>
                 <div class="text-2xl font-semibold leading-none text-foreground">{{ googleStats.accounts }}</div>
                 <div class="mt-1 text-xs text-muted-foreground">账号数</div>
@@ -54,7 +54,7 @@
 
           <button
             type="button"
-            class="group relative w-full text-left rounded-2xl border border-border bg-background/60 p-5 shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md"
+            class="group relative w-full text-left rounded-2xl border border-border bg-background/70 p-5 shadow-sm transition-all hover:-translate-y-0.5 hover:border-sky-500/30 hover:bg-sky-500/5 hover:shadow-md"
             @click="openGptZone"
           >
             <Badge variant="outline" class="absolute right-4 top-4 rounded-full bg-amber-500/10 text-amber-800">NEW</Badge>
@@ -71,7 +71,7 @@
               </div>
             </div>
 
-            <div class="mt-4 grid grid-cols-2 gap-3 rounded-xl border border-border/60 bg-muted/30 p-3">
+            <div class="mt-4 grid grid-cols-2 gap-3 rounded-xl border border-border/60 bg-gradient-to-br from-muted/30 via-background to-muted/10 p-3">
               <div>
                 <div class="text-2xl font-semibold leading-none text-foreground">{{ gptStats.teams }}</div>
                 <div class="mt-1 text-xs text-muted-foreground">团队数</div>
@@ -102,7 +102,7 @@
             v-for="zone in zones"
             :key="zone.id"
             type="button"
-            class="group w-full text-left rounded-2xl border border-border bg-background/60 p-5 shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md"
+            class="group w-full text-left rounded-2xl border border-border bg-background/70 p-5 shadow-sm transition-all hover:-translate-y-0.5 hover:border-primary/30 hover:bg-primary/5 hover:shadow-md"
             @click="handleZoneClick(zone)"
           >
             <div class="flex items-start gap-4">
@@ -139,7 +139,7 @@
           </div>
         </div>
 
-        <div v-else class="rounded-xl border border-border bg-muted/10 p-10 text-center">
+        <div v-else class="rounded-xl border border-border bg-gradient-to-br from-muted/20 via-background to-muted/5 p-10 text-center">
           <div class="text-sm font-medium text-foreground">暂无其他专区</div>
           <div class="mt-1 text-xs text-muted-foreground">请稍后再试或联系管理员添加。</div>
         </div>

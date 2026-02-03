@@ -1,6 +1,6 @@
 <template>
   <div class="space-y-6 p-5">
-    <Card class="shadow-sm">
+    <Card class="shadow-sm border-border/80 bg-background/80">
       <CardHeader>
         <div class="flex items-center justify-between gap-4">
           <div class="flex items-center gap-2">
@@ -58,19 +58,19 @@
 
         <!-- 统计面板 -->
         <div class="grid grid-cols-2 gap-4 sm:grid-cols-4">
-          <div class="rounded-xl bg-gradient-to-br from-indigo-500 to-fuchsia-500 p-5 text-center text-white shadow-sm">
+          <div class="rounded-xl bg-gradient-to-br from-sky-500 to-emerald-500 p-5 text-center text-white shadow-sm">
             <div class="text-3xl font-bold leading-none">{{ stats.link_ready }}</div>
             <div class="mt-1 text-sm text-white/90">待验证</div>
           </div>
-          <div class="rounded-xl bg-gradient-to-br from-emerald-500 to-cyan-400 p-5 text-center text-white shadow-sm">
+          <div class="rounded-xl bg-gradient-to-br from-emerald-500 to-teal-400 p-5 text-center text-white shadow-sm">
             <div class="text-3xl font-bold leading-none">{{ stats.verified }}</div>
             <div class="mt-1 text-sm text-white/90">已验证</div>
           </div>
-          <div class="rounded-xl bg-gradient-to-br from-rose-500 to-amber-400 p-5 text-center text-white shadow-sm">
+          <div class="rounded-xl bg-gradient-to-br from-amber-500 to-orange-400 p-5 text-center text-white shadow-sm">
             <div class="text-3xl font-bold leading-none">{{ stats.verifying }}</div>
             <div class="mt-1 text-sm text-white/90">验证中</div>
           </div>
-          <div class="rounded-xl bg-gradient-to-br from-orange-500 to-pink-500 p-5 text-center text-white shadow-sm">
+          <div class="rounded-xl bg-gradient-to-br from-rose-500 to-amber-500 p-5 text-center text-white shadow-sm">
             <div class="text-3xl font-bold leading-none">{{ stats.failed }}</div>
             <div class="mt-1 text-sm text-white/90">验证失败</div>
           </div>

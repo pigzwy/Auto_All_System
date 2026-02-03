@@ -11,7 +11,7 @@
       </Button>
     </div>
 
-    <Card class="shadow-sm">
+    <Card class="shadow-sm border-border/80 bg-background/80">
       <CardContent class="space-y-8 p-6">
         <!-- Google业务专区 (固定卡片) -->
         <div class="space-y-4 border-b border-border pb-8">

@@ -1,6 +1,6 @@
 <template>
   <Dialog :open="modelValue" @update:open="onOpenChange">
-    <DialogContent :style="contentStyle">
+    <DialogContent :style="contentStyle" class="bg-card/95 border-border/80 shadow-xl">
       <DialogHeader v-if="title">
         <DialogTitle>{{ title }}</DialogTitle>
       </DialogHeader>

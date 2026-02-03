@@ -1,8 +1,8 @@
 <template>
   <div class="w-full">
-    <div class="overflow-auto" :style="tableWrapperStyle">
-      <table class="w-full text-sm">
-        <thead class="bg-muted/30 text-muted-foreground">
+    <div class="overflow-auto rounded-xl border border-border bg-background/70 shadow-sm" :style="tableWrapperStyle">
+      <table class="w-full text-sm text-foreground">
+        <thead class="bg-muted/40 text-muted-foreground">
           <tr class="border-b border-border">
             <th
               v-for="col in columns"
@@ -20,8 +20,8 @@
           <tr
             v-for="(row, idx) in props.data"
             :key="getRowKey(row, idx)"
-            class="border-b border-border"
-            :class="props.stripe && idx % 2 === 1 ? 'bg-muted/10' : ''"
+            class="border-b border-border transition-colors"
+            :class="[props.stripe && idx % 2 === 1 ? 'bg-muted/10' : '', 'hover:bg-muted/30']"
           >
             <td v-for="col in columns" :key="col.id" class="px-3 py-2" :style="colStyle(col)">
               <template v-if="col.type === 'selection'">

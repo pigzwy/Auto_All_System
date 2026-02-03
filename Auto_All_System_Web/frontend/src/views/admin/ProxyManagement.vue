@@ -11,7 +11,7 @@
       </Button>
     </div>
 
-    <Card class="shadow-sm">
+    <Card class="shadow-sm border-border/80 bg-background/80">
       <CardContent class="p-6">
         <div class="relative overflow-hidden rounded-xl border border-border">
           <div

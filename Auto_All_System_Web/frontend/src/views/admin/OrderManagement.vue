@@ -2,7 +2,7 @@
   <div class="space-y-6 p-5">
     <h1 class="text-2xl font-semibold text-foreground">订单管理</h1>
 
-    <Card class="shadow-sm">
+    <Card class="shadow-sm border-border/80 bg-background/80">
       <CardContent class="p-6">
         <DataTable :data="orders" v-loading="loading" stripe class="w-full">
         <DataColumn prop="order_no" label="订单号" width="200">

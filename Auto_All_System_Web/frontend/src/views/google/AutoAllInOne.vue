@@ -1,10 +1,10 @@
 <template>
   <div class="space-y-6 p-5">
-    <Card class="shadow-sm">
+    <Card class="shadow-sm border-border/80 bg-background/80">
       <CardHeader>
         <div class="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
           <div class="flex items-center gap-2">
-            <Icon color="#9C27B0"><MagicStick /></Icon>
+            <Icon color="#0EA5E9"><MagicStick /></Icon>
             <CardTitle class="text-base">一键全自动处理</CardTitle>
           </div>
           <Tag type="info" size="large">
@@ -97,28 +97,28 @@
 
         <!-- 统计信息 -->
         <div class="grid grid-cols-2 gap-4 sm:grid-cols-4 lg:grid-cols-8">
-          <div class="rounded-xl border border-border bg-background/60 p-4 shadow-sm">
+          <div class="rounded-xl border border-border bg-background/70 p-4 shadow-sm">
             <Statistic title="总账号" :value="stats.totalAccounts" />
           </div>
-          <div class="rounded-xl border border-border bg-background/60 p-4 shadow-sm">
+          <div class="rounded-xl border border-border bg-background/70 p-4 shadow-sm">
             <Statistic title="可用卡片" :value="stats.availableCards" />
           </div>
-          <div class="rounded-xl border border-border bg-background/60 p-4 shadow-sm">
+          <div class="rounded-xl border border-border bg-background/70 p-4 shadow-sm">
             <Statistic title="待处理" :value="stats.pending" />
           </div>
-          <div class="rounded-xl border border-border bg-background/60 p-4 shadow-sm">
+          <div class="rounded-xl border border-border bg-background/70 p-4 shadow-sm">
             <Statistic title="处理中" :value="stats.processing" />
           </div>
-          <div class="rounded-xl border border-border bg-background/60 p-4 shadow-sm">
+          <div class="rounded-xl border border-border bg-background/70 p-4 shadow-sm">
             <Statistic title="已完成" :value="stats.completed" />
           </div>
-          <div class="rounded-xl border border-border bg-background/60 p-4 shadow-sm">
+          <div class="rounded-xl border border-border bg-background/70 p-4 shadow-sm">
             <Statistic title="失败" :value="stats.failed" />
           </div>
-          <div class="rounded-xl border border-border bg-background/60 p-4 shadow-sm">
+          <div class="rounded-xl border border-border bg-background/70 p-4 shadow-sm">
             <Statistic title="已订阅" :value="stats.subscribed" />
           </div>
-          <div class="rounded-xl border border-border bg-background/60 p-4 shadow-sm">
+          <div class="rounded-xl border border-border bg-background/70 p-4 shadow-sm">
             <Statistic title="成功率" :value="successRate" suffix="%" />
           </div>
         </div>

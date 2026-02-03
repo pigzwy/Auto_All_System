@@ -4,32 +4,32 @@
       <h1 class="text-2xl font-semibold text-foreground">任务管理</h1>
     </div>
 
-    <Card class="shadow-sm">
+    <Card class="shadow-sm border-border/80 bg-background/80">
       <CardContent class="space-y-6 p-6">
       <!-- 统计卡片 -->
       <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <div class="flex items-center gap-4 rounded-xl border border-border bg-background/60 p-5 shadow-sm">
+        <div class="flex items-center gap-4 rounded-xl border border-border bg-background/70 p-5 shadow-sm">
           <div class="flex h-14 w-14 items-center justify-center rounded-xl bg-sky-500/10 text-2xl">📋</div>
           <div>
             <div class="text-2xl font-bold leading-none text-foreground">{{ taskStats.pending }}</div>
             <div class="mt-1 text-sm text-muted-foreground">待处理</div>
           </div>
         </div>
-        <div class="flex items-center gap-4 rounded-xl border border-border bg-background/60 p-5 shadow-sm">
+        <div class="flex items-center gap-4 rounded-xl border border-border bg-background/70 p-5 shadow-sm">
           <div class="flex h-14 w-14 items-center justify-center rounded-xl bg-amber-500/10 text-2xl">🏃</div>
           <div>
             <div class="text-2xl font-bold leading-none text-foreground">{{ taskStats.running }}</div>
             <div class="mt-1 text-sm text-muted-foreground">执行中</div>
           </div>
         </div>
-        <div class="flex items-center gap-4 rounded-xl border border-border bg-background/60 p-5 shadow-sm">
+        <div class="flex items-center gap-4 rounded-xl border border-border bg-background/70 p-5 shadow-sm">
           <div class="flex h-14 w-14 items-center justify-center rounded-xl bg-emerald-500/10 text-2xl">✅</div>
           <div>
             <div class="text-2xl font-bold leading-none text-foreground">{{ taskStats.success }}</div>
             <div class="mt-1 text-sm text-muted-foreground">已完成</div>
           </div>
         </div>
-        <div class="flex items-center gap-4 rounded-xl border border-border bg-background/60 p-5 shadow-sm">
+        <div class="flex items-center gap-4 rounded-xl border border-border bg-background/70 p-5 shadow-sm">
           <div class="flex h-14 w-14 items-center justify-center rounded-xl bg-rose-500/10 text-2xl">❌</div>
           <div>
             <div class="text-2xl font-bold leading-none text-foreground">{{ taskStats.failed }}</div>

@@ -23,7 +23,7 @@ provide('el-descriptions-cols', props.column)
 
 const wrapperClass = computed(() => {
   const cols = `grid grid-cols-1 md:grid-cols-${props.column}`
-  return [cols, 'overflow-hidden rounded-lg border border-border'].filter(Boolean)
+  return [cols, 'overflow-hidden rounded-xl border border-border/80 bg-background/70'].filter(Boolean)
 })
 
 // props are used directly in computed

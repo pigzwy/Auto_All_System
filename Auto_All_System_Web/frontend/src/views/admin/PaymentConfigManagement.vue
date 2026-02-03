@@ -5,7 +5,7 @@
       <p class="mt-1 text-sm text-muted-foreground">管理支付网关、启用状态、手续费与金额范围。</p>
     </div>
 
-    <Card class="shadow-sm">
+    <Card class="shadow-sm border-border/80 bg-background/80">
       <CardContent class="p-6">
       <DataTable :data="configs" v-loading="loading" stripe class="w-full">
         <DataColumn prop="id" label="ID" width="60" />

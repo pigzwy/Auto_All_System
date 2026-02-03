@@ -1,7 +1,7 @@
 <template>
   <div class="space-y-6">
     <!-- 顶部欢迎栏 -->
-    <Card class="relative overflow-hidden">
+    <Card class="relative overflow-hidden bg-gradient-to-br from-background to-primary/5">
       <CardContent class="flex items-center justify-between p-6">
         <div class="relative z-10">
           <h1 class="mb-2 text-2xl font-semibold text-card-foreground">
@@ -19,7 +19,7 @@
     <!-- 统计卡片 -->
     <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
       <!-- 余额卡片 -->
-      <Card class="relative overflow-hidden transition-shadow duration-300 hover:shadow-md">
+      <Card class="group relative overflow-hidden transition-shadow duration-300 hover:shadow-lg">
         <CardContent class="p-6">
           <div class="mb-4 flex items-center justify-between">
             <span class="text-sm font-medium text-muted-foreground">账户余额</span>
@@ -51,7 +51,7 @@
       </Card>
 
       <!-- 专区卡片 -->
-      <Card class="transition-shadow duration-300 hover:shadow-md">
+      <Card class="group transition-shadow duration-300 hover:shadow-lg">
         <CardContent class="p-6">
           <div class="mb-4 flex items-center justify-between">
             <span class="text-sm font-medium text-muted-foreground">可用专区</span>
@@ -70,7 +70,7 @@
       </Card>
 
       <!-- 虚拟卡卡片 -->
-      <Card class="transition-shadow duration-300 hover:shadow-md">
+      <Card class="group transition-shadow duration-300 hover:shadow-lg">
         <CardContent class="p-6">
           <div class="mb-4 flex items-center justify-between">
             <span class="text-sm font-medium text-muted-foreground">虚拟卡资源</span>
@@ -106,33 +106,42 @@
 
       <CardContent>
         <div class="grid grid-cols-2 gap-4 md:grid-cols-4">
-        <div @click="$router.push('/zones')" class="group cursor-pointer p-4 rounded-xl border border-border hover:border-primary/30 hover:bg-primary/5 transition-all duration-300 flex flex-col items-center justify-center gap-3">
-          <div class="w-12 h-12 rounded-full bg-primary/10 text-primary flex items-center justify-center group-hover:scale-110 transition-transform shadow-sm">
-            <Icon :size="24"><Grid /></Icon>
+          <div
+            @click="$router.push('/zones')"
+            class="group flex cursor-pointer flex-col items-center justify-center gap-3 rounded-2xl border border-border bg-background/70 p-4 transition-all duration-300 hover:-translate-y-0.5 hover:border-primary/30 hover:bg-primary/5 hover:shadow-md"
+          >
+            <div class="flex h-12 w-12 items-center justify-center rounded-full bg-primary/10 text-primary shadow-sm transition-transform group-hover:scale-110">
+              <Icon :size="24"><Grid /></Icon>
+            </div>
+            <span class="text-sm font-medium text-card-foreground group-hover:text-primary">浏览专区</span>
           </div>
-          <span class="text-sm font-medium text-card-foreground group-hover:text-primary">浏览专区</span>
-        </div>
 
-        <div @click="$router.push('/cards')" class="group cursor-pointer p-4 rounded-xl border border-border hover:border-violet-500/30 hover:bg-violet-500/5 transition-all duration-300 flex flex-col items-center justify-center gap-3">
-          <div class="w-12 h-12 rounded-full bg-violet-500/10 text-violet-600 flex items-center justify-center group-hover:scale-110 transition-transform shadow-sm">
-            <Icon :size="24"><CreditCard /></Icon>
+          <div
+            @click="$router.push('/cards')"
+            class="group flex cursor-pointer flex-col items-center justify-center gap-3 rounded-2xl border border-border bg-background/70 p-4 transition-all duration-300 hover:-translate-y-0.5 hover:border-sky-500/30 hover:bg-sky-500/5 hover:shadow-md"
+          >
+            <div class="flex h-12 w-12 items-center justify-center rounded-full bg-sky-500/10 text-sky-600 shadow-sm transition-transform group-hover:scale-110">
+              <Icon :size="24"><CreditCard /></Icon>
+            </div>
+            <span class="text-sm font-medium text-card-foreground group-hover:text-sky-600">管理卡片</span>
           </div>
-          <span class="text-sm font-medium text-card-foreground group-hover:text-violet-600">管理卡片</span>
-        </div>
 
-        <div @click="$router.push('/balance')" class="group cursor-pointer p-4 rounded-xl border border-border hover:border-emerald-500/30 hover:bg-emerald-500/5 transition-all duration-300 flex flex-col items-center justify-center gap-3">
-          <div class="w-12 h-12 rounded-full bg-emerald-500/10 text-emerald-600 flex items-center justify-center group-hover:scale-110 transition-transform shadow-sm">
-            <Icon :size="24"><Money /></Icon>
+          <div
+            @click="$router.push('/balance')"
+            class="group flex cursor-pointer flex-col items-center justify-center gap-3 rounded-2xl border border-border bg-background/70 p-4 transition-all duration-300 hover:-translate-y-0.5 hover:border-emerald-500/30 hover:bg-emerald-500/5 hover:shadow-md"
+          >
+            <div class="flex h-12 w-12 items-center justify-center rounded-full bg-emerald-500/10 text-emerald-600 shadow-sm transition-transform group-hover:scale-110">
+              <Icon :size="24"><Money /></Icon>
+            </div>
+            <span class="text-sm font-medium text-card-foreground group-hover:text-emerald-600">账户充值</span>
           </div>
-          <span class="text-sm font-medium text-card-foreground group-hover:text-emerald-600">账户充值</span>
-        </div>
 
-        <div class="group cursor-not-allowed p-4 rounded-xl border border-border transition-all duration-300 flex flex-col items-center justify-center gap-3 opacity-60">
-           <div class="w-12 h-12 rounded-full bg-muted text-muted-foreground/70 flex items-center justify-center shadow-inner">
-             <Icon :size="24"><Plus /></Icon>
-           </div>
-          <span class="text-sm font-medium text-muted-foreground">更多功能</span>
-        </div>
+          <div class="group flex cursor-not-allowed flex-col items-center justify-center gap-3 rounded-2xl border border-border bg-muted/40 p-4 opacity-60">
+            <div class="flex h-12 w-12 items-center justify-center rounded-full bg-muted text-muted-foreground/70 shadow-inner">
+              <Icon :size="24"><Plus /></Icon>
+            </div>
+            <span class="text-sm font-medium text-muted-foreground">更多功能</span>
+          </div>
         </div>
       </CardContent>
     </Card>

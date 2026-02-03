@@ -11,7 +11,7 @@
       </Button>
     </div>
 
-    <Card class="shadow-sm">
+    <Card class="shadow-sm border-border/80 bg-background/80">
       <CardContent class="space-y-4 p-6">
         <!-- 搜索和筛选 -->
         <div class="flex flex-wrap items-end gap-4">
@@ -58,10 +58,10 @@
         </div>
 
         <!-- 用户表格 -->
-        <div class="overflow-hidden rounded-xl border border-border" v-loading="loading">
+        <div class="overflow-hidden rounded-xl border border-border bg-background/70 shadow-sm" v-loading="loading">
           <Table>
             <TableHeader>
-              <TableRow>
+              <TableRow class="bg-muted/40">
                 <TableHead class="w-[80px]">ID</TableHead>
                 <TableHead class="w-[150px]">用户名</TableHead>
                 <TableHead class="w-[200px]">邮箱</TableHead>
@@ -77,7 +77,7 @@
               <TableRow
                 v-for="(row, idx) in users"
                 :key="row.id"
-                :class="idx % 2 === 1 ? 'bg-muted/10' : ''"
+                :class="[idx % 2 === 1 ? 'bg-muted/10' : '', 'hover:bg-muted/30']"
               >
                 <TableCell class="w-[80px]">{{ row.id }}</TableCell>
                 <TableCell class="w-[150px]">{{ row.username }}</TableCell>
@@ -161,7 +161,7 @@
 
     <!-- 创建/编辑用户对话框 -->
     <Dialog v-model:open="showCreateDialog">
-      <DialogContent class="sm:max-w-[600px]">
+      <DialogContent class="sm:max-w-[600px] bg-card/95">
         <DialogHeader>
           <DialogTitle>{{ editingUser ? '编辑用户' : '创建用户' }}</DialogTitle>
         </DialogHeader>

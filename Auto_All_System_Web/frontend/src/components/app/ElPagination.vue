@@ -4,7 +4,7 @@
 
     <div class="flex items-center gap-2">
       <select
-        class="h-9 rounded-md border border-input bg-transparent px-2 text-sm"
+        class="h-9 rounded-md border border-input bg-background/70 px-2 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
         :value="pageSize"
         @change="onSizeChange"
       >
@@ -13,7 +13,7 @@
 
       <button
         type="button"
-        class="h-9 rounded-md border border-border px-3 disabled:opacity-50"
+        class="h-9 rounded-md border border-border bg-background/70 px-3 transition-colors hover:bg-muted disabled:opacity-50"
         :disabled="currentPage <= 1"
         @click="setPage(currentPage - 1)"
       >
@@ -26,7 +26,7 @@
 
       <button
         type="button"
-        class="h-9 rounded-md border border-border px-3 disabled:opacity-50"
+        class="h-9 rounded-md border border-border bg-background/70 px-3 transition-colors hover:bg-muted disabled:opacity-50"
         :disabled="currentPage >= totalPages"
         @click="setPage(currentPage + 1)"
       >

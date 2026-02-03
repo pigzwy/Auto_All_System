@@ -1,13 +1,13 @@
 <template>
   <div class="space-y-6 p-5">
-    <Card class="shadow-sm">
+    <Card class="shadow-sm border-border/80 bg-background/80">
       <CardContent class="px-4 py-3">
         <PageHeader @back="$router.push('/admin')" content="Google Business 插件仪表板" />
       </CardContent>
     </Card>
 
     <div class="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-4">
-      <Card class="relative overflow-hidden shadow-sm">
+      <Card class="relative overflow-hidden shadow-sm border-border/80 bg-background/80">
         <CardContent class="p-6 pb-16">
           <div class="flex items-center gap-4">
             <div class="flex h-14 w-14 items-center justify-center rounded-xl bg-primary text-primary-foreground">
@@ -26,7 +26,7 @@
         </div>
       </Card>
 
-      <Card class="relative overflow-hidden shadow-sm">
+      <Card class="relative overflow-hidden shadow-sm border-border/80 bg-background/80">
         <CardContent class="p-6 pb-16">
           <div class="flex items-center gap-4">
             <div class="flex h-14 w-14 items-center justify-center rounded-xl bg-emerald-500 text-white">
@@ -45,7 +45,7 @@
         </div>
       </Card>
 
-      <Card class="relative overflow-hidden shadow-sm">
+      <Card class="relative overflow-hidden shadow-sm border-border/80 bg-background/80">
         <CardContent class="p-6 pb-16">
           <div class="flex items-center gap-4">
             <div class="flex h-14 w-14 items-center justify-center rounded-xl bg-rose-500 text-white">
@@ -64,7 +64,7 @@
         </div>
       </Card>
 
-      <Card class="relative overflow-hidden shadow-sm">
+      <Card class="relative overflow-hidden shadow-sm border-border/80 bg-background/80">
         <CardContent class="p-6 pb-16">
           <div class="flex items-center gap-4">
             <div class="flex h-14 w-14 items-center justify-center rounded-xl bg-amber-500 text-white">
@@ -84,7 +84,7 @@
       </Card>
     </div>
 
-    <Card class="shadow-sm">
+    <Card class="shadow-sm border-border/80 bg-background/80">
       <CardHeader class="pb-3">
         <CardTitle class="text-base">快速操作</CardTitle>
       </CardHeader>
@@ -111,7 +111,7 @@
     </Card>
 
     <div class="grid grid-cols-1 gap-5 lg:grid-cols-2">
-      <Card class="shadow-sm">
+      <Card class="shadow-sm border-border/80 bg-background/80">
         <CardHeader class="pb-3">
           <div class="flex items-center justify-between gap-4">
             <CardTitle class="text-base">任务趋势（最近7天）</CardTitle>
@@ -127,7 +127,7 @@
         </CardContent>
       </Card>
 
-      <Card class="shadow-sm">
+      <Card class="shadow-sm border-border/80 bg-background/80">
         <CardHeader class="pb-3">
           <div class="flex items-center justify-between gap-4">
             <CardTitle class="text-base">费用统计（最近7天）</CardTitle>
@@ -144,7 +144,7 @@
       </Card>
     </div>
 
-    <Card class="shadow-sm">
+      <Card class="shadow-sm border-border/80 bg-background/80">
       <CardHeader class="pb-3">
         <div class="flex items-center justify-between gap-4">
           <CardTitle class="text-base">最近任务</CardTitle>

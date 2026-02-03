@@ -1,6 +1,6 @@
 <template>
   <div class="space-y-6">
-    <Card class="bg-card text-card-foreground text-center py-6">
+    <Card class="bg-gradient-to-br from-background to-muted/20 text-card-foreground text-center py-6 shadow-sm border-border/80">
       <CardHeader>
         <CardTitle class="text-3xl">👑 VIP会员</CardTitle>
         <CardDescription class="text-base">升级VIP，享受专属特权</CardDescription>
@@ -8,7 +8,7 @@
     </Card>
 
     <!-- 当前会员状态 -->
-    <Card v-if="userVip.level > 0" class="bg-gradient-to-br from-indigo-500 to-purple-600 text-white border-none shadow-lg">
+    <Card v-if="userVip.level > 0" class="bg-gradient-to-br from-emerald-500 to-sky-500 text-white border-none shadow-lg">
       <CardContent class="flex items-center gap-6 p-6">
         <div class="flex flex-col items-center gap-2">
           <span class="text-5xl">👑</span>
@@ -32,18 +32,18 @@
       <Card
         v-for="plan in vipPlans"
         :key="plan.level"
-        class="relative flex flex-col transition-all hover:-translate-y-2 hover:shadow-lg"
+        class="relative flex flex-col rounded-2xl border border-border/80 bg-background/70 transition-all hover:-translate-y-2 hover:shadow-lg"
         :class="{
           'border-primary shadow-md': plan.recommended,
           'border-emerald-500': userVip.level === plan.level
         }"
       >
-        <div v-if="plan.recommended" class="absolute top-3 right-3 rounded-full bg-primary px-3 py-1 text-xs font-bold text-primary-foreground">
-          🔥 推荐
-        </div>
-        <div v-if="userVip.level === plan.level" class="absolute top-3 right-3 rounded-full bg-emerald-500 px-3 py-1 text-xs font-bold text-white">
-          ✓ 当前
-        </div>
+          <div v-if="plan.recommended" class="absolute top-3 right-3 rounded-full bg-emerald-500 px-3 py-1 text-xs font-bold text-white">
+            🔥 推荐
+          </div>
+          <div v-if="userVip.level === plan.level" class="absolute top-3 right-3 rounded-full bg-sky-500 px-3 py-1 text-xs font-bold text-white">
+            ✓ 当前
+          </div>
 
         <CardHeader class="text-center pb-2">
           <div class="text-6xl mb-4">{{ plan.icon }}</div>
@@ -78,7 +78,7 @@
     </div>
 
     <!-- VIP特权说明 -->
-    <Card class="bg-card text-card-foreground">
+    <Card class="bg-card text-card-foreground shadow-sm border-border/80">
       <CardHeader>
         <CardTitle>VIP特权详细说明</CardTitle>
       </CardHeader>

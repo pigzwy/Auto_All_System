@@ -44,7 +44,7 @@
             <ArrowRightToLine class="h-4 w-4" />
             邀请
           </Button>
-          <Button size="sm" class="gap-2 bg-violet-600 hover:bg-violet-700 text-white" :disabled="!selectedMother" @click="runSub2apiSink">
+          <Button size="sm" class="gap-2 bg-sky-600 hover:bg-sky-700 text-white" :disabled="!selectedMother" @click="runSub2apiSink">
             <LayoutList class="h-4 w-4" />
             入池
           </Button>
