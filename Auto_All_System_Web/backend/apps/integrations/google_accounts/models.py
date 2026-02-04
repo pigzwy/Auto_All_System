@@ -28,6 +28,35 @@ class GeminiStatus(models.TextChoices):
     CANCELLED = "cancelled", "已取消"
 
 
+class AccountGroup(models.Model):
+    """账号分组"""
+
+    name = models.CharField(max_length=100, verbose_name="分组名称", help_text="如：售后_10个、2FA_5个")
+    description = models.TextField(blank=True, verbose_name="分组描述")
+    owner_user = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="account_groups",
+        verbose_name="所有者",
+    )
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="创建时间")
+    updated_at = models.DateTimeField(auto_now=True, verbose_name="更新时间")
+
+    class Meta:
+        db_table = "account_groups"
+        verbose_name = "账号分组"
+        verbose_name_plural = "账号分组"
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["owner_user", "name"]),
+        ]
+
+    def __str__(self):
+        return self.name
+
+
 class GoogleAccount(models.Model):
     """
     Google账号表

@@ -193,6 +193,7 @@ export interface GoogleAccount {
   new_2fa?: string | null
   new_2fa_display?: string | null
   new_2fa_updated_at?: string | null
+  two_fa?: string | null  // 统一的2FA字段（优先new_2fa，否则two_fa_secret）
   sheerid_verified: boolean
   sheerid_link?: string
   gemini_status?: string

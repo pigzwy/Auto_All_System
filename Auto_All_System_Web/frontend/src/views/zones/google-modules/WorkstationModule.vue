@@ -147,7 +147,7 @@ const stats = reactive({
 })
 
 const recentTasks = ref([
-  { id: 1, type: '一键全自动', account: 'test@gmail.com', status: '运行中', progress: 60, created_at: new Date().toISOString() },
+  { id: 1, type: '一键启动', account: 'test@gmail.com', status: '运行中', progress: 60, created_at: new Date().toISOString() },
   { id: 2, type: 'SheerID验证', account: 'demo@gmail.com', status: '已完成', progress: 100, created_at: new Date().toISOString() },
   { id: 3, type: '自动绑卡', account: 'user@gmail.com', status: '失败', progress: 30, created_at: new Date().toISOString() }
 ])

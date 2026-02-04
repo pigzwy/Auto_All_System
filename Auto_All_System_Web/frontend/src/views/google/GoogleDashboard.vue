@@ -168,7 +168,7 @@
 
           <Button  variant="secondary" type="button" size="large" class="w-full" @click="$router.push('/google/auto-all')">
             <Icon><MagicStick /></Icon>
-            <span class="ml-2">一键全自动</span>
+          <span class="ml-2">一键启动</span>
           </Button>
         </div>
       </CardContent>

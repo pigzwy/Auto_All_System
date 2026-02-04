@@ -684,12 +684,18 @@ class GoogleAccountViewSet(viewsets.ModelViewSet):
             except Exception:
                 pwd = a.password
 
-            try:
-                secret = (
-                    EncryptionUtil.decrypt(a.two_fa_secret) if a.two_fa_secret else ""
-                )
-            except Exception:
-                secret = a.two_fa_secret or ""
+            # 优先使用 new_2fa_secret（安全更新后的新密钥），否则使用原始 two_fa_secret
+            meta = getattr(a, "metadata", None) or {}
+            new_2fa = meta.get("new_2fa_secret")
+            if isinstance(new_2fa, str) and new_2fa.strip():
+                secret = new_2fa.strip()
+            else:
+                try:
+                    secret = (
+                        EncryptionUtil.decrypt(a.two_fa_secret) if a.two_fa_secret else ""
+                    )
+                except Exception:
+                    secret = a.two_fa_secret or ""
 
             writer.writerow(
                 [
@@ -734,12 +740,18 @@ class GoogleAccountViewSet(viewsets.ModelViewSet):
             except Exception:
                 pwd = a.password
 
-            try:
-                secret = (
-                    EncryptionUtil.decrypt(a.two_fa_secret) if a.two_fa_secret else ""
-                )
-            except Exception:
-                secret = a.two_fa_secret or ""
+            # 优先使用 new_2fa_secret（安全更新后的新密钥），否则使用原始 two_fa_secret
+            meta = getattr(a, "metadata", None) or {}
+            new_2fa = meta.get("new_2fa_secret")
+            if isinstance(new_2fa, str) and new_2fa.strip():
+                secret = new_2fa.strip()
+            else:
+                try:
+                    secret = (
+                        EncryptionUtil.decrypt(a.two_fa_secret) if a.two_fa_secret else ""
+                    )
+                except Exception:
+                    secret = a.two_fa_secret or ""
 
             recovery = a.recovery_email or ""
             lines.append(f"{a.email}----{pwd}----{recovery}----{secret}")
@@ -1252,17 +1264,24 @@ class GoogleTaskViewSet(viewsets.ModelViewSet):
         ]
         GoogleTaskAccount.objects.bulk_create(task_accounts)
 
-        # 提交Celery异步任务
+        # 提交Celery异步任务（使用 on_commit 确保数据库事务提交后再触发）
+        from django.db import transaction
         from .tasks import batch_process_task
 
         account_id_list = list(accounts.values_list("id", flat=True))
-        celery_task = batch_process_task.delay(
-            task.id, account_id_list, task_type, config
-        )
-        task.celery_task_id = celery_task.id
-        task.status = "running"
-        task.started_at = timezone.now()
-        task.save()
+        task_id = task.id
+
+        def trigger_celery_task():
+            celery_task = batch_process_task.delay(
+                task_id, account_id_list, task_type, config
+            )
+            GoogleTask.objects.filter(id=task_id).update(
+                celery_task_id=celery_task.id,
+                status="running",
+                started_at=timezone.now(),
+            )
+
+        transaction.on_commit(trigger_celery_task)
 
         return Response(
             {
@@ -2049,4 +2068,77 @@ class SubscriptionViewSet(viewsets.ViewSet):
         return FileResponse(open(file_path, "rb"), content_type="image/png")
 
 
-# ==================== 账号分组管理（已废弃，使用 group_name 字符串字段替代） ====================
+class AccountGroupViewSet(viewsets.ModelViewSet):
+    """账号分组管理"""
+    
+    permission_classes = [IsAuthenticated]
+    
+    def get_queryset(self):
+        from apps.integrations.google_accounts.models import AccountGroup
+        return AccountGroup.objects.filter(owner_user=self.request.user)
+    
+    def get_serializer_class(self):
+        from .serializers import AccountGroupSerializer
+        return AccountGroupSerializer
+    
+    def perform_create(self, serializer):
+        serializer.save(owner_user=self.request.user)
+    
+    @action(detail=False, methods=["get"])
+    def list_with_counts(self, request):
+        """获取分组列表（带账号数量）"""
+        from apps.integrations.google_accounts.models import AccountGroup
+        
+        groups = AccountGroup.objects.filter(owner_user=request.user).order_by("-created_at")
+        
+        data = []
+        for g in groups:
+            count = GoogleAccount.objects.filter(
+                owner_user=request.user,
+                group_name=g.name
+            ).count()
+            data.append({
+                "id": g.id,
+                "name": g.name,
+                "description": g.description,
+                "account_count": count,
+                "created_at": g.created_at.isoformat() if g.created_at else None,
+            })
+        return Response(data)
+    
+    @action(detail=True, methods=["post"])
+    def add_accounts(self, request, pk=None):
+        """添加账号到分组"""
+        from apps.integrations.google_accounts.models import AccountGroup
+        
+        group = get_object_or_404(AccountGroup, pk=pk, owner_user=request.user)
+        account_ids = request.data.get("account_ids", [])
+        
+        if not account_ids:
+            return Response({"error": "account_ids required"}, status=status.HTTP_400_BAD_REQUEST)
+        
+        updated = GoogleAccount.objects.filter(
+            id__in=account_ids,
+            owner_user=request.user
+        ).update(group_name=group.name)
+        
+        return Response({"updated": updated})
+    
+    @action(detail=True, methods=["post"])
+    def remove_accounts(self, request, pk=None):
+        """从分组移除账号"""
+        from apps.integrations.google_accounts.models import AccountGroup
+        
+        group = get_object_or_404(AccountGroup, pk=pk, owner_user=request.user)
+        account_ids = request.data.get("account_ids", [])
+        
+        if not account_ids:
+            return Response({"error": "account_ids required"}, status=status.HTTP_400_BAD_REQUEST)
+        
+        updated = GoogleAccount.objects.filter(
+            id__in=account_ids,
+            owner_user=request.user,
+            group_name=group.name
+        ).update(group_name="")
+        
+        return Response({"updated": updated})

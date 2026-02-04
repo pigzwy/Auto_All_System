@@ -30,6 +30,7 @@ from .serializers import (
 from .storage import (
     add_account,
     add_task,
+    clear_tasks,
     delete_account,
     find_account,
     find_task,
@@ -40,8 +41,35 @@ from .storage import (
     patch_task,
     update_settings,
 )
-from .tasks import auto_invite_task, invite_only_task, self_register_task, sub2api_sink_task
+from .tasks import (
+    auto_invite_task,
+    invite_only_task,
+    launch_geekez_task,
+    self_register_task,
+    sub2api_sink_task,
+)
 from .trace_cleanup import cleanup_trace_files, get_trace_cleanup_settings
+
+
+def _normalize_id_list(raw: Any) -> list[str]:
+    if isinstance(raw, str):
+        return [part.strip() for part in raw.split(",") if part.strip()]
+    if isinstance(raw, list):
+        values: list[str] = []
+        for item in raw:
+            if item is None:
+                continue
+            val = str(item).strip()
+            if val:
+                values.append(val)
+        return values
+    return []
+
+
+def _batch_countdown(index: int, concurrency: int) -> int:
+    if concurrency <= 0:
+        return 0
+    return int(index // concurrency)
 
 
 def _mask_secret(value: str) -> str:
@@ -646,6 +674,27 @@ class AccountsViewSet(ViewSet):
     def list(self, request):
         settings = get_settings()
         accounts = list_accounts(settings)
+        tasks = list_tasks(settings)
+
+        active_tasks_by_mother: dict[str, dict[str, Any]] = {}
+        for t in tasks:
+            status = str(t.get("status") or "").strip()
+            if status not in {"pending", "running"}:
+                continue
+            mid = str(t.get("mother_id") or "").strip()
+            if not mid or mid in active_tasks_by_mother:
+                continue
+            active_tasks_by_mother[mid] = {
+                "id": t.get("id"),
+                "type": t.get("type"),
+                "status": status,
+                "progress_current": int(t.get("progress_current") or 0),
+                "progress_total": int(t.get("progress_total") or 0),
+                "progress_percent": int(t.get("progress_percent") or 0),
+                "progress_label": str(t.get("progress_label") or ""),
+                "created_at": t.get("created_at"),
+                "started_at": t.get("started_at"),
+            }
 
         mothers = [a for a in accounts if str(a.get("type")) == "mother"]
         children_by_parent: dict[str, list[dict[str, Any]]] = {}
@@ -727,6 +776,10 @@ class AccountsViewSet(ViewSet):
                     team_join_status = "success"
                 else:
                     team_join_status = "not_started"
+            active_task = None
+            if str(acc.get("type")) == "mother":
+                active_task = active_tasks_by_mother.get(str(acc.get("id") or "").strip())
+
             return {
                 **acc,
                 "geekez_profile_exists": has_profile,
@@ -736,6 +789,7 @@ class AccountsViewSet(ViewSet):
                 "pool_status": pool_status,
                 "invite_status": invite_status,
                 "team_join_status": team_join_status,
+                **({"active_task": active_task} if active_task else {}),
                 **({"geekez_env": geekez_env} if isinstance(geekez_env, dict) else {}),
             }
 
@@ -1066,6 +1120,10 @@ class AccountsViewSet(ViewSet):
             "type": "self_register",
             "mother_id": str(pk),
             "status": "pending",
+            "progress_current": 0,
+            "progress_total": 3,
+            "progress_percent": 0,
+            "progress_label": "",
             "created_at": now,
         })
 
@@ -1115,6 +1173,10 @@ class AccountsViewSet(ViewSet):
             "type": "auto_invite",
             "mother_id": mother_id,
             "status": "pending",
+            "progress_current": 0,
+            "progress_total": 3,
+            "progress_percent": 0,
+            "progress_label": "",
             "created_at": now,
         })
 
@@ -1140,6 +1202,10 @@ class AccountsViewSet(ViewSet):
             "s2a_target_key": target_key,
             "pool_mode": mode,
             "status": "pending",
+            "progress_current": 0,
+            "progress_total": 3,
+            "progress_percent": 0,
+            "progress_label": "",
             "created_at": now,
         })
 
@@ -1153,6 +1219,172 @@ class AccountsViewSet(ViewSet):
                 "mode": mode,
             }
         )
+
+    @action(detail=False, methods=["post"], url_path="batch/self_register")
+    def batch_self_register(self, request):
+        settings = get_settings()
+        mother_ids = _normalize_id_list(request.data.get("mother_ids") or request.data.get("ids"))
+        if not mother_ids:
+            return Response({"detail": "mother_ids is required"}, status=status.HTTP_400_BAD_REQUEST)
+
+        concurrency = int(request.data.get("concurrency") or 5)
+        open_geekez = bool(request.data.get("open_geekez") or False)
+
+        results: list[dict[str, Any]] = []
+        for idx, mother_id in enumerate(mother_ids):
+            acc = find_account(settings, str(mother_id))
+            if not isinstance(acc, dict) or str(acc.get("type")) != "mother":
+                results.append({"mother_id": mother_id, "skipped": True, "message": "Mother account not found"})
+                continue
+
+            delay_seconds = _batch_countdown(idx, concurrency)
+            if open_geekez:
+                launch_geekez_task.apply_async(args=[str(mother_id)], countdown=delay_seconds)
+
+            record_id = uuid.uuid4().hex
+            now = timezone.now().isoformat()
+            add_task({
+                "id": record_id,
+                "type": "self_register",
+                "mother_id": str(mother_id),
+                "status": "pending",
+                "progress_current": 0,
+                "progress_total": 3,
+                "progress_percent": 0,
+                "progress_label": "",
+                "created_at": now,
+            })
+
+            async_result = self_register_task.apply_async(args=[record_id], countdown=delay_seconds)
+            results.append({
+                "mother_id": mother_id,
+                "record_id": record_id,
+                "task_id": async_result.id,
+            })
+
+        return Response({"message": "已启动：批量自动开通", "results": results})
+
+    @action(detail=False, methods=["post"], url_path="batch/auto_invite")
+    def batch_auto_invite(self, request):
+        settings = get_settings()
+        mother_ids = _normalize_id_list(request.data.get("mother_ids") or request.data.get("ids"))
+        if not mother_ids:
+            return Response({"detail": "mother_ids is required"}, status=status.HTTP_400_BAD_REQUEST)
+
+        concurrency = int(request.data.get("concurrency") or 5)
+        open_geekez = bool(request.data.get("open_geekez") or False)
+        accounts = list_accounts(settings)
+
+        results: list[dict[str, Any]] = []
+        for idx, mother_id in enumerate(mother_ids):
+            acc = find_account(settings, str(mother_id))
+            if not isinstance(acc, dict) or str(acc.get("type")) != "mother":
+                results.append({"mother_id": mother_id, "skipped": True, "message": "Mother account not found"})
+                continue
+
+            seat_total = int(acc.get("seat_total") or 0)
+            children = [
+                a
+                for a in accounts
+                if isinstance(a, dict)
+                and str(a.get("type")) == "child"
+                and str(a.get("parent_id") or "") == str(mother_id)
+            ]
+
+            if seat_total <= 0 and not children:
+                results.append({"mother_id": mother_id, "skipped": True, "message": "该母号暂无子号"})
+                continue
+
+            if seat_total <= 0 or len(children) >= seat_total:
+                pending_children: list[str] = []
+                for child in children:
+                    join_status = str(child.get("team_join_status") or "").strip()
+                    team_account_id_saved = str(child.get("team_account_id") or "").strip()
+                    if join_status == "success" or team_account_id_saved:
+                        continue
+                    child_email = str(child.get("email") or "").strip()
+                    if child_email:
+                        pending_children.append(child_email)
+                if not pending_children:
+                    results.append({"mother_id": mother_id, "skipped": True, "message": "全部子号已入队"})
+                    continue
+
+            delay_seconds = _batch_countdown(idx, concurrency)
+            if open_geekez:
+                launch_geekez_task.apply_async(args=[str(mother_id)], countdown=delay_seconds)
+
+            record_id = uuid.uuid4().hex
+            now = timezone.now().isoformat()
+            add_task({
+                "id": record_id,
+                "type": "auto_invite",
+                "mother_id": str(mother_id),
+                "status": "pending",
+                "progress_current": 0,
+                "progress_total": 3,
+                "progress_percent": 0,
+                "progress_label": "",
+                "created_at": now,
+            })
+
+            async_result = auto_invite_task.apply_async(args=[record_id], countdown=delay_seconds)
+            results.append({
+                "mother_id": mother_id,
+                "record_id": record_id,
+                "task_id": async_result.id,
+            })
+
+        return Response({"message": "已启动：批量自动邀请", "results": results})
+
+    @action(detail=False, methods=["post"], url_path="batch/sub2api_sink")
+    def batch_sub2api_sink(self, request):
+        settings = get_settings()
+        mother_ids = _normalize_id_list(request.data.get("mother_ids") or request.data.get("ids"))
+        if not mother_ids:
+            return Response({"detail": "mother_ids is required"}, status=status.HTTP_400_BAD_REQUEST)
+
+        concurrency = int(request.data.get("concurrency") or 5)
+        open_geekez = bool(request.data.get("open_geekez") or False)
+        target_key = str(request.data.get("target_key") or request.data.get("s2a_target_key") or "").strip()
+        mode = str(request.data.get("mode") or request.data.get("pool_mode") or "").strip() or "crs_sync"
+
+        results: list[dict[str, Any]] = []
+        for idx, mother_id in enumerate(mother_ids):
+            acc = find_account(settings, str(mother_id))
+            if not isinstance(acc, dict) or str(acc.get("type")) != "mother":
+                results.append({"mother_id": mother_id, "skipped": True, "message": "Mother account not found"})
+                continue
+
+            delay_seconds = _batch_countdown(idx, concurrency)
+            if open_geekez:
+                launch_geekez_task.apply_async(args=[str(mother_id)], countdown=delay_seconds)
+
+            record_id = uuid.uuid4().hex
+            now = timezone.now().isoformat()
+            add_task({
+                "id": record_id,
+                "type": "sub2api_sink",
+                "mother_id": str(mother_id),
+                "s2a_target_key": target_key,
+                "pool_mode": mode,
+                "status": "pending",
+                "progress_current": 0,
+                "progress_total": 3,
+                "progress_percent": 0,
+                "progress_label": "",
+                "created_at": now,
+            })
+
+            async_result = sub2api_sink_task.apply_async(args=[record_id], countdown=delay_seconds)
+            results.append({
+                "mother_id": mother_id,
+                "record_id": record_id,
+                "task_id": async_result.id,
+                "target_key": target_key,
+                "mode": mode,
+            })
+
+        return Response({"message": "已启动：批量自动入池", "results": results})
 
 
 class CeleryTaskViewSet(ViewSet):
@@ -1179,6 +1411,13 @@ class CeleryTaskViewSet(ViewSet):
         result = AsyncResult(task_id)
         result.revoke(terminate=False)
         return Response({"status": "cancelled"})
+
+    @action(detail=False, methods=["post"], url_path="clear")
+    def clear(self, request):
+        settings = get_settings()
+        count = len(list_tasks(settings))
+        cleared = clear_tasks()
+        return Response({"status": "cleared", "count": count, "cleared": cleared})
 
     @action(detail=True, methods=["get"], url_path="trace")
     def trace(self, request, pk=None):

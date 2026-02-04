@@ -15,6 +15,7 @@ from .views import (
     BrowserManagementViewSet,
     SecurityViewSet,
     SubscriptionViewSet,
+    AccountGroupViewSet,
 )
 
 # 创建路由器
@@ -30,6 +31,7 @@ router.register(r"settings", SettingsViewSet, basename="google-settings")
 router.register(r"browser", BrowserManagementViewSet, basename="google-browser")
 router.register(r"security", SecurityViewSet, basename="google-security")
 router.register(r"subscription", SubscriptionViewSet, basename="google-subscription")
+router.register(r"groups", AccountGroupViewSet, basename="google-groups")
 
 # URL patterns
 urlpatterns = [

@@ -11,7 +11,7 @@ from .models import (
     GoogleCardInfo,
     GoogleTaskAccount,
 )
-from .utils import mask_card_number
+from .utils import mask_card_number, EncryptionUtil
 
 
 # ==================== Google账号相关 ====================
@@ -31,13 +31,15 @@ class GoogleAccountSerializer(serializers.ModelSerializer):
     new_2fa_updated_at = serializers.SerializerMethodField()
     group_name = serializers.SerializerMethodField()
     group_id = serializers.SerializerMethodField()
-    # 不返回敏感字段（密码、密钥）
+    password = serializers.SerializerMethodField()  # 解密后的密码
+    two_fa = serializers.SerializerMethodField()  # 2FA密钥（优先 new_2fa，否则 two_fa_secret）
 
     class Meta:
         model = GoogleAccount
         fields = [
             "id",
             "email",
+            "password",
             "recovery_email",
             "status",
             "status_display",
@@ -49,6 +51,7 @@ class GoogleAccountSerializer(serializers.ModelSerializer):
             "new_2fa",
             "new_2fa_display",
             "new_2fa_updated_at",
+            "two_fa",
             "sheerid_link",
             "sheerid_verified",
             "gemini_status",
@@ -61,6 +64,31 @@ class GoogleAccountSerializer(serializers.ModelSerializer):
             "last_login_at",
         ]
         read_only_fields = ["id", "created_at", "updated_at"]
+
+    def get_password(self, obj: GoogleAccount):
+        """获取解密后的密码"""
+        raw = getattr(obj, "password", None)
+        if not raw:
+            return None
+        try:
+            return EncryptionUtil.decrypt(raw)
+        except Exception:
+            return raw
+
+    def get_two_fa(self, obj: GoogleAccount):
+        """获取2FA密钥：优先 new_2fa_secret，否则用 two_fa_secret"""
+        meta = getattr(obj, "metadata", None) or {}
+        new_2fa = meta.get("new_2fa_secret")
+        if isinstance(new_2fa, str) and new_2fa.strip():
+            return new_2fa.strip()
+        # 回退到原始 two_fa_secret
+        raw = getattr(obj, "two_fa_secret", None)
+        if not raw:
+            return None
+        try:
+            return EncryptionUtil.decrypt(raw)
+        except Exception:
+            return raw
 
     def get_group_id(self, obj: GoogleAccount):
         """获取分组ID（已废弃，返回分组名称作为ID）"""
@@ -546,3 +574,23 @@ class PricingInfoSerializer(serializers.Serializer):
     verify = serializers.IntegerField(help_text="SheerID验证（积分）")
     bind_card = serializers.IntegerField(help_text="绑卡订阅（积分）")
     one_click = serializers.IntegerField(help_text="一键到底（积分）")
+
+
+class AccountGroupSerializer(serializers.ModelSerializer):
+    """账号分组序列化器"""
+
+    account_count = serializers.SerializerMethodField()
+
+    class Meta:
+        from apps.integrations.google_accounts.models import AccountGroup
+        model = AccountGroup
+        fields = ["id", "name", "description", "account_count", "created_at", "updated_at"]
+        read_only_fields = ["id", "created_at", "updated_at"]
+
+    def get_account_count(self, obj):
+        if hasattr(obj, "account_count"):
+            return obj.account_count
+        return GoogleAccount.objects.filter(
+            owner_user=obj.owner_user,
+            group_name=obj.name
+        ).count()

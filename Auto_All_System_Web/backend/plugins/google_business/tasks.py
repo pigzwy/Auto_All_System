@@ -11,7 +11,7 @@ from django.db import transaction
 from django.utils import timezone
 
 from apps.cards.models import Card
-from apps.integrations.google_accounts.models import GoogleAccount
+from apps.integrations.google_accounts.models import GoogleAccount, GoogleAccountStatus
 from .models import GoogleTask, GoogleTaskAccount, GoogleCardInfo
 from .services import (
     browser_pool,
@@ -143,6 +143,7 @@ def process_single_account(
 
                 try:
                     result: Dict[str, Any]
+                    keep_browser_open = False
 
                     if config.get("smoke_test_cdp_only") is True:
                         await page.goto("about:blank")
@@ -357,14 +358,23 @@ def process_single_account(
                             )
                             if not login_result.get("success"):
                                 error_msg = login_result.get("error") or "登录失败"
-                                if "机器人验证" in error_msg or "验证码" in error_msg:
-                                    append_note("检测到机器人验证，已退出")
+                                is_captcha = "机器人验证" in error_msg or "验证码" in error_msg
+                                if is_captcha:
+                                    append_note("检测到机器人验证，已中断")
+                                    account_updates["status"] = GoogleAccountStatus.LOCKED
+                                    keep_browser_open = False
+                                    error_msg = "需要机器人验证"
                                 if "手机号验证" in error_msg or "phone" in error_msg:
                                     append_note("需要手机号验证，需绑卡")
+                                main_flow_title = "机器人验证" if is_captcha else "登录失败"
                                 return {
                                     "success": False,
                                     "message": f"登录失败: {error_msg}",
                                     "account_updates": account_updates,
+                                    "failed_step": "login",
+                                    "main_flow_step_num": 1,
+                                    "main_flow_step_title": main_flow_title,
+                                    "keep_browser": False,
                                 }
                         else:
                             task_logger.info(
@@ -599,10 +609,14 @@ def process_single_account(
 
                 finally:
                     # 断开连接/关闭窗口（按当前任务模型：跑完即关，避免大量窗口堆积）
-                    try:
-                        await browser.close()
-                    except Exception:
-                        pass
+                    # 但如果检测到机器人验证，保留浏览器让用户手动处理
+                    if not keep_browser_open:
+                        try:
+                            await browser.close()
+                        except Exception:
+                            pass
+                    else:
+                        task_logger.info("检测到机器人验证，保留浏览器环境以便手动处理")
 
         # 运行异步函数（只做浏览器自动化，不做 ORM 写入）
         result = asyncio.run(_process())
@@ -820,8 +834,15 @@ def batch_process_task(
     task.started_at = timezone.now()
     task.save()
 
+    max_concurrency = int(config.get("max_concurrency") or config.get("concurrency") or 5)
+    if max_concurrency <= 0:
+        max_concurrency = 1
+    wave_delay = int(config.get("concurrency_delay") or 1)
+    if wave_delay < 0:
+        wave_delay = 0
+
     logger.info(
-        f"Starting batch task {task_id} with {len(account_ids)} accounts, type={task_type}"
+        f"Starting batch task {task_id} with {len(account_ids)} accounts, type={task_type}, concurrency={max_concurrency}"
     )
 
     try:
@@ -838,7 +859,7 @@ def batch_process_task(
         # 创建子任务列表
         subtasks = []
 
-        for account_id in account_ids:
+        for index, account_id in enumerate(account_ids):
             try:
                 # 获取账号信息
                 account = GoogleAccount.objects.get(id=account_id)
@@ -900,8 +921,12 @@ def batch_process_task(
                 task_account.save()
 
                 # 创建子任务
-                subtask = process_single_account.s(
-                    task_id, account_id, profile.id, ws_endpoint, task_type, config
+                delay_seconds = (index // max_concurrency) * wave_delay
+                subtask = (
+                    process_single_account.s(
+                        task_id, account_id, profile.id, ws_endpoint, task_type, config
+                    )
+                    .set(countdown=delay_seconds)
                 )
                 subtasks.append(subtask)
 

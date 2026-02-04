@@ -42,6 +42,25 @@ def _mask_secret(value: str, prefix: int = 4, suffix: int = 4) -> str:
     return f"{v[:prefix]}***{v[-suffix:]}"
 
 
+def _set_task_progress(record_id: str, current: int, total: int, label: str) -> None:
+    try:
+        total_int = max(int(total), 1)
+        current_int = max(0, min(int(current), total_int))
+        percent = int(round(current_int / total_int * 100))
+        patch_task(
+            record_id,
+            {
+                "progress_current": current_int,
+                "progress_total": total_int,
+                "progress_label": str(label or ""),
+                "progress_percent": percent,
+                "progress_updated_at": timezone.now().isoformat(),
+            },
+        )
+    except Exception:
+        pass
+
+
 class SensitiveDataFilter:
     PATTERNS = [
         (
@@ -346,6 +365,8 @@ def invite_only_task(self, record_id: str):
             "celery_task_id": self.request.id,
         },
     )
+    _set_task_progress(record_id, 1, 3, "准备邀请")
+    _set_task_progress(record_id, 1, 3, "创建账号")
 
     try:
         settings = get_settings()
@@ -827,6 +848,7 @@ def self_register_task(self, record_id: str):
                     _log(f"failed to close profile: {e}")
 
         flow_result = _run_sync()
+        _set_task_progress(record_id, 2, 3, "初始化环境")
         register_ok = bool(flow_result.get("register_ok"))
         checkout_ok = flow_result.get("checkout_ok")
         used_card_id = flow_result.get("used_card_id")
@@ -869,6 +891,7 @@ def self_register_task(self, record_id: str):
             "details": flow_result,
         }
 
+        _set_task_progress(record_id, 3, 3, "完成处理")
         patch_task(
             record_id,
             {
@@ -907,6 +930,7 @@ def self_register_task(self, record_id: str):
         except Exception:
             pass
 
+        _set_task_progress(record_id, 3, 3, "失败")
         patch_task(
             record_id,
             {
@@ -929,6 +953,86 @@ def self_register_task(self, record_id: str):
             },
         )
         raise
+
+
+def _launch_geekez_for_account(account_id: str) -> dict[str, Any]:
+    settings = get_settings()
+    acc_raw = find_account(settings, str(account_id))
+    if not isinstance(acc_raw, dict):
+        raise RuntimeError("Account not found")
+
+    acc: dict[str, Any] = acc_raw
+    email = str(acc.get("email") or "").strip()
+    if not email:
+        raise RuntimeError("Email missing")
+
+    from apps.integrations.browser_base import BrowserType, get_browser_manager
+
+    manager = get_browser_manager()
+    api = manager.get_api(BrowserType.GEEKEZ)
+    if not api.health_check():
+        raise RuntimeError("GeekezBrowser 服务不在线")
+
+    profile_name_new = f"gpt_{email}"
+    created_profile = False
+
+    profile = api.get_profile_by_name(profile_name_new)
+    if not profile:
+        profile = api.get_profile_by_name(email)
+    if not profile:
+        created_profile = True
+        profile = api.create_or_update_profile(
+            name=profile_name_new,
+            proxy=None,
+            metadata={"account": {"email": email}},
+        )
+
+    launch_info = api.launch_profile(profile.id)
+    if not launch_info:
+        raise RuntimeError("启动 Geekez profile 失败")
+
+    now = timezone.now().isoformat()
+    existing_profile_value = acc.get("geekez_profile")
+    existing_profile: dict[str, Any] = (
+        existing_profile_value if isinstance(existing_profile_value, dict) else {}
+    )
+    patch = {
+        "geekez_profile": {
+            "browser_type": BrowserType.GEEKEZ.value,
+            "profile_id": profile.id,
+            "profile_name": profile.name,
+            "created_by_system": True,
+            "created_at": str(existing_profile.get("created_at") or now),
+        },
+        "geekez_env": {
+            "browser_type": BrowserType.GEEKEZ.value,
+            "profile_id": launch_info.profile_id,
+            "debug_port": launch_info.debug_port,
+            "cdp_endpoint": launch_info.cdp_endpoint,
+            "ws_endpoint": launch_info.ws_endpoint,
+            "pid": launch_info.pid,
+            "launched_at": now,
+        },
+        "updated_at": now,
+    }
+
+    saved = patch_account(str(account_id), patch)
+
+    return {
+        "success": True,
+        "created_profile": created_profile,
+        "browser_type": BrowserType.GEEKEZ.value,
+        "profile_id": launch_info.profile_id,
+        "debug_port": launch_info.debug_port,
+        "cdp_endpoint": launch_info.cdp_endpoint,
+        "pid": launch_info.pid,
+        "saved": bool(saved),
+    }
+
+
+@shared_task(bind=True)
+def launch_geekez_task(self, account_id: str):
+    return _launch_geekez_for_account(str(account_id))
 
 
 @shared_task(bind=True)
@@ -1097,6 +1201,7 @@ def auto_invite_task(self, record_id: str):
         _append_log(
             f"auto_invite start mother_id={mother_id} email={email} children_total={len(children)} invite_targets={len(child_emails_to_invite)}"
         )
+        _set_task_progress(record_id, 2, 3, "发送邀请")
 
         # 状态：邀请中
         try:
@@ -1709,6 +1814,7 @@ def auto_invite_task(self, record_id: str):
             "children_join_failed": join_failed,
         }
 
+        _set_task_progress(record_id, 3, 3, "完成处理")
         patch_task(
             record_id,
             {
@@ -1740,6 +1846,7 @@ def auto_invite_task(self, record_id: str):
             action="error",
             level="error",
         )
+        _set_task_progress(record_id, 3, 3, "失败")
         patch_task(
             record_id,
             {
@@ -1763,6 +1870,7 @@ def sub2api_sink_task(self, record_id: str):
             "celery_task_id": self.request.id,
         },
     )
+    _set_task_progress(record_id, 1, 3, "准备入池")
 
     try:
         settings = get_settings()
@@ -1997,6 +2105,8 @@ def sub2api_sink_task(self, record_id: str):
             )
 
             timeout = int((settings.get("request") or {}).get("timeout") or 30)
+
+            _set_task_progress(record_id, 2, 3, "推送任务")
 
             if pool_mode == "crs_sync":
                 if not crs_api_base or not crs_admin_token:
@@ -2450,6 +2560,7 @@ def sub2api_sink_task(self, record_id: str):
         fail_n = int(sink_result.get("fail") or 0) if isinstance(sink_result, dict) else 0
         error_msg = f"sub2api_sink failed: ok={ok_n} skip={skip_n} fail={fail_n} (see run.log)"
 
+        _set_task_progress(record_id, 3, 3, "完成处理")
         patch_task(
             record_id,
             {
@@ -2486,6 +2597,7 @@ def sub2api_sink_task(self, record_id: str):
         except Exception:
             pass
 
+        _set_task_progress(record_id, 3, 3, "失败")
         patch_task(
             record_id,
             {

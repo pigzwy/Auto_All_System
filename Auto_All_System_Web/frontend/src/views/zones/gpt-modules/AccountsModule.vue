@@ -72,24 +72,6 @@
         </SelectContent>
       </Select>
 
-      <!-- 批量操作 -->
-      <div v-if="hasSelection" class="flex items-center gap-2 rounded-lg border border-primary/30 bg-primary/5 px-3 py-1.5">
-        <span class="text-sm font-medium text-primary">已选 {{ selectedIds.size }} 项</span>
-        <div class="h-4 w-px bg-primary/30" />
-        <Button size="xs" class="gap-1 bg-emerald-600 hover:bg-emerald-700 text-white" @click="batchRunSelfRegister">
-          <UserPlus class="h-3.5 w-3.5" /> 批量开通
-        </Button>
-        <Button size="xs" class="gap-1 bg-blue-600 hover:bg-blue-700 text-white" @click="batchRunAutoInvite">
-          <ArrowRightToLine class="h-3.5 w-3.5" /> 批量邀请
-        </Button>
-        <Button size="xs" class="gap-1 bg-violet-600 hover:bg-violet-700 text-white" @click="batchRunSub2apiSink">
-          <LayoutList class="h-3.5 w-3.5" /> 批量入池
-        </Button>
-        <button class="ml-1 rounded p-1 hover:bg-primary/20" @click="selectedIds.clear(); selectedIds = new Set(selectedIds)">
-          <X class="h-3.5 w-3.5 text-primary/70" />
-        </button>
-      </div>
-
       <div class="text-sm text-muted-foreground ml-auto">
         共 <span class="font-medium text-foreground">{{ filteredMothers.length }}</span> 条结果
       </div>
@@ -102,18 +84,16 @@
             <TableHeader>
               <TableRow>
                 <TableHead class="w-10">
-                  <Checkbox 
-                    :checked="isAllSelected" 
-                    :indeterminate="hasSelection && !isAllSelected"
-                    @update:checked="toggleSelectAll" 
-                  />
+                  <Checkbox v-model="selectAllState" />
                 </TableHead>
                 <TableHead class="w-10"></TableHead>
                 <TableHead class="min-w-[220px]">母号邮箱</TableHead>
                 <TableHead class="w-20">座位</TableHead>
                 <TableHead class="w-24">备注</TableHead>
                 <TableHead class="min-w-[280px]">状态</TableHead>
+                <TableHead class="w-44">进度</TableHead>
                 <TableHead class="w-36">创建时间</TableHead>
+                <TableHead class="w-64 text-right">操作</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -176,16 +156,18 @@
                 <TableRow
                   class="cursor-pointer transition-colors"
                   :class="[
-                    selectedMotherId === mother.id 
-                      ? 'bg-primary/10 hover:bg-primary/15 border-l-2 border-l-primary' 
-                      : index % 2 === 0 ? 'bg-background hover:bg-muted/50' : 'bg-muted/20 hover:bg-muted/50'
+                    selectedIds.has(mother.id)
+                      ? 'bg-primary/15 hover:bg-primary/20 border-l-2 border-l-primary'
+                      : selectedMotherId === mother.id
+                        ? 'bg-primary/10 hover:bg-primary/15 border-l-2 border-l-primary'
+                        : index % 2 === 0 ? 'bg-background hover:bg-muted/50' : 'bg-muted/20 hover:bg-muted/50'
                   ]"
                   @click="onCurrentChange(mother)"
                 >
                   <TableCell @click.stop>
-                    <Checkbox 
-                      :checked="selectedIds.has(mother.id)" 
-                      @update:checked="toggleSelect(mother.id)" 
+                    <Checkbox
+                      :model-value="selectedIds.has(mother.id)"
+                      @update:modelValue="(val: boolean | 'indeterminate') => handleRowSelect(mother.id, val)"
                     />
                   </TableCell>
                   <TableCell>
@@ -224,7 +206,73 @@
                       </Badge>
                     </div>
                   </TableCell>
+                  <TableCell>
+                    <div v-if="mother.active_task && ['pending','running'].includes(mother.active_task.status || '')" class="space-y-1">
+                      <div class="flex items-center gap-2">
+                        <Loader2 class="h-3.5 w-3.5 animate-spin text-primary" />
+                        <span class="text-xs text-muted-foreground">
+                          {{ mother.active_task.progress_label || '运行中' }}
+                        </span>
+                        <span class="ml-auto text-xs text-muted-foreground">
+                          {{ getProgressPercent(mother) }}%
+                        </span>
+                      </div>
+                      <div class="h-1.5 w-full rounded bg-muted">
+                        <div class="h-1.5 rounded bg-primary" :class="getProgressWidthClass(mother)"></div>
+                      </div>
+                    </div>
+                    <span v-else class="text-xs text-muted-foreground">-</span>
+                  </TableCell>
                   <TableCell class="text-muted-foreground text-xs">{{ formatDate(mother.created_at) }}</TableCell>
+                  <TableCell class="text-right" @click.stop>
+                    <div class="flex items-center justify-end gap-1">
+                      <Button
+                        variant="ghost"
+                        size="xs"
+                        class="gap-1 text-teal-600 hover:text-teal-700 hover:bg-teal-50 dark:text-teal-400 dark:hover:bg-teal-950"
+                        @click="launchGeekez(mother)"
+                      >
+                        <ExternalLink class="h-3.5 w-3.5" />
+                        {{ getGeekezActionLabel(mother) }}
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="xs"
+                        class="gap-1 text-orange-600 hover:text-orange-700 hover:bg-orange-50 dark:text-orange-400 dark:hover:bg-orange-950"
+                        @click="openCreateChild(mother)"
+                      >
+                        <Plus class="h-3.5 w-3.5" />
+                        子号
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="xs"
+                        class="gap-1 text-sky-600 hover:text-sky-700 hover:bg-sky-50 dark:text-sky-400 dark:hover:bg-sky-950"
+                        @click="editSeat(mother)"
+                      >
+                        <Settings class="h-3.5 w-3.5" />
+                        座位
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="xs"
+                        class="gap-1 text-slate-600 hover:text-slate-700 hover:bg-slate-50 dark:text-slate-400 dark:hover:bg-slate-900"
+                        @click="viewTasks(mother)"
+                      >
+                        <FileText class="h-3.5 w-3.5" />
+                        日志
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="xs"
+                        class="gap-1 text-destructive hover:text-destructive"
+                        @click="removeAccount(mother.id)"
+                      >
+                        <Trash2 class="h-3.5 w-3.5" />
+                        删除
+                      </Button>
+                    </div>
+                  </TableCell>
                 </TableRow>
 
                 <!-- Expanded Child Rows -->
@@ -364,7 +412,7 @@
       <DialogContent class="sm:max-w-[500px]">
         <DialogHeader>
           <DialogTitle>生成子账号</DialogTitle>
-          <DialogDescription>为 {{ selectedMother?.email }} 生成子号</DialogDescription>
+          <DialogDescription>为 {{ activeMother?.email }} 生成子号</DialogDescription>
         </DialogHeader>
         <div class="grid gap-4 py-4">
           <div class="grid gap-2">
@@ -394,7 +442,9 @@
           </div>
         </div>
         <DialogFooter>
-          <Button variant="outline" @click="childDialogVisible = false">取消</Button>
+          <DialogClose as-child>
+            <Button variant="outline">取消</Button>
+          </DialogClose>
           <Button :disabled="creating" @click="createChild">
             <Loader2 v-if="creating" class="mr-2 h-4 w-4 animate-spin" />
             创建
@@ -508,8 +558,20 @@
     <Sheet v-model:open="tasksDrawerVisible">
       <SheetContent side="right" class="w-full sm:max-w-[800px]">
         <SheetHeader>
-          <SheetTitle>任务日志</SheetTitle>
-          <SheetDescription>账号：{{ tasksDrawerAccount?.email }}</SheetDescription>
+          <div class="flex items-start justify-between gap-3">
+            <div>
+              <SheetTitle>任务日志</SheetTitle>
+              <SheetDescription>账号：{{ tasksDrawerAccount?.email }}</SheetDescription>
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              class="text-destructive border-destructive/40 hover:bg-destructive/10"
+              @click="clearTaskRecords"
+            >
+              清空记录
+            </Button>
+          </div>
         </SheetHeader>
         <div class="mt-4 h-[calc(100vh-140px)] overflow-y-auto">
           <div v-if="tasksLoading" class="py-10 text-center text-muted-foreground">
@@ -828,16 +890,20 @@ import { ElMessage, ElMessageBox } from '@/lib/element'
 import {
   Armchair,
   Copy,
+  ExternalLink,
+  FileText,
   Loader2,
   Monitor,
   Plus,
   Search,
+  Settings,
   UserPlus,
   Users,
   ArrowRightToLine,
   LayoutList,
   FileDown,
-  X
+  X,
+  Trash2
 } from 'lucide-vue-next'
 
 import { Badge } from '@/components/ui/badge'
@@ -853,6 +919,7 @@ import {
 } from '@/components/ui/accordion'
 import {
   Dialog,
+  DialogClose,
   DialogContent,
   DialogDescription,
   DialogFooter,
@@ -891,6 +958,7 @@ type MotherRow = GptBusinessAccountsResponse['mothers'][number]
 
 // 从父组件注入状态
 const selectedMother = inject<Ref<GptBusinessAccount | null>>('selectedMother')!
+const selectedMotherIds = inject<Ref<string[]>>('selectedMotherIds')!
 const accountsLoading = inject<Ref<boolean>>('accountsLoading')!
 
 const loading = ref(false)
@@ -906,26 +974,48 @@ const envFilter = ref('all')
 
 // 批量选择
 const selectedIds = ref<Set<string>>(new Set())
-const isAllSelected = computed(() => 
-  filteredMothers.value.length > 0 && 
-  filteredMothers.value.every((m: any) => selectedIds.value.has(m.id))
-)
+const selectAllState = computed<boolean | 'indeterminate'>({
+  get: () => {
+    const total = filteredMothers.value.length
+    if (total === 0) return false
+    let selectedCount = 0
+    for (const mother of filteredMothers.value) {
+      if (selectedIds.value.has(mother.id)) selectedCount++
+    }
+    if (selectedCount === 0) return false
+    if (selectedCount === total) return true
+    return 'indeterminate'
+  },
+  set: (val) => {
+    if (val === true) {
+      filteredMothers.value.forEach((m: any) => selectedIds.value.add(m.id))
+    } else {
+      selectedIds.value.clear()
+    }
+    selectedIds.value = new Set(selectedIds.value) // 触发响应式
+  }
+})
 const hasSelection = computed(() => selectedIds.value.size > 0)
 
-const toggleSelectAll = () => {
-  if (isAllSelected.value) {
-    selectedIds.value.clear()
-  } else {
-    filteredMothers.value.forEach((m: any) => selectedIds.value.add(m.id))
-  }
-  selectedIds.value = new Set(selectedIds.value) // 触发响应式
+watch(
+  selectedIds,
+  (val) => {
+    if (!selectedMotherIds) return
+    selectedMotherIds.value = Array.from(val)
+  },
+  { immediate: true }
+)
+
+const onSelectionClear = () => {
+  selectedIds.value.clear()
+  selectedIds.value = new Set(selectedIds.value)
 }
 
-const toggleSelect = (id: string) => {
-  if (selectedIds.value.has(id)) {
-    selectedIds.value.delete(id)
-  } else {
+const handleRowSelect = (id: string, checked: boolean | 'indeterminate') => {
+  if (checked === true) {
     selectedIds.value.add(id)
+  } else {
+    selectedIds.value.delete(id)
   }
   selectedIds.value = new Set(selectedIds.value) // 触发响应式
 }
@@ -935,7 +1025,11 @@ const batchRunSelfRegister = async () => {
   if (selectedIds.value.size === 0) return
   const ids = Array.from(selectedIds.value)
   try {
-    await Promise.all(ids.map(id => gptBusinessApi.selfRegister(id)))
+    await gptBusinessApi.batchSelfRegister({
+      mother_ids: ids,
+      concurrency: 5,
+      open_geekez: true
+    })
     ElMessage.success(`已启动 ${ids.length} 个母号的自动开通`)
     selectedIds.value.clear()
     refresh()
@@ -948,11 +1042,40 @@ const batchRunAutoInvite = async () => {
   if (selectedIds.value.size === 0) return
   const ids = Array.from(selectedIds.value)
   try {
-    await Promise.all(ids.map(id => gptBusinessApi.autoInvite(id)))
+    await gptBusinessApi.batchAutoInvite({
+      mother_ids: ids,
+      concurrency: 5,
+      open_geekez: true
+    })
     ElMessage.success(`已启动 ${ids.length} 个母号的自动邀请`)
     selectedIds.value.clear()
+    refresh()
   } catch (e: any) {
     ElMessage.error(e?.response?.data?.detail || e?.message || '批量操作失败')
+  }
+}
+
+const batchDelete = async () => {
+  if (selectedIds.value.size === 0) return
+  const ids = Array.from(selectedIds.value)
+  try {
+    await ElMessageBox.confirm(
+      `确定要删除选中的 ${ids.length} 个账号吗？删除后不可恢复，删除母号会同时删除其子账号。`,
+      '批量删除',
+      {
+        type: 'warning',
+        confirmButtonText: '删除',
+        cancelButtonText: '取消'
+      }
+    )
+    await Promise.all(ids.map(id => gptBusinessApi.deleteAccount(id)))
+    ElMessage.success(`已删除 ${ids.length} 个账号`)
+    selectedIds.value.clear()
+    selectedIds.value = new Set(selectedIds.value)
+    refresh()
+  } catch (e: any) {
+    if (e === 'cancel' || e?.message === 'cancel') return
+    ElMessage.error(e?.response?.data?.detail || e?.message || '批量删除失败')
   }
 }
 
@@ -1121,7 +1244,11 @@ const startSub2apiSink = async () => {
   sub2apiStarting.value = true
   try {
     const ids = sub2apiMotherIds.value || []
-    await Promise.all(ids.map(id => gptBusinessApi.sub2apiSink(id, { mode: poolMode.value })))
+    await gptBusinessApi.batchSub2apiSink({
+      mother_ids: ids,
+      concurrency: Number(sub2apiForm.concurrency || 5),
+      mode: poolMode.value
+    })
     ElMessage.success(`已启动 ${ids.length} 个母号的自动入池`)
     selectedIds.value.clear()
     selectedIds.value = new Set(selectedIds.value)
@@ -1193,6 +1320,22 @@ const filteredMothers = computed(() => {
 const formatDate = (date: string | undefined) => {
   if (!date) return '-'
   return new Date(date).toLocaleString()
+}
+
+const getProgressPercent = (mother: MotherRow) => {
+  const percent = Number(mother.active_task?.progress_percent ?? 0)
+  if (Number.isNaN(percent)) return 0
+  return Math.max(0, Math.min(100, Math.round(percent)))
+}
+
+const getProgressWidthClass = (mother: MotherRow) => {
+  const percent = getProgressPercent(mother)
+  if (percent >= 100) return 'w-full'
+  if (percent >= 75) return 'w-3/4'
+  if (percent >= 50) return 'w-1/2'
+  if (percent >= 25) return 'w-1/4'
+  if (percent > 0) return 'w-1/6'
+  return 'w-0'
 }
 
 const expandedRows = ref(new Set<number>())
@@ -1280,6 +1423,13 @@ const refresh = async () => {
 const onCurrentChange = (row: any) => {
   selectedMother.value = row || null
   activeMother.value = row || null
+  if (!row?.id) return
+  if (selectedIds.value.has(row.id)) {
+    selectedIds.value.delete(row.id)
+  } else {
+    selectedIds.value.add(row.id)
+  }
+  selectedIds.value = new Set(selectedIds.value)
 }
 
 const openCreateMother = () => {
@@ -1322,6 +1472,24 @@ const openCreateChild = (mother: MotherRow) => {
   childForm.count = 1
   childForm.note = ''
   childDialogVisible.value = true
+}
+
+const editSeat = async (mother: MotherRow) => {
+  try {
+    const { value } = await ElMessageBox.prompt('请输入母号座位数（seat_total）', '修改座位', {
+      confirmButtonText: '保存',
+      cancelButtonText: '取消',
+      inputValue: String(mother.seat_total || 0),
+      inputPattern: /^\d+$/,
+      inputErrorMessage: '请输入非负整数'
+    })
+    await gptBusinessApi.updateAccount(mother.id, { seat_total: Number(value) })
+    ElMessage.success('已更新')
+    await refresh()
+  } catch (e: any) {
+    if (e === 'cancel' || e?.message === 'cancel') return
+    ElMessage.error(e?.response?.data?.detail || e?.message || '更新失败')
+  }
 }
 
 const createChild = async () => {
@@ -1391,7 +1559,7 @@ const removeAccount = async (accountId: string) => {
 }
 
 const getGeekezActionLabel = (account: GptBusinessAccount) => {
-  return account.geekez_profile_exists ? '打开环境' : '创建环境'
+  return account.geekez_profile_exists ? '打开' : '创建'
 }
 
 const getEnvStatusClass = (exists: boolean | undefined) => {
@@ -2021,6 +2189,7 @@ onMounted(() => {
   window.addEventListener('gpt-open-create-child', handleOpenCreateChild)
   window.addEventListener('gpt-view-tasks', handleViewTasks)
   window.addEventListener('gpt-open-sub2api-sink', handleOpenSub2apiSink)
+  window.addEventListener('gpt-selection-clear', onSelectionClear)
   
   // 快捷键支持
   window.addEventListener('keydown', handleKeydown)
@@ -2033,6 +2202,7 @@ onUnmounted(() => {
   window.removeEventListener('gpt-open-create-child', handleOpenCreateChild)
   window.removeEventListener('gpt-view-tasks', handleViewTasks)
   window.removeEventListener('gpt-open-sub2api-sink', handleOpenSub2apiSink)
+  window.removeEventListener('gpt-selection-clear', onSelectionClear)
   window.removeEventListener('keydown', handleKeydown)
   stopTracePolling()
 })

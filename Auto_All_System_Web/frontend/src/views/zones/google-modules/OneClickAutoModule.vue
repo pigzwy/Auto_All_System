@@ -1,7 +1,7 @@
 <template>
   <div class="space-y-6">
     <div class="flex items-center justify-between">
-      <h2 class="text-2xl font-semibold text-foreground">一键全自动</h2>
+  <h2 class="text-2xl font-semibold text-foreground">一键启动</h2>
     </div>
 
     <Card class="bg-card text-card-foreground">

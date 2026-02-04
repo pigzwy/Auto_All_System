@@ -104,6 +104,17 @@ def add_task(record: dict[str, Any]) -> dict[str, Any] | None:
     return find_task(updated_settings, str(record.get("id")))
 
 
+def clear_tasks() -> int:
+    def mutator(settings: dict[str, Any]) -> dict[str, Any]:
+        settings["tasks"] = []
+        settings["last_updated"] = timezone.now().isoformat()
+        return settings
+
+    current = len(list_tasks(get_settings()))
+    update_settings(mutator)
+    return current
+
+
 def list_accounts(settings: dict[str, Any]) -> list[dict[str, Any]]:
     accounts = settings.get("accounts") or []
     if isinstance(accounts, list):

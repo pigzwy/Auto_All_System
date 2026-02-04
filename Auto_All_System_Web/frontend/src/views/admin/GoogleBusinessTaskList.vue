@@ -25,7 +25,7 @@
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">全部类型</SelectItem>
-                <SelectItem value="one_click">一键全自动</SelectItem>
+              <SelectItem value="one_click">一键启动</SelectItem>
                 <SelectItem value="register">注册账号</SelectItem>
                 <SelectItem value="login">登录检测</SelectItem>
                 <SelectItem value="verify">验证/绑卡</SelectItem>
@@ -237,7 +237,7 @@ const viewDetail = (row: any) => {
 
 const getTaskTypeName = (type: string) => {
   const map: Record<string, string> = {
-    one_click: '一键全自动',
+  one_click: '一键启动',
     register: '注册账号',
     login: '登录检测',
     verify: '验证/绑卡',

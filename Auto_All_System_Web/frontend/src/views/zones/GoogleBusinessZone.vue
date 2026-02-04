@@ -4,10 +4,10 @@
       <template #toolbar>
         <!-- 已选账号 -->
         <div class="flex items-center gap-3">
-          <span class="text-sm text-muted-foreground">已选：</span>
+          <span class="text-sm text-muted-foreground">当前选择：</span>
           <div v-if="selectedCount > 0" class="flex items-center gap-2 rounded-lg border border-primary/30 bg-primary/5 px-3 py-1.5">
             <div class="h-2 w-2 rounded-full bg-primary animate-pulse" />
-            <span class="text-sm font-medium text-primary">{{ selectedCount }} 个账号</span>
+            <span class="text-sm font-medium text-primary">已选 {{ selectedCount }} 项</span>
             <button class="ml-1 rounded p-0.5 hover:bg-primary/20" @click="clearSelection">
               <X class="h-3.5 w-3.5 text-primary/70 hover:text-primary" />
             </button>
@@ -36,7 +36,7 @@
             <span class="mr-2 text-xs font-medium text-muted-foreground">自动化</span>
             <Button size="sm" class="gap-2 bg-emerald-600 hover:bg-emerald-700 text-white" :disabled="selectedCount === 0" @click="openOneClickDialog">
               <Wand2 class="h-4 w-4" />
-              一键全自动
+              一键启动
             </Button>
 
             <DropdownMenu>

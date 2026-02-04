@@ -14,6 +14,18 @@ export interface GptBusinessInviteTaskCreate {
   legacy_args?: string[]
 }
 
+export interface GptBusinessActiveTask {
+  id?: string
+  type?: string
+  status?: string
+  progress_current?: number
+  progress_total?: number
+  progress_percent?: number
+  progress_label?: string
+  created_at?: string
+  started_at?: string
+}
+
 export type GptBusinessAccountType = 'mother' | 'child'
 
 export interface GptBusinessAccount {
@@ -30,6 +42,8 @@ export interface GptBusinessAccount {
 
   geekez_profile_exists?: boolean
   geekez_env?: any
+
+  active_task?: GptBusinessActiveTask
 
   // 状态字段（后端 tasks 会写回；用于前端展示/跳过策略）
   open_status?: string
@@ -161,8 +175,24 @@ export const gptBusinessApi = {
     return request.post(`/plugins/gpt-business/accounts/${motherAccountId}/self_register/`)
   },
 
+  batchSelfRegister(data: {
+    mother_ids: string[]
+    concurrency?: number
+    open_geekez?: boolean
+  }): Promise<{ message?: string; results?: any[] }> {
+    return request.post('/plugins/gpt-business/accounts/batch/self_register/', data)
+  },
+
   autoInvite(motherAccountId: string): Promise<{ message?: string; task_id?: string }> {
     return request.post(`/plugins/gpt-business/accounts/${motherAccountId}/auto_invite/`)
+  },
+
+  batchAutoInvite(data: {
+    mother_ids: string[]
+    concurrency?: number
+    open_geekez?: boolean
+  }): Promise<{ message?: string; results?: any[] }> {
+    return request.post('/plugins/gpt-business/accounts/batch/auto_invite/', data)
   },
 
   sub2apiSink(
@@ -173,6 +203,16 @@ export const gptBusinessApi = {
     }
   ): Promise<{ message?: string; task_id?: string; record_id?: string; target_key?: string }> {
     return request.post(`/plugins/gpt-business/accounts/${motherAccountId}/sub2api_sink/`, data || {})
+  },
+
+  batchSub2apiSink(data: {
+    mother_ids: string[]
+    concurrency?: number
+    open_geekez?: boolean
+    target_key?: string
+    mode?: string
+  }): Promise<{ message?: string; results?: any[] }> {
+    return request.post('/plugins/gpt-business/accounts/batch/sub2api_sink/', data)
   },
 
   launchGeekez(accountId: string): Promise<{

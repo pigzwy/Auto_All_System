@@ -5,7 +5,7 @@
         <div class="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
           <div class="flex items-center gap-2">
             <Icon color="#0EA5E9"><MagicStick /></Icon>
-            <CardTitle class="text-base">一键全自动处理</CardTitle>
+      <CardTitle class="text-base">一键启动处理</CardTitle>
           </div>
           <Tag type="info" size="large">
             登录 → 检测 → 验证 → 绑卡 → 订阅

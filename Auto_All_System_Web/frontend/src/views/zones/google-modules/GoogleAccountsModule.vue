@@ -97,8 +97,8 @@
               <TableRow>
                 <TableHead class="w-10">
                   <Checkbox
-                    :checked="allSelectedOnPage || (someSelectedOnPage ? 'indeterminate' : false)"
-                    @update:checked="onToggleAllOnPage"
+                    :model-value="allSelectedOnPage ? true : (someSelectedOnPage ? 'indeterminate' : false)"
+                    @update:modelValue="onToggleAllOnPage"
                   />
                 </TableHead>
                 <TableHead class="w-20">ID</TableHead>
@@ -138,8 +138,8 @@
               >
                 <TableCell @click.stop>
                   <Checkbox
-                    :checked="isRowSelected(row)"
-                    @update:checked="(v: boolean) => onToggleRow(row, v)"
+                    :model-value="isRowSelected(row)"
+                    @update:modelValue="(v: boolean | 'indeterminate') => onToggleRow(row, v === true)"
                   />
                 </TableCell>
 
@@ -427,6 +427,58 @@
           </div>
 
           <div class="space-y-1">
+            <div class="text-xs text-muted-foreground">密码</div>
+            <div class="flex items-center gap-2">
+              <code v-if="selectedAccount.password" class="flex-1 rounded bg-muted px-2 py-1 font-mono text-sm break-all">
+                {{ showDetailPassword ? selectedAccount.password : '••••••••' }}
+              </code>
+              <span v-else class="text-sm text-muted-foreground">无</span>
+              <Button
+                v-if="selectedAccount.password"
+                variant="ghost"
+                size="sm"
+                class="h-7 px-2"
+                @click="showDetailPassword = !showDetailPassword"
+              >
+                <Eye v-if="!showDetailPassword" class="h-4 w-4" />
+                <EyeOff v-else class="h-4 w-4" />
+              </Button>
+              <Button
+                v-if="selectedAccount.password"
+                variant="ghost"
+                size="sm"
+                class="h-7 px-2"
+                @click="copyToClipboard(selectedAccount.password, '密码')"
+              >
+                <Copy class="h-4 w-4" />
+              </Button>
+            </div>
+          </div>
+
+          <div class="space-y-1 sm:col-span-2">
+            <div class="text-xs text-muted-foreground">2FA 密钥</div>
+            <div class="flex items-center gap-2">
+              <template v-if="selectedAccount.two_fa || selectedAccount.new_2fa_display || selectedAccount.new_2fa">
+                <code class="flex-1 rounded bg-muted px-2 py-1 font-mono text-sm break-all">
+                  {{ format2fa(selectedAccount.two_fa || selectedAccount.new_2fa_display || selectedAccount.new_2fa) }}
+                </code>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  class="h-7 px-2"
+                  @click="copyToClipboard(selectedAccount.two_fa || selectedAccount.new_2fa_display || selectedAccount.new_2fa || '', '2FA 密钥')"
+                >
+                  <Copy class="h-4 w-4" />
+                </Button>
+              </template>
+              <span v-else class="text-sm text-muted-foreground">无</span>
+            </div>
+            <div v-if="selectedAccount.new_2fa_updated_at" class="text-xs text-muted-foreground">
+              更新于 {{ formatDate(selectedAccount.new_2fa_updated_at) }}
+            </div>
+          </div>
+
+          <div class="space-y-1">
             <div class="text-xs text-muted-foreground">分组</div>
             <div>
               <Badge v-if="selectedAccount.group_name" variant="outline" class="rounded-full">{{ selectedAccount.group_name }}</Badge>
@@ -618,8 +670,14 @@
                     </TableCell>
                     <TableCell>
                       <span v-if="row.source === 'google' && row.task_type === 'one_click'">
-                        <span class="font-medium">{{ row.main_flow_step_num ? `${row.main_flow_step_num}/6` : '-' }}</span>
-                        <span class="ml-2 text-xs text-muted-foreground">{{ row.main_flow_step_title || '' }}</span>
+                        <span
+                          class="font-medium"
+                          :class="{ 'text-destructive': row.status === 'failed' }"
+                        >{{ row.main_flow_step_num ? `${row.main_flow_step_num}/6` : '-' }}</span>
+                        <span
+                          class="ml-2 text-xs"
+                          :class="row.status === 'failed' ? 'text-destructive' : 'text-muted-foreground'"
+                        >{{ row.main_flow_step_title || '' }}</span>
                       </span>
                       <span v-else class="text-xs text-muted-foreground">-</span>
                     </TableCell>
@@ -845,11 +903,11 @@
       </DialogContent>
     </Dialog>
 
-    <!-- 一键全自动配置（主流程增项） -->
+    <!-- 一键启动配置（主流程增项） -->
     <Dialog v-model:open="showOneClickDialog">
       <DialogContent class="sm:max-w-[560px]">
         <DialogHeader>
-          <DialogTitle>一键全自动</DialogTitle>
+          <DialogTitle>一键启动</DialogTitle>
           <DialogDescription>主流程：登录 -> Google One -> 检查学生资格 -> 学生验证 -> 订阅 -> 完成</DialogDescription>
         </DialogHeader>
 
@@ -1063,6 +1121,9 @@ import {
   Users,
   XCircle,
   KeyRound,
+  Eye,
+  EyeOff,
+  Copy,
 } from 'lucide-vue-next'
 
 import { Badge } from '@/components/ui/badge'
@@ -1118,6 +1179,7 @@ const showDialog = ref(false)
 const showImportDialog = ref(false)
 const showEditDialog = ref(false)
 const showViewDialog = ref(false)
+const showDetailPassword = ref(false)
 const selectedAccount = ref<GoogleAccount | null>(null)
 const importText = ref('')
 const filterType = ref('all')
@@ -2154,6 +2216,7 @@ const handleImportAccounts = async () => {
 
 const viewAccount = (account: GoogleAccount) => {
   selectedAccount.value = account
+  showDetailPassword.value = false
   showViewDialog.value = true
 }
 
@@ -2237,6 +2300,16 @@ const formatDate = (dateStr: string) => {
 // New-2FA 展示：去除中间空格（Google 提示 spaces don't matter）
 const format2fa = (val?: string | null) => {
   return String(val || '').replace(/\s+/g, '')
+}
+
+// 通用复制函数
+const copyToClipboard = async (text: string, label: string = '内容') => {
+  try {
+    await navigator.clipboard.writeText(text)
+    ElMessage.success(`${label}已复制`)
+  } catch {
+    ElMessage.error('复制失败')
+  }
 }
 
 // 单账号操作事件处理
