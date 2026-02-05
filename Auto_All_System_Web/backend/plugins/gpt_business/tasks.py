@@ -2633,6 +2633,8 @@ def team_push_task(
     target_url: str,
     admin_password: str,
     is_warranty: bool = True,
+    seat_total: int = 5,
+    note: str = "",
 ):
     """
     推送母号 session 到外部兑换系统。
@@ -2676,10 +2678,9 @@ def team_push_task(
             raise ValueError(f"母号不存在: {mother_id}")
 
         email = mother.get("email", "")
-        seat_total = mother.get("seat_total", 0)
-        note = mother.get("note", "")
 
         _log(f"母号: {email}")
+        _log(f"座位数: {seat_total}, 备注: {note}")
 
         if not email:
             raise ValueError("母号邮箱为空")
@@ -2751,7 +2752,6 @@ def team_push_task(
 
         # 更新账号状态
         patch_account(
-            settings,
             mother_id,
             {
                 "team_push_status": "success",
@@ -2791,7 +2791,6 @@ def team_push_task(
         # 更新账号状态为失败
         try:
             patch_account(
-                settings,
                 mother_id,
                 {
                     "team_push_status": "failed",

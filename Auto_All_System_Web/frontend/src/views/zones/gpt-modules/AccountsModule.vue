@@ -797,9 +797,19 @@
             <label class="text-sm font-medium">管理员密码</label>
             <Input v-model="teamPushForm.password" type="password" placeholder="输入管理员密码" />
           </div>
-          <div class="flex items-center gap-2">
-            <Checkbox v-model:checked="teamPushForm.is_warranty" />
-            <label class="text-sm text-muted-foreground">质保</label>
+          <div class="grid grid-cols-2 gap-4">
+            <div class="grid gap-2">
+              <label class="text-sm font-medium">座位数</label>
+              <Input v-model.number="teamPushForm.seat_total" type="number" min="1" placeholder="5" />
+            </div>
+            <div class="flex items-center gap-2 pt-6">
+              <Checkbox v-model:checked="teamPushForm.is_warranty" />
+              <label class="text-sm text-muted-foreground">质保</label>
+            </div>
+          </div>
+          <div class="grid gap-2">
+            <label class="text-sm font-medium">备注</label>
+            <Input v-model="teamPushForm.note" placeholder="从auto推送" />
           </div>
         </div>
         <DialogFooter>
@@ -1279,7 +1289,9 @@ const teamPushLoading = ref(false)
 const teamPushForm = reactive({
   target_url: localStorage.getItem('gpt_team_push_url') || '',
   password: '',
-  is_warranty: true
+  is_warranty: true,
+  seat_total: 5,
+  note: '从auto推送'
 })
 
 const openTeamPushDialog = (motherIds: string[]) => {
@@ -1287,6 +1299,8 @@ const openTeamPushDialog = (motherIds: string[]) => {
   // URL 从 localStorage 读取，不清空
   teamPushForm.password = ''
   teamPushForm.is_warranty = true
+  teamPushForm.seat_total = 5
+  teamPushForm.note = '从auto推送'
   teamPushDialogVisible.value = true
 }
 
@@ -1305,7 +1319,9 @@ const executeTeamPush = async () => {
         gptBusinessApi.teamPush(id, {
           target_url: teamPushForm.target_url,
           password: teamPushForm.password,
-          is_warranty: teamPushForm.is_warranty
+          is_warranty: teamPushForm.is_warranty,
+          seat_total: teamPushForm.seat_total,
+          note: teamPushForm.note
         })
       )
     )

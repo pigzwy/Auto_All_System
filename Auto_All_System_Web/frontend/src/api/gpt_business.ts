@@ -263,6 +263,8 @@ export const gptBusinessApi = {
       target_url: string
       password: string
       is_warranty?: boolean
+      seat_total?: number
+      note?: string
     }
   ): Promise<{ message?: string; task_id?: string; record_id?: string }> {
     return request.post(`/plugins/gpt-business/accounts/${motherAccountId}/team_push/`, data)

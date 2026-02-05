@@ -1237,6 +1237,8 @@ class AccountsViewSet(ViewSet):
         target_url = str(request.data.get("target_url") or "").strip()
         admin_password = str(request.data.get("password") or "").strip()
         is_warranty = bool(request.data.get("is_warranty", True))
+        seat_total = int(request.data.get("seat_total") or 5)
+        note = str(request.data.get("note") or "").strip()
 
         if not target_url:
             return Response({"detail": "target_url is required"}, status=status.HTTP_400_BAD_REQUEST)
@@ -1258,7 +1260,7 @@ class AccountsViewSet(ViewSet):
             "created_at": now,
         })
 
-        async_result = team_push_task.delay(record_id, str(pk), target_url, admin_password, is_warranty)
+        async_result = team_push_task.delay(record_id, str(pk), target_url, admin_password, is_warranty, seat_total, note)
         return Response({
             "message": "已启动：推送到兑换系统",
             "task_id": async_result.id,
