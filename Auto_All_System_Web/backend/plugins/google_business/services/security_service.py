@@ -643,6 +643,15 @@ class GoogleSecurityService:
                 {**account, "totp_secret": current_secret},
                 task_logger=task_logger,
             )
+            
+            # 等待页面跳转到 twosv（密码/TOTP 验证完成后）
+            # 最多等待 30 秒
+            for _ in range(30):
+                url_now = getattr(page, "url", "") or ""
+                if "twosv" in url_now or "two-step-verification" in url_now:
+                    break
+                await asyncio.sleep(1)
+            await asyncio.sleep(1)  # 额外等待页面渲染
 
             # 2) 进入 Authenticator app 设置
             # 真实元素结构:
