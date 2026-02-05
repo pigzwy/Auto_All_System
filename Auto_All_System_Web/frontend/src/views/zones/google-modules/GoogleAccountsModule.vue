@@ -53,15 +53,82 @@
       <CardContent class="p-4">
         <div class="flex flex-wrap items-center gap-3">
           <Select :model-value="filterType" @update:modelValue="(v) => onFilterTypeChange(v)">
-            <SelectTrigger class="h-9 w-40">
-              <SelectValue placeholder="账号状态筛选" />
+            <SelectTrigger class="h-9 w-36">
+              <SelectValue placeholder="状态筛选" />
             </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">全部状态</SelectItem>
-              <SelectItem value="ineligible">无资格</SelectItem>
-              <SelectItem value="unbound_card">未绑卡</SelectItem>
-              <SelectItem value="success">成功</SelectItem>
-              <SelectItem value="other">其他</SelectItem>
+            <SelectContent class="max-h-[400px]">
+              <SelectItem value="all">
+                <span class="flex items-center gap-2">
+                  <span class="h-2 w-2 rounded-full bg-slate-400" />
+                  全部
+                </span>
+              </SelectItem>
+
+              <!-- 主线流程状态 -->
+              <div class="px-2 py-1.5 text-xs font-medium text-muted-foreground">流程状态</div>
+              <SelectItem value="pending">
+                <span class="flex items-center gap-2">
+                  <span class="h-2 w-2 rounded-full bg-slate-300" />
+                  待处理
+                </span>
+              </SelectItem>
+              <SelectItem value="logged_in">
+                <span class="flex items-center gap-2">
+                  <span class="h-2 w-2 rounded-full bg-blue-400" />
+                  已登录
+                </span>
+              </SelectItem>
+              <SelectItem value="link_ready">
+                <span class="flex items-center gap-2">
+                  <span class="h-2 w-2 rounded-full bg-cyan-500" />
+                  已检测
+                </span>
+              </SelectItem>
+              <SelectItem value="verified">
+                <span class="flex items-center gap-2">
+                  <span class="h-2 w-2 rounded-full bg-violet-500" />
+                  已验证
+                </span>
+              </SelectItem>
+              <SelectItem value="card_bound">
+                <span class="flex items-center gap-2">
+                  <span class="h-2 w-2 rounded-full bg-amber-500" />
+                  已绑卡
+                </span>
+              </SelectItem>
+              <SelectItem value="subscribed">
+                <span class="flex items-center gap-2">
+                  <span class="h-2 w-2 rounded-full bg-emerald-500" />
+                  已完成
+                </span>
+              </SelectItem>
+
+              <!-- 失败状态 -->
+              <div class="px-2 py-1.5 text-xs font-medium text-muted-foreground">异常状态</div>
+              <SelectItem value="ineligible">
+                <span class="flex items-center gap-2">
+                  <span class="h-2 w-2 rounded-full bg-rose-500" />
+                  无资格
+                </span>
+              </SelectItem>
+              <SelectItem value="login_failed">
+                <span class="flex items-center gap-2">
+                  <span class="h-2 w-2 rounded-full bg-red-400" />
+                  登录失败
+                </span>
+              </SelectItem>
+              <SelectItem value="verify_failed">
+                <span class="flex items-center gap-2">
+                  <span class="h-2 w-2 rounded-full bg-orange-500" />
+                  验证失败
+                </span>
+              </SelectItem>
+              <SelectItem value="bindcard_failed">
+                <span class="flex items-center gap-2">
+                  <span class="h-2 w-2 rounded-full bg-pink-500" />
+                  绑卡失败
+                </span>
+              </SelectItem>
             </SelectContent>
           </Select>
 
@@ -103,7 +170,7 @@
                 </TableHead>
                 <TableHead class="w-20">ID</TableHead>
                 <TableHead class="min-w-[260px]">邮箱</TableHead>
-                <TableHead class="min-w-[320px]">进度</TableHead>
+                <TableHead class="min-w-[320px]">状态</TableHead>
                 <TableHead class="w-24">n-2fa</TableHead>
                 <TableHead class="w-28">环境</TableHead>
                 <TableHead class="w-44">创建时间</TableHead>

@@ -342,6 +342,76 @@ class GoogleAccountViewSet(viewsets.ModelViewSet):
                     | Q(metadata__google_one_status="subscribed")
                     | Q(status="subscribed")
                 )
+            # === 主线流程状态筛选 ===
+            elif type_tag == "pending":
+                # 待处理：未登录过，无任何进度
+                queryset = queryset.filter(
+                    Q(last_login_at__isnull=True)
+                    & Q(sheerid_verified=False)
+                    & Q(card_bound=False)
+                    & ~Q(status__in=["logged_in", "link_ready", "verified", "subscribed", "ineligible"])
+                    & ~Q(metadata__google_one_status__in=["link_ready", "verified", "subscribed", "ineligible"])
+                )
+            elif type_tag == "logged_in":
+                # 已登录：有登录记录但未到检测资格阶段
+                queryset = queryset.filter(
+                    Q(last_login_at__isnull=False)
+                    & Q(sheerid_verified=False)
+                    & Q(card_bound=False)
+                    & ~Q(metadata__google_one_status__in=["link_ready", "verified", "subscribed", "ineligible"])
+                    & ~Q(status__in=["link_ready", "verified", "subscribed", "ineligible"])
+                )
+            elif type_tag == "link_ready":
+                # 已检测/链接就绪：有 sheerid_link 或 google_one_status=link_ready，但未验证
+                queryset = queryset.filter(
+                    (Q(sheerid_link__isnull=False) & ~Q(sheerid_link=""))
+                    | Q(metadata__google_one_status="link_ready")
+                    | Q(status="link_ready")
+                ).filter(
+                    Q(sheerid_verified=False)
+                    & Q(card_bound=False)
+                )
+            elif type_tag == "verified":
+                # 已验证：sheerid_verified=True 或 google_one_status=verified，但未绑卡
+                queryset = queryset.filter(
+                    (Q(sheerid_verified=True) | Q(metadata__google_one_status="verified") | Q(status="verified"))
+                    & Q(card_bound=False)
+                )
+            elif type_tag == "card_bound":
+                # 已绑卡：card_bound=True 但未完成订阅
+                queryset = queryset.filter(
+                    Q(card_bound=True)
+                    & ~Q(gemini_status="active")
+                    & ~Q(metadata__google_one_status="subscribed")
+                    & ~Q(status="subscribed")
+                )
+            elif type_tag == "subscribed":
+                # 已订阅/完成：gemini_status=active 或 google_one_status=subscribed
+                queryset = queryset.filter(
+                    Q(gemini_status="active")
+                    | Q(metadata__google_one_status="subscribed")
+                    | Q(status="subscribed")
+                )
+            elif type_tag == "login_failed":
+                # 登录失败：status=locked/disabled 或 notes 包含失败关键词
+                queryset = queryset.filter(
+                    Q(status__in=["locked", "disabled"])
+                    | Q(notes__icontains="机器人验证")
+                    | Q(notes__icontains="验证码")
+                    | Q(notes__icontains="登录失败")
+                )
+            elif type_tag == "verify_failed":
+                # 验证失败
+                queryset = queryset.filter(
+                    Q(notes__icontains="学生验证失败")
+                )
+            elif type_tag == "bindcard_failed":
+                # 绑卡失败
+                queryset = queryset.filter(
+                    Q(notes__icontains="订阅失败")
+                    | Q(notes__icontains="绑卡失败")
+                    | Q(notes__icontains="绑卡过程出错")
+                )
 
         return queryset.order_by("-created_at")
 
