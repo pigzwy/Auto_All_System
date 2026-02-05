@@ -368,12 +368,12 @@
           </div>
           <div class="grid gap-2">
             <label class="text-sm font-medium">域名</label>
-            <Select v-model="motherForm.domain">
+            <Select :model-value="motherForm.domain || '__random__'" @update:model-value="(v) => motherForm.domain = v === '__random__' ? '' : v">
               <SelectTrigger>
                 <SelectValue placeholder="留空=随机" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="">随机</SelectItem>
+                <SelectItem value="__random__">随机</SelectItem>
                 <SelectItem v-for="d in motherDomains" :key="d" :value="d">{{ d }}</SelectItem>
               </SelectContent>
             </Select>
