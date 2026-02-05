@@ -653,54 +653,7 @@ class GoogleSecurityService:
                 await asyncio.sleep(1)
             await asyncio.sleep(1)  # 额外等待页面渲染
 
-            # 2) 进入 Authenticator app 设置
-            # 真实元素结构:
-            # <div class="GqRghe tXqPBe hv7wl">  <-- 这个是可点击的外层容器
-            #   <div class="mMsbvc ">Authenticator</div>  <-- 这只是文本
-            # </div>
-            await asyncio.sleep(1)  # 等待页面完全加载
-            clicked_auth = await self._click_first_visible(
-                [
-                    # 点击包含 Authenticator 文本的外层容器
-                    page.locator('div.GqRghe:has-text("Authenticator")'),
-                    page.locator('div[class*="GqRghe"]:has-text("Authenticator")'),
-                    page.locator('div.tXqPBe:has-text("Authenticator")'),
-                    # 或者直接点击包含 mMsbvc 的父元素
-                    page.locator('div:has(div.mMsbvc:text("Authenticator"))'),
-                    page.locator('div:has([class*="mMsbvc"]:text("Authenticator"))'),
-                    # 文本匹配 - 会自动找到包含文本的元素
-                    page.locator("text=Authenticator").first,
-                    page.get_by_text("Authenticator", exact=True),
-                    page.get_by_text("Authenticator"),
-                    # 中文
-                    page.get_by_text("身份验证器"),
-                ],
-                debug_label="click_authenticator",
-            )
-            if not clicked_auth:
-                if task_logger:
-                    task_logger.event(
-                        step="2fa",
-                        action="warning",
-                        level="warning",
-                        message="failed to click Authenticator entry, will try Change button anyway",
-                        url=getattr(page, "url", ""),
-                    )
-            if clicked_auth:
-                if task_logger:
-                    task_logger.event(
-                        step="2fa",
-                        action="click",
-                        message="clicked Authenticator entry",
-                        url=getattr(page, "url", ""),
-                    )
-                await self._handle_reauth(
-                    page,
-                    {**account, "totp_secret": current_secret},
-                    task_logger=task_logger,
-                )
-
-            # 3) 点击 "Change authenticator app" 进入更换流程
+            # 2) 点击 "Change authenticator app" 进入更换流程
             # 真实元素: <span jsname="V67aGc" class="mUIrbf-vQzf8d">Change authenticator app</span>
             await self._click_first_visible(
                 [
