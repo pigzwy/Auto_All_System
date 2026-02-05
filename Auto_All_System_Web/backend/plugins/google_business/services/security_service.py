@@ -8,7 +8,6 @@ Google 账号安全设置服务
 import asyncio
 import logging
 import re
-import time
 from pathlib import Path
 import pyotp
 from typing import Dict, Any, Optional, Tuple, List
@@ -70,7 +69,7 @@ class GoogleSecurityService:
 
         password_input = page.locator('input[type="password"]').first
         try:
-            if await password_input.is_visible(timeout=500):
+            if await password_input.is_visible():
                 await password_input.fill(password)
                 await page.keyboard.press("Enter")
                 # 等待页面反应，不用固定 sleep 太久
@@ -80,183 +79,29 @@ class GoogleSecurityService:
             return False
         return False
 
-    async def _maybe_fill_totp(
-        self,
-        page: Page,
-        totp_secret: str,
-        task_logger: Optional[TaskLogger] = None,
-    ) -> bool:
-        """处理 Google re-auth 的 TOTP 输入。
-
-        关键点：
-        - Google 会提示 "Wrong code. Try again."，这时需要生成新的 code 再提交。
-        - 在同一个 30s 窗口内生成的 code 不会变化，所以要等到下一个 tick 再试。
-        - 为了缓解轻微时钟偏差，额外尝试相邻时间窗（-30s/+30s）。
-        - 只在真正的 TOTP challenge 页面才执行复杂重试，避免误匹配电话输入框。
-        """
-
+    async def _maybe_fill_totp(self, page: Page, totp_secret: str) -> bool:
         totp_secret = self._normalize_base32_secret(totp_secret)
         if not totp_secret:
             return False
 
-        # 这里的 secret 可能来自 DB（加密/明文兼容），必须确保格式正确
-        if not self._is_plausible_base32_secret(totp_secret):
-            return False
-
-        # 检查是否在 TOTP challenge 页面，避免误匹配其他页面的 input[type="tel"]
-        url_now = getattr(page, "url", "") or ""
-        is_totp_challenge = "challenge/totp" in url_now or "signin/challenge/totp" in url_now
-
-        # 如果不在 TOTP challenge 页面，使用更精确的选择器
-        if is_totp_challenge:
-            totp_input = page.locator('input[name="totpPin"], input[type="tel"]').first
-        else:
-            # 非 TOTP 页面只匹配明确的 totpPin，避免误匹配电话输入框
-            totp_input = page.locator('input[name="totpPin"]').first
-
+        # Google 常见的 TOTP 输入框
+        totp_input = page.locator('input[name="totpPin"], input[type="tel"]').first
         try:
-            if not (await totp_input.count() > 0 and await totp_input.is_visible(timeout=500)):
-                return False
-        except Exception:
-            return False
-
-        # 如果不在 TOTP challenge 页面，使用简单逻辑快速返回
-        if not is_totp_challenge:
-            try:
+            if await totp_input.is_visible():
+                # 这里的 secret 可能来自 DB（加密/明文兼容），必须确保格式正确
+                if not self._is_plausible_base32_secret(totp_secret):
+                    return False
                 code = pyotp.TOTP(totp_secret).now()
                 await totp_input.fill(code)
                 await page.keyboard.press("Enter")
                 await asyncio.sleep(1)
                 return True
-            except Exception:
-                return False
-
-        # 以下是 TOTP challenge 页面的复杂重试逻辑
-        def _wrong_code_locator() -> Locator:
-            # 只做英文/常见关键词兜底；如需更多语言再加
-            return page.get_by_text(
-                re.compile(
-                    r"Wrong code|Try again|incorrect|Invalid code", re.IGNORECASE
-                ),
-                exact=False,
-            ).first
-
-        async def _submit_code(code: str) -> bool:
-            # 返回 True 表示"看起来通过/页面推进了"，False 表示仍然 wrong code
-            await totp_input.fill(code)
-
-            # 优先点 Next（Google reauth 常见结构）
-            try:
-                next_btn = page.locator("#totpNext >> button").first
-                if await next_btn.count() > 0 and await next_btn.is_visible():
-                    await next_btn.click()
-                else:
-                    await totp_input.press("Enter")
-            except Exception:
-                try:
-                    await totp_input.press("Enter")
-                except Exception:
-                    pass
-
-            await asyncio.sleep(1.2)
-
-            # 若输入框消失或页面离开 challenge/totp，视为通过
-            try:
-                if not await totp_input.is_visible(timeout=500):
-                    return True
-            except Exception:
-                # is_visible 失败时不阻断，继续按 URL/错误提示判断
-                pass
-
-            try:
-                url_after = getattr(page, "url", "") or ""
-                if (
-                    "/challenge/totp" not in url_after
-                    and "signin/challenge/totp" not in url_after
-                ):
-                    return True
-            except Exception:
-                pass
-
-            # 若出现 wrong code 提示，说明没过
-            try:
-                if await _wrong_code_locator().is_visible(timeout=500):
-                    return False
-            except Exception:
-                # 没看到错误提示也没推进：保守返回 False，交给外层继续处理
-                return False
-
-            return False
-
-        totp = pyotp.TOTP(totp_secret)
-
-        # 先尝试相邻时间窗，缓解轻微时钟偏差；并去重避免重复提交同一个 code
-        base_ts = int(time.time())
-        codes: List[str] = []
-        for delta in (0, -30, 30):
-            try:
-                codes.append(totp.at(base_ts + delta))
-            except Exception:
-                continue
-        # 去重保持顺序
-        uniq_codes: List[str] = []
-        for c in codes:
-            if c and c not in uniq_codes:
-                uniq_codes.append(c)
-
-        for idx, code in enumerate(uniq_codes[:3]):
-            if task_logger:
-                task_logger.event(
-                    step="reauth",
-                    action="totp_submit",
-                    message=f"submit totp (window_try {idx + 1}/{min(3, len(uniq_codes))})",
-                    url=getattr(page, "url", ""),
-                )
-            ok = await _submit_code(code)
-            if ok:
-                return True
-
-            # 出现 wrong code：多数情况下是时间窗刚好过期，等到下一个 tick 再试
-            try:
-                if await _wrong_code_locator().is_visible(timeout=300):
-                    if task_logger:
-                        task_logger.event(
-                            step="reauth",
-                            action="totp_wrong",
-                            level="warning",
-                            message="wrong totp code, will wait for next tick",
-                            url=getattr(page, "url", ""),
-                        )
-            except Exception:
-                pass
-
-        # 等到下一个 30s tick 再生成一次 code
-        try:
-            wait_s = 30 - (int(time.time()) % 30)
-            # 避免 0s 等待导致还是同一窗口
-            wait_s = max(2, min(wait_s + 1, 31))
-            if task_logger:
-                task_logger.event(
-                    step="reauth",
-                    action="totp_wait",
-                    message=f"wait {wait_s}s for next totp tick",
-                    url=getattr(page, "url", ""),
-                )
-            await asyncio.sleep(wait_s)
-            code = totp.now()
-            if task_logger:
-                task_logger.event(
-                    step="reauth",
-                    action="totp_submit",
-                    message="submit totp after tick wait",
-                    url=getattr(page, "url", ""),
-                )
-            return await _submit_code(code)
         except Exception:
             return False
+        return False
 
     async def _dismiss_common_prompts(self, page: Page) -> None:
-        # 一些常见的"跳过/稍后"弹窗（不保证覆盖全部）
+        # 一些常见的“跳过/稍后”弹窗（不保证覆盖全部）
         candidates = [
             page.get_by_role("button", name="Not now"),
             page.get_by_role("button", name="Skip"),
@@ -264,45 +109,26 @@ class GoogleSecurityService:
             page.get_by_role("button", name="稍后"),
             page.get_by_role("button", name="跳过"),
         ]
-
-        async def _try_click_prompt(loc: Locator) -> bool:
+        for loc in candidates:
             try:
-                first = loc.first
-                if await first.is_visible(timeout=300):
-                    await first.click()
-                    return True
+                if await loc.first.is_visible():
+                    await loc.first.click()
+                    await asyncio.sleep(0.5)
             except Exception:
-                pass
-            return False
+                continue
 
-        # 并行检测所有弹窗按钮
-        results = await asyncio.gather(
-            *[_try_click_prompt(loc) for loc in candidates],
-            return_exceptions=True
-        )
-        # 如果点到了任何一个，稍等一下
-        if any(r is True for r in results):
-            await asyncio.sleep(0.3)
-
-    async def _handle_reauth(
-        self,
-        page: Page,
-        account: Dict[str, Any],
-        task_logger: Optional[TaskLogger] = None,
-    ) -> None:
+    async def _handle_reauth(self, page: Page, account: Dict[str, Any]) -> None:
         # 重新验证身份：可能出现 password + 2FA
         await self._dismiss_common_prompts(page)
         await self._maybe_fill_password(page, account.get("password", ""))
-        await self._maybe_fill_totp(
-            page, account.get("totp_secret", ""), task_logger=task_logger
-        )
+        await self._maybe_fill_totp(page, account.get("totp_secret", ""))
         await self._dismiss_common_prompts(page)
 
     async def _click_first_visible(
         self, locators: List[Locator], debug_label: str = ""
     ) -> bool:
         """
-        尝试点击第一个可见的元素（并行检测版本）
+        尝试点击第一个可见的元素
 
         Args:
             locators: Locator 列表
@@ -312,15 +138,16 @@ class GoogleSecurityService:
             是否成功点击
         """
 
-        # 减少超时时间，元素要么很快出现，要么不在
-        probe_timeout_ms = 500
-        click_timeout_ms = 3000
+        # Playwright 的 locator.is_visible()/is_enabled() 默认会用全局 timeout（常见 30s）。
+        # 这里是“试探性”点击：不应为单个 selector 卡 30s，否则多 selector 串起来会非常慢。
+        probe_timeout_ms = 1200
 
         async def _try_click(target: Locator, label: str) -> bool:
             """Google 页面经常把文本放在 span 内，真正可点的是祖先 button/role=button。
 
             这里优先常规 click，失败后再点祖先元素，最后才 force click。
             """
+
             try:
                 await target.scroll_into_view_if_needed()
             except Exception:
@@ -328,8 +155,15 @@ class GoogleSecurityService:
 
             # 1) 直接点目标
             try:
-                await target.click(timeout=click_timeout_ms)
-                return True
+                if await target.is_visible(timeout=probe_timeout_ms):
+                    try:
+                        if not await target.is_enabled(timeout=probe_timeout_ms):
+                            return False
+                    except Exception:
+                        # 某些元素不支持 enabled 检查，忽略
+                        pass
+                    await target.click(timeout=5000)
+                    return True
             except Exception as e:
                 if label:
                     logger.debug(f"[{label}] direct click failed: {e}")
@@ -342,8 +176,14 @@ class GoogleSecurityService:
             ]:
                 try:
                     anc = target.locator(ancestor_selector).first
-                    if await anc.count() > 0:
-                        await anc.click(timeout=click_timeout_ms)
+                    if await anc.count() > 0 and await anc.is_visible(
+                        timeout=probe_timeout_ms
+                    ):
+                        try:
+                            await anc.scroll_into_view_if_needed()
+                        except Exception:
+                            pass
+                        await anc.click(timeout=5000)
                         return True
                 except Exception as e:
                     if label:
@@ -354,51 +194,37 @@ class GoogleSecurityService:
 
             # 3) 兜底：force click（避免被内部 span 指针事件影响）
             try:
-                await target.click(timeout=click_timeout_ms, force=True)
-                return True
+                if await target.is_visible(timeout=probe_timeout_ms):
+                    await target.click(timeout=5000, force=True)
+                    return True
             except Exception as e:
                 if label:
                     logger.debug(f"[{label}] force click failed: {e}")
             return False
 
-        async def _check_visible(idx: int, loc: Locator) -> Optional[Tuple[int, Locator]]:
-            """检查单个 locator 是否可见，返回 (索引, locator) 或 None"""
+        for i, loc in enumerate(locators):
             try:
                 candidate = loc.first
+                # 先 count 再 is_visible：避免 is_visible 的默认超时导致串行等待过久
                 if await candidate.count() <= 0:
-                    return None
-                if await candidate.is_visible(timeout=probe_timeout_ms):
-                    return (idx, candidate)
-            except Exception:
-                pass
-            return None
+                    continue
 
-        # 并行检测所有 locator
-        tasks = [_check_visible(i, loc) for i, loc in enumerate(locators)]
-        results = await asyncio.gather(*tasks, return_exceptions=True)
+                is_visible = await candidate.is_visible(timeout=probe_timeout_ms)
+                if debug_label:
+                    logger.debug(f"[{debug_label}] Locator {i}: visible={is_visible}")
+                if not is_visible:
+                    continue
 
-        # 按原顺序找第一个可见的
-        visible_locators = []
-        for r in results:
-            if isinstance(r, tuple) and r is not None:
-                visible_locators.append(r)
-
-        # 按索引排序，优先点击靠前的 locator
-        visible_locators.sort(key=lambda x: x[0])
-
-        for idx, candidate in visible_locators:
-            try:
                 clicked = await _try_click(candidate, debug_label)
                 if clicked:
-                    await asyncio.sleep(0.5)  # 减少等待时间
+                    await asyncio.sleep(1)
                     if debug_label:
-                        logger.info(f"[{debug_label}] Clicked locator {idx} successfully")
+                        logger.info(f"[{debug_label}] Clicked locator {i} successfully")
                     return True
             except Exception as e:
                 if debug_label:
-                    logger.warning(f"[{debug_label}] Locator {idx} click failed: {e}")
+                    logger.warning(f"[{debug_label}] Locator {i} failed: {e}")
                 continue
-
         if debug_label:
             logger.warning(f"[{debug_label}] No locator was clickable")
         return False
@@ -638,22 +464,37 @@ class GoogleSecurityService:
                 )
             await page.goto(self.TWO_STEP_URL, wait_until="domcontentloaded")
             await asyncio.sleep(1)
-            await self._handle_reauth(
-                page,
-                {**account, "totp_secret": current_secret},
-                task_logger=task_logger,
-            )
-            
-            # 等待页面跳转到 twosv（密码/TOTP 验证完成后）
-            # 最多等待 30 秒
-            for _ in range(30):
-                url_now = getattr(page, "url", "") or ""
-                if "twosv" in url_now or "two-step-verification" in url_now:
-                    break
-                await asyncio.sleep(1)
-            await asyncio.sleep(1)  # 额外等待页面渲染
+            await self._handle_reauth(page, {**account, "totp_secret": current_secret})
 
-            # 2) 点击 "Change authenticator app" 进入更换流程
+            # 2) 进入 Authenticator app 设置
+            # 真实元素: <div class="mMsbvc ">Authenticator</div>
+            clicked_auth = await self._click_first_visible(
+                [
+                    # 精确匹配 Google 页面的 div.mMsbvc
+                    page.locator('div.mMsbvc:has-text("Authenticator")'),
+                    page.locator('.mMsbvc:has-text("Authenticator")'),
+                    # 文本匹配兜底
+                    page.get_by_text("Authenticator", exact=True),
+                    page.get_by_text("Authenticator app", exact=False),
+                    page.get_by_text("Authenticator", exact=False),
+                    # 中文
+                    page.get_by_text("身份验证器", exact=False),
+                ],
+                debug_label="click_authenticator",
+            )
+            if clicked_auth:
+                if task_logger:
+                    task_logger.event(
+                        step="2fa",
+                        action="click",
+                        message="clicked Authenticator entry",
+                        url=getattr(page, "url", ""),
+                    )
+                await self._handle_reauth(
+                    page, {**account, "totp_secret": current_secret}
+                )
+
+            # 3) 点击 "Change authenticator app" 进入更换流程
             # 真实元素: <span jsname="V67aGc" class="mUIrbf-vQzf8d">Change authenticator app</span>
             await self._click_first_visible(
                 [
@@ -688,11 +529,7 @@ class GoogleSecurityService:
                     message="clicked Change authenticator app (if present)",
                     url=getattr(page, "url", ""),
                 )
-            await self._handle_reauth(
-                page,
-                {**account, "totp_secret": current_secret},
-                task_logger=task_logger,
-            )
+            await self._handle_reauth(page, {**account, "totp_secret": current_secret})
 
             # 4) 等待页面加载完成，尝试获取 secret
             # 减少循环次数避免长时间等待
@@ -706,41 +543,8 @@ class GoogleSecurityService:
                         url=getattr(page, "url", ""),
                     )
                 await self._handle_reauth(
-                    page,
-                    {**account, "totp_secret": current_secret},
-                    task_logger=task_logger,
+                    page, {**account, "totp_secret": current_secret}
                 )
-
-                # 如果卡在 re-auth 的 totp challenge 并持续 Wrong code，没必要继续 15 次抽取循环
-                try:
-                    url_now = getattr(page, "url", "") or ""
-                    if "challenge/totp" in url_now:
-                        wrong = page.get_by_text(
-                            re.compile(
-                                r"Wrong code|Try again|incorrect|Invalid code",
-                                re.IGNORECASE,
-                            ),
-                            exact=False,
-                        ).first
-                        if await wrong.is_visible(timeout=300):
-                            shot = await self._save_debug_screenshot(
-                                page, "security_change_2fa", email
-                            )
-                            msg = "re-auth 2FA 验证失败：Wrong code. Try again."
-                            if shot:
-                                msg += f" (screenshot={shot})"
-                            if task_logger:
-                                task_logger.event(
-                                    step="reauth",
-                                    action="fail",
-                                    level="error",
-                                    message=msg,
-                                    url=url_now,
-                                    screenshot=shot,
-                                )
-                            return False, msg, None
-                except Exception:
-                    pass
 
                 # 如果已经进入“输入 6 位验证码”的步骤（Step 2），说明走到了扫码验证环节。
                 # 需要明文密钥来生成验证码，所以优先回退到上一步寻找 "Can't scan it?"。
