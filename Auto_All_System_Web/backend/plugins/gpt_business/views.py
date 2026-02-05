@@ -1275,7 +1275,8 @@ class AccountsViewSet(ViewSet):
             return Response({"detail": "mother_ids is required"}, status=status.HTTP_400_BAD_REQUEST)
 
         concurrency = int(request.data.get("concurrency") or 5)
-        open_geekez = bool(request.data.get("open_geekez") or False)
+        # open_geekez 参数已废弃，self_register_task 内部会自动启动浏览器
+        # 不再单独调用 launch_geekez_task，避免并发冲突
 
         results: list[dict[str, Any]] = []
         for idx, mother_id in enumerate(mother_ids):
@@ -1285,8 +1286,6 @@ class AccountsViewSet(ViewSet):
                 continue
 
             delay_seconds = _batch_countdown(idx, concurrency)
-            if open_geekez:
-                launch_geekez_task.apply_async(args=[str(mother_id)], countdown=delay_seconds)
 
             record_id = uuid.uuid4().hex
             now = timezone.now().isoformat()
@@ -1319,7 +1318,8 @@ class AccountsViewSet(ViewSet):
             return Response({"detail": "mother_ids is required"}, status=status.HTTP_400_BAD_REQUEST)
 
         concurrency = int(request.data.get("concurrency") or 5)
-        open_geekez = bool(request.data.get("open_geekez") or False)
+        # open_geekez 参数已废弃，auto_invite_task 内部会自动启动浏览器
+        # 不再单独调用 launch_geekez_task，避免并发冲突
         accounts = list_accounts(settings)
 
         results: list[dict[str, Any]] = []
@@ -1357,8 +1357,6 @@ class AccountsViewSet(ViewSet):
                     continue
 
             delay_seconds = _batch_countdown(idx, concurrency)
-            if open_geekez:
-                launch_geekez_task.apply_async(args=[str(mother_id)], countdown=delay_seconds)
 
             record_id = uuid.uuid4().hex
             now = timezone.now().isoformat()
@@ -1391,7 +1389,8 @@ class AccountsViewSet(ViewSet):
             return Response({"detail": "mother_ids is required"}, status=status.HTTP_400_BAD_REQUEST)
 
         concurrency = int(request.data.get("concurrency") or 5)
-        open_geekez = bool(request.data.get("open_geekez") or False)
+        # open_geekez 参数已废弃，sub2api_sink_task 内部会自动启动浏览器
+        # 不再单独调用 launch_geekez_task，避免并发冲突
         target_key = str(request.data.get("target_key") or request.data.get("s2a_target_key") or "").strip()
         mode = str(request.data.get("mode") or request.data.get("pool_mode") or "").strip() or "crs_sync"
 
@@ -1403,8 +1402,6 @@ class AccountsViewSet(ViewSet):
                 continue
 
             delay_seconds = _batch_countdown(idx, concurrency)
-            if open_geekez:
-                launch_geekez_task.apply_async(args=[str(mother_id)], countdown=delay_seconds)
 
             record_id = uuid.uuid4().hex
             now = timezone.now().isoformat()
