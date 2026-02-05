@@ -645,31 +645,38 @@ class GoogleSecurityService:
             )
 
             # 2) 进入 Authenticator app 设置
-            # 真实元素: <div class="mMsbvc ">Authenticator</div>
-            # 需要点击展开后才能看到 "Change authenticator app"
+            # 真实元素结构:
+            # <div class="GqRghe tXqPBe hv7wl">  <-- 这个是可点击的外层容器
+            #   <div class="mMsbvc ">Authenticator</div>  <-- 这只是文本
+            # </div>
+            await asyncio.sleep(1)  # 等待页面完全加载
             clicked_auth = await self._click_first_visible(
                 [
-                    # 精确匹配 Google 页面的 div.mMsbvc（注意类名可能有空格）
-                    page.locator('div.mMsbvc:has-text("Authenticator")'),
-                    page.locator('div[class*="mMsbvc"]:has-text("Authenticator")'),
-                    page.locator('.mMsbvc:has-text("Authenticator")'),
-                    # 直接文本匹配 - 可能在一个可点击的父元素内
-                    page.locator('div:has-text("Authenticator")').filter(
-                        has=page.locator("text=Authenticator")
-                    ).first,
-                    # 文本匹配兜底
+                    # 点击包含 Authenticator 文本的外层容器
+                    page.locator('div.GqRghe:has-text("Authenticator")'),
+                    page.locator('div[class*="GqRghe"]:has-text("Authenticator")'),
+                    page.locator('div.tXqPBe:has-text("Authenticator")'),
+                    # 或者直接点击包含 mMsbvc 的父元素
+                    page.locator('div:has(div.mMsbvc:text("Authenticator"))'),
+                    page.locator('div:has([class*="mMsbvc"]:text("Authenticator"))'),
+                    # 文本匹配 - 会自动找到包含文本的元素
+                    page.locator("text=Authenticator").first,
                     page.get_by_text("Authenticator", exact=True),
-                    page.get_by_text("Authenticator app", exact=False),
-                    page.get_by_text("Authenticator", exact=False),
-                    # 按 role 查找
-                    page.get_by_role("button", name="Authenticator"),
-                    page.get_by_role("link", name="Authenticator"),
-                    page.get_by_role("listitem").filter(has_text="Authenticator"),
+                    page.get_by_text("Authenticator"),
                     # 中文
-                    page.get_by_text("身份验证器", exact=False),
+                    page.get_by_text("身份验证器"),
                 ],
                 debug_label="click_authenticator",
             )
+            if not clicked_auth:
+                if task_logger:
+                    task_logger.event(
+                        step="2fa",
+                        action="warning",
+                        level="warning",
+                        message="failed to click Authenticator entry, will try Change button anyway",
+                        url=getattr(page, "url", ""),
+                    )
             if clicked_auth:
                 if task_logger:
                     task_logger.event(
