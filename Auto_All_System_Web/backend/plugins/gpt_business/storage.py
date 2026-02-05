@@ -115,6 +115,39 @@ def clear_tasks() -> int:
     return current
 
 
+def clear_tasks_for_mother(mother_id: str, *, keep_in_progress: bool = True) -> int:
+    mother_id = str(mother_id or "").strip()
+    if not mother_id:
+        return 0
+
+    in_progress_statuses = {"queued", "pending", "running"}
+    removed = 0
+
+    def mutator(settings: dict[str, Any]) -> dict[str, Any]:
+        nonlocal removed
+        tasks = list_tasks(settings)
+        kept: list[dict[str, Any]] = []
+
+        for t in tasks:
+            if str(t.get("mother_id") or "") != mother_id:
+                kept.append(t)
+                continue
+
+            status = str(t.get("status") or "").strip().lower()
+            if keep_in_progress and status in in_progress_statuses:
+                kept.append(t)
+                continue
+
+            removed += 1
+
+        settings["tasks"] = kept
+        settings["last_updated"] = timezone.now().isoformat()
+        return settings
+
+    update_settings(mutator)
+    return removed
+
+
 def list_accounts(settings: dict[str, Any]) -> list[dict[str, Any]]:
     accounts = settings.get("accounts") or []
     if isinstance(accounts, list):

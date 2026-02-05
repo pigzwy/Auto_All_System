@@ -31,6 +31,7 @@ from .storage import (
     add_account,
     add_task,
     clear_tasks,
+    clear_tasks_for_mother,
     delete_account,
     find_account,
     find_task,
@@ -47,6 +48,7 @@ from .tasks import (
     launch_geekez_task,
     self_register_task,
     sub2api_sink_task,
+    team_push_task,
 )
 from .trace_cleanup import cleanup_trace_files, get_trace_cleanup_settings
 
@@ -810,12 +812,16 @@ class AccountsViewSet(ViewSet):
 
         return Response({"mothers": normalized_mothers, "email_domains": _get_email_domains()})
 
-    @action(detail=True, methods=["get"], url_path="tasks")
+    @action(detail=True, methods=["get", "delete"], url_path="tasks")
     def tasks(self, request, pk=None):
         settings = get_settings()
         acc = find_account(settings, str(pk))
         if not isinstance(acc, dict) or str(acc.get("type")) != "mother":
             return Response({"detail": "Mother account not found"}, status=status.HTTP_400_BAD_REQUEST)
+
+        if request.method.upper() == "DELETE":
+            removed = clear_tasks_for_mother(str(pk), keep_in_progress=True)
+            return Response({"status": "cleared", "removed": removed})
 
         tasks = [t for t in list_tasks(settings) if str(t.get("mother_id") or "") == str(pk)]
         return Response({"tasks": tasks})
@@ -1219,6 +1225,45 @@ class AccountsViewSet(ViewSet):
                 "mode": mode,
             }
         )
+
+    @action(detail=True, methods=["post"], url_path="team_push")
+    def team_push(self, request, pk=None):
+        """推送母号 session 到外部兑换系统"""
+        settings = get_settings()
+        acc = find_account(settings, str(pk))
+        if not isinstance(acc, dict) or str(acc.get("type")) != "mother":
+            return Response({"detail": "Mother account not found"}, status=status.HTTP_400_BAD_REQUEST)
+
+        target_url = str(request.data.get("target_url") or "").strip()
+        admin_password = str(request.data.get("password") or "").strip()
+        is_warranty = bool(request.data.get("is_warranty", True))
+
+        if not target_url:
+            return Response({"detail": "target_url is required"}, status=status.HTTP_400_BAD_REQUEST)
+        if not admin_password:
+            return Response({"detail": "password is required"}, status=status.HTTP_400_BAD_REQUEST)
+
+        record_id = uuid.uuid4().hex
+        now = timezone.now().isoformat()
+        add_task({
+            "id": record_id,
+            "type": "team_push",
+            "mother_id": str(pk),
+            "target_url": target_url,
+            "status": "pending",
+            "progress_current": 0,
+            "progress_total": 3,
+            "progress_percent": 0,
+            "progress_label": "",
+            "created_at": now,
+        })
+
+        async_result = team_push_task.delay(record_id, str(pk), target_url, admin_password, is_warranty)
+        return Response({
+            "message": "已启动：推送到兑换系统",
+            "task_id": async_result.id,
+            "record_id": record_id,
+        })
 
     @action(detail=False, methods=["post"], url_path="batch/self_register")
     def batch_self_register(self, request):

@@ -780,6 +780,38 @@
       </DialogContent>
     </Dialog>
 
+    <!-- Team Push Dialog -->
+    <Dialog v-model:open="teamPushDialogVisible">
+      <DialogContent class="sm:max-w-[500px]">
+        <DialogHeader>
+          <DialogTitle>推送到兑换系统</DialogTitle>
+          <DialogDescription>将 {{ teamPushMotherIds.length }} 个账号推送到 Team 兑换系统</DialogDescription>
+        </DialogHeader>
+        <div class="grid gap-4 py-4">
+          <div class="grid gap-2">
+            <label class="text-sm font-medium">目标系统 URL</label>
+            <Input v-model="teamPushForm.target_url" placeholder="https://your-team-system.com" />
+            <div class="text-xs text-muted-foreground">兑换系统的完整 URL（例如：https://team.example.com）</div>
+          </div>
+          <div class="grid gap-2">
+            <label class="text-sm font-medium">管理员密码</label>
+            <Input v-model="teamPushForm.password" type="password" placeholder="输入管理员密码" />
+          </div>
+          <div class="flex items-center gap-2">
+            <Checkbox v-model:checked="teamPushForm.is_warranty" />
+            <label class="text-sm text-muted-foreground">质保</label>
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" @click="teamPushDialogVisible = false">取消</Button>
+          <Button :disabled="teamPushLoading || !teamPushForm.target_url || !teamPushForm.password" class="bg-purple-600 hover:bg-purple-700 text-white" @click="executeTeamPush">
+            <Loader2 v-if="teamPushLoading" class="mr-2 h-4 w-4 animate-spin" />
+            推送
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+
     <!-- Celery 任务：实时 trace 日志（滚动 + 轮询） -->
     <Dialog
       :open="showCeleryDialog"
@@ -899,7 +931,6 @@ import {
   Settings,
   UserPlus,
   Users,
-  ArrowRightToLine,
   LayoutList,
   FileDown,
   X,
@@ -995,7 +1026,6 @@ const selectAllState = computed<boolean | 'indeterminate'>({
     selectedIds.value = new Set(selectedIds.value) // 触发响应式
   }
 })
-const hasSelection = computed(() => selectedIds.value.size > 0)
 
 watch(
   selectedIds,
@@ -1052,30 +1082,6 @@ const batchRunAutoInvite = async () => {
     refresh()
   } catch (e: any) {
     ElMessage.error(e?.response?.data?.detail || e?.message || '批量操作失败')
-  }
-}
-
-const batchDelete = async () => {
-  if (selectedIds.value.size === 0) return
-  const ids = Array.from(selectedIds.value)
-  try {
-    await ElMessageBox.confirm(
-      `确定要删除选中的 ${ids.length} 个账号吗？删除后不可恢复，删除母号会同时删除其子账号。`,
-      '批量删除',
-      {
-        type: 'warning',
-        confirmButtonText: '删除',
-        cancelButtonText: '取消'
-      }
-    )
-    await Promise.all(ids.map(id => gptBusinessApi.deleteAccount(id)))
-    ElMessage.success(`已删除 ${ids.length} 个账号`)
-    selectedIds.value.clear()
-    selectedIds.value = new Set(selectedIds.value)
-    refresh()
-  } catch (e: any) {
-    if (e === 'cancel' || e?.message === 'cancel') return
-    ElMessage.error(e?.response?.data?.detail || e?.message || '批量删除失败')
   }
 }
 
@@ -1265,6 +1271,76 @@ const batchRunSub2apiSink = async () => {
   const ids = Array.from(selectedIds.value)
   await openSub2apiSinkDialog(ids)
 }
+
+// ========== Team Push ==========
+const teamPushDialogVisible = ref(false)
+const teamPushMotherIds = ref<string[]>([])
+const teamPushLoading = ref(false)
+const teamPushForm = reactive({
+  target_url: localStorage.getItem('gpt_team_push_url') || '',
+  password: '',
+  is_warranty: true
+})
+
+const openTeamPushDialog = (motherIds: string[]) => {
+  teamPushMotherIds.value = motherIds
+  // URL 从 localStorage 读取，不清空
+  teamPushForm.password = ''
+  teamPushForm.is_warranty = true
+  teamPushDialogVisible.value = true
+}
+
+const executeTeamPush = async () => {
+  if (!teamPushMotherIds.value.length) return
+  if (!teamPushForm.target_url || !teamPushForm.password) {
+    ElMessage.warning('请输入目标 URL 和密码')
+    return
+  }
+  
+  teamPushLoading.value = true
+  try {
+    // 批量推送
+    const results = await Promise.allSettled(
+      teamPushMotherIds.value.map(id =>
+        gptBusinessApi.teamPush(id, {
+          target_url: teamPushForm.target_url,
+          password: teamPushForm.password,
+          is_warranty: teamPushForm.is_warranty
+        })
+      )
+    )
+    const successCount = results.filter(r => r.status === 'fulfilled').length
+    const failCount = results.filter(r => r.status === 'rejected').length
+    
+    if (failCount === 0) {
+      ElMessage.success(`已启动 ${successCount} 个账号的推送任务`)
+    } else {
+      ElMessage.warning(`成功 ${successCount} 个，失败 ${failCount} 个`)
+    }
+    // 保存 URL 到 localStorage
+    localStorage.setItem('gpt_team_push_url', teamPushForm.target_url)
+    teamPushDialogVisible.value = false
+    await refresh()
+  } catch (e: any) {
+    ElMessage.error(e?.response?.data?.detail || e?.message || '推送失败')
+  } finally {
+    teamPushLoading.value = false
+  }
+}
+
+// 监听头部工具栏的 Team Push 事件
+onMounted(() => {
+  const handleTeamPush = (e: Event) => {
+    const detail = (e as CustomEvent).detail
+    if (detail?.mother_ids?.length) {
+      openTeamPushDialog(detail.mother_ids)
+    }
+  }
+  window.addEventListener('gpt-open-team-push', handleTeamPush)
+  onUnmounted(() => {
+    window.removeEventListener('gpt-open-team-push', handleTeamPush)
+  })
+})
 
 // 提供给父组件
 provide('selectedIds', selectedIds)
@@ -1520,25 +1596,6 @@ const copyText = async (text: string) => {
   } catch {
     ElMessage.warning('复制失败（浏览器不支持剪贴板）')
   }
-}
-
-const copyFull = (acc: GptBusinessAccount) => {
-  const lines = [
-    acc.email,
-    acc.account_password ? `account_password: ${acc.account_password}` : '',
-    acc.email_password ? `email_password: ${acc.email_password}` : ''
-  ].filter(Boolean)
-  copyText(lines.join('\n'))
-}
-
-const copyAccountPassword = (acc: GptBusinessAccount) => {
-  if (!acc.account_password) return
-  copyText(acc.account_password)
-}
-
-const copyEmailPassword = (acc: GptBusinessAccount) => {
-  if (!acc.email_password) return
-  copyText(acc.email_password)
 }
 
 
@@ -2016,6 +2073,27 @@ const viewTasks = async (mother: MotherRow) => {
     accountTasks.value = []
   } finally {
     tasksLoading.value = false
+  }
+}
+
+const clearTaskRecords = async () => {
+  if (!tasksDrawerAccount.value) return
+  const mother = tasksDrawerAccount.value
+  try {
+    await ElMessageBox.confirm(
+      '确定清空该母号的历史任务记录吗？（会删除已完成/失败/取消的记录，运行中任务会保留）',
+      '清空记录',
+      {
+        type: 'warning',
+        confirmButtonText: '清空',
+        cancelButtonText: '取消'
+      }
+    )
+    const res = await gptBusinessApi.clearAccountTasks(mother.id)
+    ElMessage.success(`已清空 ${res?.removed ?? 0} 条记录`)
+    await viewTasks(mother)
+  } catch (e: any) {
+    if (e === 'cancel' || e?.message === 'cancel') return
   }
 }
 

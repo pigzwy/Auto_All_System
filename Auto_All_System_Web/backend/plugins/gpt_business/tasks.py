@@ -2623,3 +2623,183 @@ def cleanup_trace_task():
         logger.exception("gpt_business cleanup_trace_task failed")
         return {"success": False, "error": str(exc)}
         raise
+
+
+@shared_task(name="gpt_business.team_push", bind=True)
+def team_push_task(
+    self: Task,
+    record_id: str,
+    mother_id: str,
+    target_url: str,
+    admin_password: str,
+    is_warranty: bool = True,
+):
+    """
+    推送母号 session 到外部兑换系统。
+
+    流程：
+    1. 启动浏览器获取 ChatGPT session
+    2. 调用外部 API 推送 session
+    3. 更新账号状态
+    """
+    import httpx
+    from .services.browser_service import BrowserService
+    from .services.chatgpt_session import fetch_auth_session
+    from .storage import find_account, patch_account, patch_task
+
+    settings = get_settings()
+    result: dict = {"success": False, "record_id": record_id, "mother_id": mother_id}
+
+    # 日志文件
+    media_root = Path(str(getattr(django_settings, "MEDIA_ROOT", "")))
+    job_dir = media_root / "gpt_business" / "jobs" / record_id
+    job_dir.mkdir(parents=True, exist_ok=True)
+    log_file = job_dir / "run.log"
+
+    def _log(msg: str):
+        ts = timezone.now().strftime("%Y-%m-%d %H:%M:%S")
+        line = f"[{ts}] {msg}"
+        logger.info("team_push[%s]: %s", record_id[:8], msg)
+        try:
+            with log_file.open("a", encoding="utf-8") as fp:
+                fp.write(line + "\n")
+        except Exception:
+            pass
+
+    try:
+        patch_task(record_id, {"status": "running", "started_at": timezone.now().isoformat()})
+        _set_task_progress(record_id, 0, 3, "准备中...")
+        _log("任务开始")
+
+        mother = find_account(settings, mother_id)
+        if not mother:
+            raise ValueError(f"母号不存在: {mother_id}")
+
+        email = mother.get("email", "")
+        seat_total = mother.get("seat_total", 0)
+        note = mother.get("note", "")
+
+        _log(f"母号: {email}")
+
+        if not email:
+            raise ValueError("母号邮箱为空")
+
+        _set_task_progress(record_id, 1, 3, "获取 session...")
+        _log("启动浏览器获取 session")
+
+        session_data = None
+        profile_name = f"gpt_{email}"
+
+        with BrowserService(profile_name=profile_name) as browser:
+            page = browser.page
+            if page is None:
+                raise RuntimeError("Browser page is not available")
+
+            _log("浏览器已启动，导航到 ChatGPT")
+
+            # 导航到 ChatGPT 获取 session
+            page.get("https://chatgpt.com/")
+            time.sleep(3)
+
+            _log(f"当前 URL: {browser.current_url()}")
+
+            # 获取 session
+            session_data = fetch_auth_session(page)
+
+            if not session_data:
+                _log("获取 session 失败")
+                raise RuntimeError("无法获取 session")
+
+            if not session_data.get("accessToken"):
+                _log("accessToken 为空，账号可能未登录")
+                raise RuntimeError("无法获取 accessToken，账号可能未登录")
+
+            _log(f"成功获取 session, user: {session_data.get('user', {}).get('email', 'unknown')}")
+
+        if not session_data:
+            raise RuntimeError("获取 session 失败")
+
+        _set_task_progress(record_id, 2, 3, "推送到兑换系统...")
+        _log(f"推送到: {target_url}")
+
+        # 构造推送请求
+        push_payload = {
+            "password": admin_password,
+            "session": session_data,
+            "isWarranty": is_warranty,
+            "seatTotal": seat_total,
+            "note": note,
+        }
+
+        # 发送推送请求
+        push_url = target_url.rstrip("/") + "/api/admin/mothers/push"
+        _log(f"POST {push_url}")
+
+        with httpx.Client(timeout=60) as client:
+            resp = client.post(push_url, json=push_payload)
+            _log(f"响应状态: {resp.status_code}")
+            resp.raise_for_status()
+            push_result = resp.json()
+
+        if not push_result.get("ok"):
+            error_msg = push_result.get("error", "unknown")
+            _log(f"推送失败: {error_msg}")
+            raise RuntimeError(f"推送失败: {error_msg}")
+
+        _log(f"推送成功: action={push_result.get('action')}")
+        _set_task_progress(record_id, 3, 3, "完成")
+
+        # 更新账号状态
+        patch_account(
+            settings,
+            mother_id,
+            {
+                "team_push_status": "success",
+                "team_push_updated_at": timezone.now().isoformat(),
+                "team_push_url": target_url,
+                "team_account_id": push_result.get("mother", {}).get("id"),
+            },
+        )
+
+        patch_task(
+            record_id,
+            {
+                "status": "success",
+                "finished_at": timezone.now().isoformat(),
+            },
+        )
+
+        _log("任务完成")
+        result["success"] = True
+        result["push_result"] = push_result
+        return result
+
+    except Exception as exc:
+        logger.exception("team_push_task failed: %s", exc)
+        _log(f"任务失败: {exc}")
+
+        _set_task_progress(record_id, 3, 3, "失败")
+        patch_task(
+            record_id,
+            {
+                "status": "failed",
+                "finished_at": timezone.now().isoformat(),
+                "error": str(exc),
+            },
+        )
+
+        # 更新账号状态为失败
+        try:
+            patch_account(
+                settings,
+                mother_id,
+                {
+                    "team_push_status": "failed",
+                    "team_push_updated_at": timezone.now().isoformat(),
+                },
+            )
+        except Exception:
+            pass
+
+        result["error"] = str(exc)
+        return result

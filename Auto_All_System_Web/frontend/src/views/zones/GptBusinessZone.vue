@@ -48,6 +48,10 @@
             <LayoutList class="h-4 w-4" />
             入池
           </Button>
+          <Button size="sm" class="gap-2 bg-purple-600 hover:bg-purple-700 text-white" :disabled="!hasSelection" @click="openTeamPush">
+            <Send class="h-4 w-4" />
+            Team
+          </Button>
           <Button size="sm" class="gap-2 bg-red-600 hover:bg-red-700 text-white" :disabled="!hasSelection" @click="runBatchDelete">
             删除
           </Button>
@@ -71,6 +75,7 @@ import {
   LayoutList,
   Plus,
   RefreshCcw,
+  Send,
   UserPlus,
   X
 } from 'lucide-vue-next'
@@ -169,6 +174,16 @@ const runBatchDelete = async () => {
     if (e === 'cancel' || e?.message === 'cancel') return
     ElMessage.error(e?.response?.data?.detail || e?.message || '删除失败')
   }
+}
+
+const openTeamPush = () => {
+  const ids = getSelectedIds()
+  if (!ids.length) return
+  window.dispatchEvent(
+    new CustomEvent('gpt-open-team-push', {
+      detail: { mother_ids: ids }
+    })
+  )
 }
 
 </script>

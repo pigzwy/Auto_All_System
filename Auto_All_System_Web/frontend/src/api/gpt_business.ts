@@ -92,6 +92,10 @@ export const gptBusinessApi = {
     return request.get(`/plugins/gpt-business/accounts/${motherAccountId}/tasks/`)
   },
 
+  clearAccountTasks(motherAccountId: string): Promise<{ status: string; removed: number }> {
+    return request.delete(`/plugins/gpt-business/accounts/${motherAccountId}/tasks/`)
+  },
+
   createTask(data: GptBusinessInviteTaskCreate): Promise<any> {
     return request.post('/plugins/gpt-business/tasks/', data)
   },
@@ -251,5 +255,16 @@ export const gptBusinessApi = {
     }
   }): Promise<{ success: boolean; message: string }> {
     return request.post('/plugins/gpt-business/settings/crs/test/', data || {})
+  },
+
+  teamPush(
+    motherAccountId: string,
+    data: {
+      target_url: string
+      password: string
+      is_warranty?: boolean
+    }
+  ): Promise<{ message?: string; task_id?: string; record_id?: string }> {
+    return request.post(`/plugins/gpt-business/accounts/${motherAccountId}/team_push/`, data)
   },
 }
