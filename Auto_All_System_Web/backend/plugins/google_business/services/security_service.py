@@ -139,8 +139,8 @@ class GoogleSecurityService:
         """
 
         # Playwright 的 locator.is_visible()/is_enabled() 默认会用全局 timeout（常见 30s）。
-        # 这里是“试探性”点击：不应为单个 selector 卡 30s，否则多 selector 串起来会非常慢。
-        probe_timeout_ms = 1200
+        # 这里是"试探性"点击：不应为单个 selector 卡太久，否则多 selector 串起来会非常慢。
+        probe_timeout_ms = 500  # 从 1200ms 减少到 500ms
 
         async def _try_click(target: Locator, label: str) -> bool:
             """Google 页面经常把文本放在 span 内，真正可点的是祖先 button/role=button。
@@ -148,12 +148,19 @@ class GoogleSecurityService:
             这里优先常规 click，失败后再点祖先元素，最后才 force click。
             """
 
+            # 1) 先快速检查元素是否存在，避免不必要的超时等待
+            try:
+                if await target.count() == 0:
+                    return False
+            except Exception:
+                return False
+
             try:
                 await target.scroll_into_view_if_needed()
             except Exception:
                 pass
 
-            # 1) 直接点目标
+            # 2) 直接点目标
             try:
                 if await target.is_visible(timeout=probe_timeout_ms):
                     try:
@@ -168,7 +175,7 @@ class GoogleSecurityService:
                 if label:
                     logger.debug(f"[{label}] direct click failed: {e}")
 
-            # 2) 点祖先 button / role=button / link
+            # 3) 点祖先 button / role=button / link
             for ancestor_selector in [
                 "xpath=ancestor-or-self::button[1]",
                 'xpath=ancestor-or-self::*[@role="button"][1]',
@@ -192,7 +199,7 @@ class GoogleSecurityService:
                         )
                     continue
 
-            # 3) 兜底：force click（避免被内部 span 指针事件影响）
+            # 4) 兜底：force click（避免被内部 span 指针事件影响）
             try:
                 if await target.is_visible(timeout=probe_timeout_ms):
                     await target.click(timeout=5000, force=True)
