@@ -92,10 +92,167 @@ class GoogleSecurityService:
         - Google 会提示 "Wrong code. Try again."，这时需要生成新的 code 再提交。
         - 在同一个 30s 窗口内生成的 code 不会变化，所以要等到下一个 tick 再试。
         - 为了缓解轻微时钟偏差，额外尝试相邻时间窗（-30s/+30s）。
+        - 只在真正的 TOTP challenge 页面才执行复杂重试，避免误匹配电话输入框。
         """
 
         totp_secret = self._normalize_base32_secret(totp_secret)
         if not totp_secret:
+            return False
+
+        # 这里的 secret 可能来自 DB（加密/明文兼容），必须确保格式正确
+        if not self._is_plausible_base32_secret(totp_secret):
+            return False
+
+        # 检查是否在 TOTP challenge 页面，避免误匹配其他页面的 input[type="tel"]
+        url_now = getattr(page, "url", "") or ""
+        is_totp_challenge = "challenge/totp" in url_now or "signin/challenge/totp" in url_now
+
+        # 如果不在 TOTP challenge 页面，使用更精确的选择器
+        if is_totp_challenge:
+            totp_input = page.locator('input[name="totpPin"], input[type="tel"]').first
+        else:
+            # 非 TOTP 页面只匹配明确的 totpPin，避免误匹配电话输入框
+            totp_input = page.locator('input[name="totpPin"]').first
+
+        try:
+            if not (await totp_input.count() > 0 and await totp_input.is_visible()):
+                return False
+        except Exception:
+            return False
+
+        # 如果不在 TOTP challenge 页面，使用简单逻辑快速返回
+        if not is_totp_challenge:
+            try:
+                code = pyotp.TOTP(totp_secret).now()
+                await totp_input.fill(code)
+                await page.keyboard.press("Enter")
+                await asyncio.sleep(1)
+                return True
+            except Exception:
+                return False
+
+        # 以下是 TOTP challenge 页面的复杂重试逻辑
+        def _wrong_code_locator() -> Locator:
+            # 只做英文/常见关键词兜底；如需更多语言再加
+            return page.get_by_text(
+                re.compile(
+                    r"Wrong code|Try again|incorrect|Invalid code", re.IGNORECASE
+                ),
+                exact=False,
+            ).first
+
+        async def _submit_code(code: str) -> bool:
+            # 返回 True 表示"看起来通过/页面推进了"，False 表示仍然 wrong code
+            await totp_input.fill(code)
+
+            # 优先点 Next（Google reauth 常见结构）
+            try:
+                next_btn = page.locator("#totpNext >> button").first
+                if await next_btn.count() > 0 and await next_btn.is_visible():
+                    await next_btn.click()
+                else:
+                    await totp_input.press("Enter")
+            except Exception:
+                try:
+                    await totp_input.press("Enter")
+                except Exception:
+                    pass
+
+            await asyncio.sleep(1.2)
+
+            # 若输入框消失或页面离开 challenge/totp，视为通过
+            try:
+                if not await totp_input.is_visible(timeout=500):
+                    return True
+            except Exception:
+                # is_visible 失败时不阻断，继续按 URL/错误提示判断
+                pass
+
+            try:
+                url_after = getattr(page, "url", "") or ""
+                if (
+                    "/challenge/totp" not in url_after
+                    and "signin/challenge/totp" not in url_after
+                ):
+                    return True
+            except Exception:
+                pass
+
+            # 若出现 wrong code 提示，说明没过
+            try:
+                if await _wrong_code_locator().is_visible(timeout=500):
+                    return False
+            except Exception:
+                # 没看到错误提示也没推进：保守返回 False，交给外层继续处理
+                return False
+
+            return False
+
+        totp = pyotp.TOTP(totp_secret)
+
+        # 先尝试相邻时间窗，缓解轻微时钟偏差；并去重避免重复提交同一个 code
+        base_ts = int(time.time())
+        codes: List[str] = []
+        for delta in (0, -30, 30):
+            try:
+                codes.append(totp.at(base_ts + delta))
+            except Exception:
+                continue
+        # 去重保持顺序
+        uniq_codes: List[str] = []
+        for c in codes:
+            if c and c not in uniq_codes:
+                uniq_codes.append(c)
+
+        for idx, code in enumerate(uniq_codes[:3]):
+            if task_logger:
+                task_logger.event(
+                    step="reauth",
+                    action="totp_submit",
+                    message=f"submit totp (window_try {idx + 1}/{min(3, len(uniq_codes))})",
+                    url=getattr(page, "url", ""),
+                )
+            ok = await _submit_code(code)
+            if ok:
+                return True
+
+            # 出现 wrong code：多数情况下是时间窗刚好过期，等到下一个 tick 再试
+            try:
+                if await _wrong_code_locator().is_visible(timeout=300):
+                    if task_logger:
+                        task_logger.event(
+                            step="reauth",
+                            action="totp_wrong",
+                            level="warning",
+                            message="wrong totp code, will wait for next tick",
+                            url=getattr(page, "url", ""),
+                        )
+            except Exception:
+                pass
+
+        # 等到下一个 30s tick 再生成一次 code
+        try:
+            wait_s = 30 - (int(time.time()) % 30)
+            # 避免 0s 等待导致还是同一窗口
+            wait_s = max(2, min(wait_s + 1, 31))
+            if task_logger:
+                task_logger.event(
+                    step="reauth",
+                    action="totp_wait",
+                    message=f"wait {wait_s}s for next totp tick",
+                    url=getattr(page, "url", ""),
+                )
+            await asyncio.sleep(wait_s)
+            code = totp.now()
+            if task_logger:
+                task_logger.event(
+                    step="reauth",
+                    action="totp_submit",
+                    message="submit totp after tick wait",
+                    url=getattr(page, "url", ""),
+                )
+            return await _submit_code(code)
+        except Exception:
             return False
 
         # 这里的 secret 可能来自 DB（加密/明文兼容），必须确保格式正确
