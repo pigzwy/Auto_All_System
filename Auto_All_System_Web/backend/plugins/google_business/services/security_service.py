@@ -646,15 +646,25 @@ class GoogleSecurityService:
 
             # 2) 进入 Authenticator app 设置
             # 真实元素: <div class="mMsbvc ">Authenticator</div>
+            # 需要点击展开后才能看到 "Change authenticator app"
             clicked_auth = await self._click_first_visible(
                 [
-                    # 精确匹配 Google 页面的 div.mMsbvc
+                    # 精确匹配 Google 页面的 div.mMsbvc（注意类名可能有空格）
                     page.locator('div.mMsbvc:has-text("Authenticator")'),
+                    page.locator('div[class*="mMsbvc"]:has-text("Authenticator")'),
                     page.locator('.mMsbvc:has-text("Authenticator")'),
+                    # 直接文本匹配 - 可能在一个可点击的父元素内
+                    page.locator('div:has-text("Authenticator")').filter(
+                        has=page.locator("text=Authenticator")
+                    ).first,
                     # 文本匹配兜底
                     page.get_by_text("Authenticator", exact=True),
                     page.get_by_text("Authenticator app", exact=False),
                     page.get_by_text("Authenticator", exact=False),
+                    # 按 role 查找
+                    page.get_by_role("button", name="Authenticator"),
+                    page.get_by_role("link", name="Authenticator"),
+                    page.get_by_role("listitem").filter(has_text="Authenticator"),
                     # 中文
                     page.get_by_text("身份验证器", exact=False),
                 ],
