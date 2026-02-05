@@ -103,11 +103,11 @@
                 </TableHead>
                 <TableHead class="w-20">ID</TableHead>
                 <TableHead class="min-w-[260px]">邮箱</TableHead>
-                <TableHead class="min-w-[220px]">备注</TableHead>
                 <TableHead class="min-w-[320px]">进度</TableHead>
                 <TableHead class="w-24">n-2fa</TableHead>
                 <TableHead class="w-28">环境</TableHead>
                 <TableHead class="w-44">创建时间</TableHead>
+                <TableHead class="min-w-[220px]">备注</TableHead>
                 <TableHead class="w-28 text-right">操作</TableHead>
               </TableRow>
             </TableHeader>
@@ -146,36 +146,39 @@
                 <TableCell class="font-mono text-xs text-muted-foreground">#{{ row.id }}</TableCell>
 
                 <TableCell>
-                  <button
-                    type="button"
-                    class="max-w-[320px] truncate text-left text-primary hover:underline underline-offset-4"
-                    :title="row.email"
-                    @click="viewAccount(row)"
-                  >
-                    {{ row.email }}
-                  </button>
+                  <div class="flex items-center gap-2">
+                    <Loader2Icon
+                      v-if="isAccountRunning(row.id)"
+                      class="h-3.5 w-3.5 animate-spin text-primary/70"
+                      title="运行中"
+                    />
+                    <button
+                      type="button"
+                      class="max-w-[320px] truncate text-left text-primary hover:underline underline-offset-4"
+                      :title="row.email"
+                      @click="viewAccount(row)"
+                    >
+                      {{ row.email }}
+                    </button>
+                  </div>
                 </TableCell>
 
                 <TableCell>
-                  <span
-                    class="block max-w-[280px] truncate text-xs text-muted-foreground"
-                    :title="row.notes || ''"
-                  >
-                    {{ row.notes || '-' }}
-                  </span>
-                </TableCell>
-
-                <TableCell>
-                  <div class="flex flex-wrap items-center gap-1">
-                    <span
+                  <div class="flex flex-wrap items-center gap-1.5">
+                    <Badge
                       v-for="(step, index) in getMainFlowProgress(row)"
                       :key="`${row.id}-${index}`"
-                      class="inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-medium"
-                      :class="step.done ? 'border-emerald-500/40 bg-emerald-500/15 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400' : 'border-muted-foreground/20 bg-muted/30 text-muted-foreground'"
+                      variant="outline"
+                      class="rounded-[3px] text-[11px] leading-4"
+                      :class="step.state === 'success'
+                        ? 'bg-emerald-100 text-emerald-700 border-emerald-200 dark:bg-emerald-900/30 dark:text-emerald-400 dark:border-emerald-800'
+                        : (step.state === 'failed'
+                          ? 'bg-rose-100 text-rose-700 border-rose-200 dark:bg-rose-900/30 dark:text-rose-400 dark:border-rose-800'
+                          : 'bg-slate-100 text-slate-600 border-slate-200 dark:bg-slate-800 dark:text-slate-400 dark:border-slate-700')"
                       :title="`${index + 1}. ${step.label}`"
                     >
                       {{ step.label }}
-                    </span>
+                    </Badge>
                   </div>
                 </TableCell>
 
@@ -208,6 +211,15 @@
 
                 <TableCell class="text-muted-foreground">
                   {{ formatDate(row.created_at) }}
+                </TableCell>
+
+                <TableCell>
+                  <span
+                    class="block max-w-[280px] truncate text-xs text-muted-foreground"
+                    :title="row.notes || ''"
+                  >
+                    {{ row.notes || '-' }}
+                  </span>
                 </TableCell>
 
                 <TableCell class="text-right">
@@ -504,24 +516,20 @@
             </div>
           </div>
 
-          <div class="space-y-2 sm:col-span-2">
-            <div class="text-xs text-muted-foreground">主线进度</div>
-            <div class="flex flex-wrap gap-2">
-              <div
-                v-for="(step, index) in getMainFlowProgress(selectedAccount)"
-                :key="`detail-${index}`"
-                class="inline-flex items-center gap-2 rounded-full border px-2.5 py-1 text-xs"
-                :class="step.done ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-700' : 'border-muted-foreground/20 bg-muted/20 text-muted-foreground'"
-              >
-                <span class="inline-flex h-5 w-5 items-center justify-center rounded-full border text-[11px] font-semibold"
-                  :class="step.done ? 'border-emerald-500/40 bg-emerald-500/15 text-emerald-700' : 'border-muted-foreground/30 bg-muted/30 text-muted-foreground'"
-                >
-                  {{ index + 1 }}
-                </span>
-                <span>{{ step.label }}</span>
+            <div class="space-y-2 sm:col-span-2">
+              <div class="text-xs text-muted-foreground">主线进度</div>
+              <div class="flex items-center gap-2">
+                <span
+                  v-for="(step, index) in getMainFlowProgress(selectedAccount)"
+                  :key="`detail-${index}`"
+                  class="h-3 w-3 rounded-full"
+                  :class="step.state === 'success'
+                    ? 'bg-emerald-500'
+                    : (step.state === 'failed' ? 'bg-rose-500' : 'bg-muted-foreground/30')"
+                  :title="`${index + 1}. ${step.label}`"
+                />
               </div>
             </div>
-          </div>
 
           <div class="space-y-1">
             <div class="text-xs text-muted-foreground">SheerID 状态</div>
@@ -699,7 +707,7 @@
                           variant="link"
                           size="xs"
                           class="h-auto p-0"
-                          @click="row.source === 'google' ? viewTaskLog(row.google_task_id) : openCeleryTask(String(row.celery_task_id), selectedAccount?.email)"
+                          @click="row.source === 'google' ? viewTaskLog(row.google_task_id, selectedAccount) : openCeleryTask(String(row.celery_task_id), selectedAccount?.email)"
                         >
                           日志
                         </Button>
@@ -763,34 +771,40 @@
         </DialogHeader>
 
         <div v-if="currentSteps.length > 0" class="mb-4 rounded-xl border border-border bg-muted/20 p-4">
-          <div class="mb-3 flex items-center justify-between">
+          <div class="mb-3 flex flex-wrap items-center justify-between gap-3">
             <div class="text-sm font-semibold">流程步骤</div>
-            <div class="text-xs text-muted-foreground">
-              {{ Math.min(activeStep + 1, currentSteps.length) }}/{{ currentSteps.length }}
+            <div class="flex items-center gap-4">
+              <div class="text-xs text-muted-foreground">
+                {{ logProgressCount }}/{{ currentSteps.length }}
+              </div>
+              <div class="flex items-center gap-2">
+                <Switch :checked="logAutoRefresh" @update:checked="logAutoRefresh = $event" />
+                <span class="text-xs text-muted-foreground">自动刷新</span>
+              </div>
             </div>
           </div>
 
-          <div class="h-2 w-full rounded-full bg-muted overflow-hidden">
-            <div
-              class="h-full bg-primary transition-all"
-              :style="{ width: `${currentSteps.length ? Math.round(((activeStep + 1) / currentSteps.length) * 100) : 0}%` }"
-            />
-          </div>
-
-          <div class="mt-4 grid gap-2">
+          <div class="flex items-start justify-between gap-2">
             <div
               v-for="(step, index) in currentSteps"
               :key="index"
-              class="flex items-start gap-3 rounded-lg border border-border bg-background/60 px-3 py-2"
-              :class="index === activeStep ? 'ring-1 ring-ring' : ''"
+              class="flex min-w-0 flex-1 flex-col items-center gap-2"
             >
-              <div class="mt-0.5 h-6 w-6 rounded-full bg-muted flex items-center justify-center text-xs font-semibold">
-                {{ index + 1 }}
-              </div>
-              <div class="min-w-0 flex-1">
-                <div class="font-medium truncate">{{ step.title }}</div>
-                <div class="text-xs text-muted-foreground">{{ step.time }}</div>
-              </div>
+              <span
+                class="h-3 w-3 rounded-full"
+                :class="step.state === 'success'
+                  ? 'bg-emerald-500'
+                  : (step.state === 'failed' ? 'bg-rose-500' : 'bg-muted-foreground/30')"
+                :title="step.title"
+              />
+              <span
+                class="line-clamp-2 text-[11px] leading-tight text-center"
+                :class="step.state === 'success'
+                  ? 'text-emerald-600'
+                  : (step.state === 'failed' ? 'text-rose-600' : 'text-muted-foreground')"
+              >
+                {{ step.title }}
+              </span>
             </div>
           </div>
 
@@ -861,6 +875,10 @@
 
         <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div class="flex items-center gap-3">
+            <div class="flex items-center gap-2">
+              <Switch :checked="traceAutoRefresh" @update:checked="traceAutoRefresh = $event" />
+              <span class="text-sm">自动刷新</span>
+            </div>
             <div class="flex items-center gap-2">
               <Switch :checked="traceFollowLatest" @update:checked="traceFollowLatest = $event" />
               <span class="text-sm">跟随最新</span>
@@ -1119,7 +1137,6 @@ import {
   Loader2 as Loader2Icon,
   Monitor as MonitorIcon,
   Users,
-  XCircle,
   KeyRound,
   Eye,
   EyeOff,
@@ -1184,7 +1201,7 @@ const selectedAccount = ref<GoogleAccount | null>(null)
 const importText = ref('')
 const filterType = ref('all')
 const filterGroup = ref('all')
-const groupList = ref<Array<{id: string, name: string}>>([])
+const groupList = ref<Array<{ id: string; name: string; account_count: number }>>([])
 const selectedAccounts = ref<GoogleAccount[]>([])
 
 const totalPages = computed(() => {
@@ -1194,6 +1211,97 @@ const totalPages = computed(() => {
 })
 
 const selectedIds = computed(() => new Set(selectedAccounts.value.map(a => a.id)))
+
+// 账号运行态（用于列表“运行中”指示）
+const runningAccountCounts = reactive(new Map<number, number>())
+
+const isAccountRunning = (accountId: number) => {
+  return (runningAccountCounts.get(accountId) || 0) > 0
+}
+
+const incRunningAccounts = (ids: number[]) => {
+  for (const id of ids) {
+    const cur = runningAccountCounts.get(id) || 0
+    runningAccountCounts.set(id, cur + 1)
+  }
+}
+
+const decRunningAccounts = (ids: number[]) => {
+  for (const id of ids) {
+    const cur = runningAccountCounts.get(id) || 0
+    if (cur <= 1) runningAccountCounts.delete(id)
+    else runningAccountCounts.set(id, cur - 1)
+  }
+}
+
+const taskStatusPollingTimers = new Map<number, number>()
+const taskAccountIdsByTaskId = new Map<number, number[]>()
+let taskStatusPollingInFlight = false
+let lastAccountsAutoRefreshAt = 0
+const ACCOUNTS_AUTO_REFRESH_MS = 5000
+
+const stopTaskStatusPolling = (taskId: number) => {
+  const timer = taskStatusPollingTimers.get(taskId)
+  if (timer) window.clearInterval(timer)
+  taskStatusPollingTimers.delete(taskId)
+
+  const ids = taskAccountIdsByTaskId.get(taskId) || []
+  taskAccountIdsByTaskId.delete(taskId)
+  if (ids.length > 0) decRunningAccounts(ids)
+}
+
+const stopAllTaskStatusPolling = () => {
+  for (const [taskId] of taskStatusPollingTimers) {
+    stopTaskStatusPolling(taskId)
+  }
+  runningAccountCounts.clear()
+}
+
+const startTaskStatusPolling = (taskId: number, accountIds: number[]) => {
+  if (!taskId || taskId <= 0) return
+  if (taskStatusPollingTimers.has(taskId)) return
+
+  taskAccountIdsByTaskId.set(taskId, accountIds)
+  if (accountIds.length > 0) incRunningAccounts(accountIds)
+
+  const timer = window.setInterval(async () => {
+    if (taskStatusPollingInFlight) return
+    taskStatusPollingInFlight = true
+    try {
+      const res: any = await googleTasksApi.getTask(taskId)
+      const status = String(res?.status ?? res?.data?.status ?? '').toLowerCase()
+      const ids = taskAccountIdsByTaskId.get(taskId) || accountIds
+
+      const isTerminal = ['completed', 'failed', 'cancelled'].includes(status)
+      const now = Date.now()
+
+      // 运行中也定期刷新列表，避免用户需要手动刷新
+      if (isTerminal || now - lastAccountsAutoRefreshAt >= ACCOUNTS_AUTO_REFRESH_MS) {
+        lastAccountsAutoRefreshAt = now
+        await fetchAccounts()
+        if (showTasksDrawer.value && selectedAccount.value && ids.includes(selectedAccount.value.id)) {
+          await viewTasks(selectedAccount.value)
+        }
+      }
+
+      if (!isTerminal) return
+
+      stopTaskStatusPolling(taskId)
+    } catch {
+      // ignore
+    } finally {
+      taskStatusPollingInFlight = false
+    }
+  }, 2000)
+
+  taskStatusPollingTimers.set(taskId, timer)
+}
+
+const getCreatedTaskId = (res: any) => {
+  const raw = res?.task_id ?? res?.data?.task_id ?? res?.id ?? res?.data?.id
+  const n = Number(raw)
+  return Number.isFinite(n) && n > 0 ? n : null
+}
 
 // 统计信息
 const stats = computed(() => {
@@ -1333,7 +1441,7 @@ const editAccount = (account: GoogleAccount) => {
   editForm.email = account.email || ''
   editForm.password = ''
   editForm.recovery_email = account.recovery_email || ''
-  editForm.secret_key = account.secret_key || ''
+  editForm.secret_key = account.two_fa || ''
   editForm.notes = account.notes || ''
   showEditDialog.value = true
 }
@@ -1370,7 +1478,22 @@ const accountTasks = reactive({
 const currentLogContent = ref('')
 const currentSteps = ref<any[]>([])
 const currentLogExtras = ref<string[]>([])
-const activeStep = ref(0)
+const currentLogTaskId = ref<number | null>(null)
+const currentLogAccountId = ref<number | null>(null)
+const currentLogEmail = ref('')
+const logAutoRefresh = ref(true)
+const logPollingTimer = ref<number | null>(null)
+let logPollingInFlight = false
+
+const logProgressCount = computed(() => {
+  const steps = currentSteps.value || []
+  let last = -1
+  for (let i = 0; i < steps.length; i++) {
+    const st = String(steps[i]?.state || 'pending')
+    if (st !== 'pending') last = i
+  }
+  return last >= 0 ? last + 1 : 0
+})
 
 type TraceLine = { id: number; text: string; isJson: boolean }
 
@@ -1388,6 +1511,7 @@ const traceHasMoreBackward = ref(false)
 const traceCursorBackward = ref<number | null>(null)
 const traceCursorForward = ref<number | null>(null)
 const traceFollowLatest = ref(true)
+const traceAutoRefresh = ref(true)
 const traceLoadingOlder = ref(false)
 const tracePollingTimer = ref<number | null>(null)
 let tracePollingInFlight = false
@@ -1420,10 +1544,43 @@ const stopTracePolling = () => {
   tracePollingInFlight = false
 }
 
+const stopLogPolling = () => {
+  if (logPollingTimer.value) {
+    window.clearInterval(logPollingTimer.value)
+    logPollingTimer.value = null
+  }
+  logPollingInFlight = false
+}
+
+const startLogPolling = () => {
+  stopLogPolling()
+  logPollingTimer.value = window.setInterval(async () => {
+    if (!showLogDialog.value) return
+    if (!logAutoRefresh.value) return
+    if (logPollingInFlight) return
+    const taskId = currentLogTaskId.value
+    if (!taskId) return
+    logPollingInFlight = true
+    try {
+      await fetchTaskLog(
+        taskId,
+        {
+          account_id: currentLogAccountId.value || undefined,
+          email: currentLogEmail.value || undefined,
+        },
+        { silent: true }
+      )
+    } finally {
+      logPollingInFlight = false
+    }
+  }, 1500)
+}
+
 const startTracePolling = () => {
   stopTracePolling()
   tracePollingTimer.value = window.setInterval(async () => {
     if (!showCeleryDialog.value) return
+    if (!traceAutoRefresh.value) return
     if (!traceFollowLatest.value) return
     if (tracePollingInFlight) return
     tracePollingInFlight = true
@@ -1437,20 +1594,45 @@ const startTracePolling = () => {
 
 watch(traceFollowLatest, (v) => {
   if (!showCeleryDialog.value) return
-  if (v) startTracePolling()
+  if (v && traceAutoRefresh.value) startTracePolling()
+  else stopTracePolling()
+})
+
+watch(traceAutoRefresh, (v) => {
+  if (!showCeleryDialog.value) return
+  if (v && traceFollowLatest.value) startTracePolling()
   else stopTracePolling()
 })
 
 watch(showCeleryDialog, (v) => {
   if (v) {
-    if (traceFollowLatest.value) startTracePolling()
+    if (traceFollowLatest.value && traceAutoRefresh.value) startTracePolling()
   } else {
     stopTracePolling()
   }
 })
 
+watch(logAutoRefresh, (v) => {
+  if (!showLogDialog.value) return
+  if (v) startLogPolling()
+  else stopLogPolling()
+})
+
+watch(showLogDialog, (v) => {
+  if (v) {
+    if (logAutoRefresh.value) startLogPolling()
+  } else {
+    stopLogPolling()
+    currentLogTaskId.value = null
+    currentLogAccountId.value = null
+    currentLogEmail.value = ''
+  }
+})
+
 onBeforeUnmount(() => {
   stopTracePolling()
+  stopLogPolling()
+  stopAllTaskStatusPolling()
 })
 
 const sheerIDForm = reactive({
@@ -1562,6 +1744,13 @@ const fetchGroups = async () => {
     // 从账号列表中提取唯一的 group_name 值
     const response = await googleAccountsApi.getAccounts({ page_size: 9999 })
     const allAccounts = Array.isArray(response) ? response : (response.results || [])
+
+     const groupCounts = new Map<string, number>()
+     for (const acc of allAccounts) {
+       const name = String((acc as any)?.group_name || '').trim()
+       if (!name) continue
+       groupCounts.set(name, (groupCounts.get(name) || 0) + 1)
+     }
     
     // 提取唯一的非空 group_name
     const uniqueGroups = [...new Set(
@@ -1573,7 +1762,8 @@ const fetchGroups = async () => {
     // 转换为下拉选项格式
     groupList.value = uniqueGroups.map((name: string) => ({
       id: name,
-      name: name
+      name: name,
+      account_count: groupCounts.get(name) || 0,
     }))
     
     // 如果当前筛选的分组不存在了，重置为全部
@@ -1623,6 +1813,8 @@ const submitOneClickTask = async () => {
     return
   }
 
+  const ids = getSelectedIds()
+
   const config: any = {}
   if (oneClickForm.force_rerun) {
     config.force_rerun = true
@@ -1637,11 +1829,14 @@ const submitOneClickTask = async () => {
   }
 
   try {
-    await googleTasksApi.createTask({
+    const res = await googleTasksApi.createTask({
       task_type: 'one_click',
-      account_ids: getSelectedIds(),
+      account_ids: ids,
       config
     })
+
+    const createdTaskId = getCreatedTaskId(res)
+    if (createdTaskId) startTaskStatusPolling(createdTaskId, ids)
     ElMessage.success('任务已创建')
     showOneClickDialog.value = false
     fetchAccounts()
@@ -1774,15 +1969,19 @@ const submitSheerIDTask = async () => {
   }
   
   try {
-    await googleTasksApi.createTask({
+    const ids = getSelectedIds()
+    const res = await googleTasksApi.createTask({
       task_type: 'verify',
-      account_ids: getSelectedIds(),
+      account_ids: ids,
       config: {
         student_name: sheerIDForm.student_name,
         student_email: sheerIDForm.student_email,
         school_name: sheerIDForm.school_name
       }
     })
+
+    const createdTaskId = getCreatedTaskId(res)
+    if (createdTaskId) startTaskStatusPolling(createdTaskId, ids)
     ElMessage.success('SheerID 验证任务已创建')
     showSheerIDDialog.value = false
     fetchAccounts()
@@ -1793,14 +1992,18 @@ const submitSheerIDTask = async () => {
 
 const submitBindCardTask = async () => {
   try {
-    await googleTasksApi.createTask({
+    const ids = getSelectedIds()
+    const res = await googleTasksApi.createTask({
       task_type: 'bind_card',
-      account_ids: getSelectedIds(),
+      account_ids: ids,
       config: { 
         card_pool: bindCardForm.card_pool,
         card_strategy: bindCardForm.card_strategy
       }
     })
+
+    const createdTaskId = getCreatedTaskId(res)
+    if (createdTaskId) startTaskStatusPolling(createdTaskId, ids)
     ElMessage.success('绑卡任务已创建')
     showBindCardDialog.value = false
     fetchAccounts()
@@ -1872,48 +2075,119 @@ const viewTasks = async (row: GoogleAccount) => {
   }
 }
 
-const viewTaskLog = async (taskId: number) => {
+const fetchTaskLog = async (
+  taskId: number,
+  params?: { account_id?: number; email?: string },
+  options?: { silent?: boolean }
+) => {
   try {
-    const res = await googleTasksApi.getTaskLog(taskId)
+    const res = await googleTasksApi.getTaskLog(taskId, params)
     // 后端返回：{ task_id, log }
     const logStr = typeof res?.log === 'string' ? res.log : JSON.stringify(res, null, 2)
     currentLogContent.value = logStr
-    
+
     // Parse steps
-    currentSteps.value = []
     currentLogExtras.value = []
-    activeStep.value = 0
-    
+
     // Define standard steps
     const standardSteps = [
-        '登录账号', '打开 Google One', '检查学生资格', '学生验证', '订阅服务', '完成处理'
+      '登录账号', '打开 Google One', '检查学生资格', '学生验证', '订阅服务', '完成处理'
     ]
-    
-    // Find highest step reached
-    let maxStep = 0
+
+    const steps = standardSteps.map(title => ({
+      title,
+      state: 'pending' as FlowStepState,
+      fromCompleted: false,
+    }))
+
+    // Step markers
     const stepRegex = /步骤 (\d+)\/6:\s*(.*)/g
     let match
     while ((match = stepRegex.exec(logStr)) !== null) {
-        const stepNum = parseInt(match[1])
-        if (stepNum > maxStep) maxStep = stepNum
+      const stepNum = parseInt(match[1])
+      const idx = stepNum - 1
+      if (!Number.isFinite(stepNum) || idx < 0 || idx >= steps.length) continue
+
+      const text = String(match[2] || '')
+      const isCompleted = text.includes('已完成')
+      const isSkip = text.includes('跳过')
+
+      // 跳过：一律视为未执行（灰），避免出现“前面失败后面却显示完成”的错觉
+      if (isSkip) {
+        steps[idx].state = 'pending'
+        continue
+      }
+
+      if (isCompleted) {
+        steps[idx].state = 'success'
+        steps[idx].fromCompleted = true
+        continue
+      }
+
+      steps[idx].state = 'success'
     }
-    
-    // el-steps 的 active 是索引（0-based），日志里是 1-based
-    activeStep.value = maxStep > 0 ? Math.min(maxStep - 1, 5) : 0
-    currentSteps.value = standardSteps.map(s => ({ title: s, time: '' }))
-    
+
+    // Failure detection (map error keywords to step)
+    let failedIndex = -1
+    if (
+      logStr.includes('检测到机器人验证') ||
+      logStr.includes('需要机器人验证') ||
+      logStr.includes('机器人验证') ||
+      logStr.includes('验证码')
+    ) {
+      failedIndex = 0
+    } else if (
+      logStr.includes('账号不符合学生优惠资格') ||
+      logStr.includes('学生资格不符合')
+    ) {
+      failedIndex = 2
+    } else if (logStr.includes('学生验证失败')) {
+      failedIndex = 3
+    } else if (
+      logStr.includes('订阅失败') ||
+      logStr.includes('绑卡失败') ||
+      logStr.includes('绑卡过程出错')
+    ) {
+      failedIndex = 4
+    }
+
+    if (failedIndex >= 0 && failedIndex < steps.length) {
+      steps[failedIndex].state = 'failed'
+      for (let i = failedIndex + 1; i < steps.length; i++) {
+        if (steps[i].fromCompleted) continue
+        steps[i].state = 'pending'
+      }
+    }
+
+    currentSteps.value = steps.map(({ fromCompleted, ...rest }) => rest)
+
     // Check extras
     const extraRegex = /增项:\s*(.*)/g
     while ((match = extraRegex.exec(logStr)) !== null) {
-        if (!currentLogExtras.value.includes(match[1])) {
-            currentLogExtras.value.push(match[1])
-        }
+      if (!currentLogExtras.value.includes(match[1])) {
+        currentLogExtras.value.push(match[1])
+      }
     }
 
     showLogDialog.value = true
   } catch (e) {
-    ElMessage.error('获取日志失败')
+    if (!options?.silent) {
+      ElMessage.error('获取日志失败')
+    }
   }
+}
+
+const viewTaskLog = async (taskId: number, account?: GoogleAccount | null) => {
+  currentLogTaskId.value = taskId
+  currentLogAccountId.value = account?.id ?? null
+  currentLogEmail.value = String(account?.email || '')
+  await fetchTaskLog(
+    taskId,
+    {
+      account_id: account?.id,
+      email: account?.email,
+    }
+  )
 }
 
 const cancelTask = async (taskId: number) => {
@@ -2229,14 +2503,17 @@ const MAIN_FLOW_STEPS = [
   '完成处理'
 ]
 
+type FlowStepState = 'success' | 'failed' | 'pending'
+
 const getMainFlowProgress = (account?: GoogleAccount | null) => {
   if (!account) {
-    return MAIN_FLOW_STEPS.map(label => ({ label, done: false }))
+    return MAIN_FLOW_STEPS.map(label => ({ label, state: 'pending' as FlowStepState }))
   }
 
   const status = String(account.status || '').toLowerCase()
   const googleOneStatus = String(account.google_one_status || '').toLowerCase()
   const geminiStatus = String(account.gemini_status || '').toLowerCase()
+  const notes = String(account.notes || '')
 
   const statusEligible = ['link_ready', 'verified', 'subscribed', 'ineligible']
   const googleOneEligible = ['link_ready', 'verified', 'subscribed', 'ineligible']
@@ -2257,21 +2534,97 @@ const getMainFlowProgress = (account?: GoogleAccount | null) => {
     hasVerify ||
     Boolean(account.card_bound)
 
+  const loginFailed =
+    status === 'locked' ||
+    status === 'disabled' ||
+    notes.includes('机器人验证') ||
+    notes.includes('验证码') ||
+    notes.includes('登录失败')
+
+  const eligibilityFailed =
+    status === 'ineligible' ||
+    googleOneStatus === 'ineligible' ||
+    googleOneStatus === 'timeout' ||
+    googleOneStatus === 'error' ||
+    notes.includes('获取链接失败') ||
+    notes.includes('账号不符合学生优惠资格') ||
+    notes.includes('学生资格不符合')
+
+  const eligibilitySuccess =
+    !eligibilityFailed &&
+    (
+      googleOneStatus === 'link_ready' ||
+      googleOneStatus === 'verified' ||
+      googleOneStatus === 'subscribed' ||
+      Boolean(account.sheerid_link) ||
+      hasVerify
+    )
+
+  const verifyFailed = notes.includes('学生验证失败')
+
   const hasSubscribe =
     Boolean(account.card_bound) ||
     Boolean(account.subscribed) ||
     googleOneStatus === 'subscribed' ||
     ['active', 'subscribed'].includes(geminiStatus)
 
+  const subscribeFailed =
+    notes.includes('订阅失败') ||
+    notes.includes('绑卡失败') ||
+    notes.includes('绑卡过程出错')
+
   const hasComplete = hasSubscribe
 
+  const loginState: FlowStepState = loginFailed ? 'failed' : (hasLogin ? 'success' : 'pending')
+
+  if (loginState !== 'success') {
+    return [
+      { label: MAIN_FLOW_STEPS[0], state: loginState },
+      { label: MAIN_FLOW_STEPS[1], state: 'pending' },
+      { label: MAIN_FLOW_STEPS[2], state: 'pending' },
+      { label: MAIN_FLOW_STEPS[3], state: 'pending' },
+      { label: MAIN_FLOW_STEPS[4], state: 'pending' },
+      { label: MAIN_FLOW_STEPS[5], state: 'pending' },
+    ]
+  }
+
+  const step3State: FlowStepState = eligibilityFailed ? 'failed' : (eligibilitySuccess ? 'success' : 'pending')
+  const step2State: FlowStepState = (step3State !== 'pending' || hasOpenOne) ? 'success' : 'pending'
+
+  if (step3State === 'failed') {
+    return [
+      { label: MAIN_FLOW_STEPS[0], state: 'success' },
+      { label: MAIN_FLOW_STEPS[1], state: step2State },
+      { label: MAIN_FLOW_STEPS[2], state: 'failed' },
+      { label: MAIN_FLOW_STEPS[3], state: 'pending' },
+      { label: MAIN_FLOW_STEPS[4], state: 'pending' },
+      { label: MAIN_FLOW_STEPS[5], state: 'pending' },
+    ]
+  }
+
+  const verifySuccess = hasVerify || googleOneStatus === 'verified' || googleOneStatus === 'subscribed' || hasSubscribe
+  const step4State: FlowStepState = verifyFailed ? 'failed' : (verifySuccess ? 'success' : 'pending')
+
+  if (step4State === 'failed') {
+    return [
+      { label: MAIN_FLOW_STEPS[0], state: 'success' },
+      { label: MAIN_FLOW_STEPS[1], state: step2State },
+      { label: MAIN_FLOW_STEPS[2], state: step3State },
+      { label: MAIN_FLOW_STEPS[3], state: 'failed' },
+      { label: MAIN_FLOW_STEPS[4], state: 'pending' },
+      { label: MAIN_FLOW_STEPS[5], state: 'pending' },
+    ]
+  }
+
+  const step5State: FlowStepState = subscribeFailed ? 'failed' : (hasSubscribe ? 'success' : 'pending')
+
   return [
-    { label: MAIN_FLOW_STEPS[0], done: hasLogin },
-    { label: MAIN_FLOW_STEPS[1], done: hasOpenOne },
-    { label: MAIN_FLOW_STEPS[2], done: hasEligibility },
-    { label: MAIN_FLOW_STEPS[3], done: hasVerify },
-    { label: MAIN_FLOW_STEPS[4], done: hasSubscribe },
-    { label: MAIN_FLOW_STEPS[5], done: hasComplete }
+    { label: MAIN_FLOW_STEPS[0], state: 'success' },
+    { label: MAIN_FLOW_STEPS[1], state: step2State },
+    { label: MAIN_FLOW_STEPS[2], state: step3State },
+    { label: MAIN_FLOW_STEPS[3], state: step4State },
+    { label: MAIN_FLOW_STEPS[4], state: step5State },
+    { label: MAIN_FLOW_STEPS[5], state: hasComplete ? 'success' : 'pending' },
   ]
 }
 

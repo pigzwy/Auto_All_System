@@ -353,29 +353,37 @@ def process_single_account(
                         if needs_login:
                             task_logger.info(f"[Account {account_id}] 步骤 1/6: 登录账号")
                             login_service = GoogleLoginService()
-                            login_result = await login_service.login(
-                                page, account_info, task_logger, exit_on_captcha=True
-                            )
-                            if not login_result.get("success"):
-                                error_msg = login_result.get("error") or "登录失败"
-                                is_captcha = "机器人验证" in error_msg or "验证码" in error_msg
-                                if is_captcha:
-                                    append_note("检测到机器人验证，已中断")
-                                    account_updates["status"] = GoogleAccountStatus.LOCKED
-                                    keep_browser_open = False
-                                    error_msg = "需要机器人验证"
-                                if "手机号验证" in error_msg or "phone" in error_msg:
-                                    append_note("需要手机号验证，需绑卡")
-                                main_flow_title = "机器人验证" if is_captcha else "登录失败"
-                                return {
-                                    "success": False,
-                                    "message": f"登录失败: {error_msg}",
-                                    "account_updates": account_updates,
-                                    "failed_step": "login",
-                                    "main_flow_step_num": 1,
-                                    "main_flow_step_title": main_flow_title,
-                                    "keep_browser": False,
-                                }
+                            logged_in = await login_service.check_login_status(page)
+                            if logged_in:
+                                task_logger.info(f"[Account {account_id}] 已检测到登录态，跳过登录")
+                                account_updates["status"] = GoogleAccountStatus.ACTIVE
+                                account_updates["last_login_at"] = timezone.now()
+                            else:
+                                login_result = await login_service.login(
+                                    page, account_info, task_logger, exit_on_captcha=True
+                                )
+                                if not login_result.get("success"):
+                                    error_msg = login_result.get("error") or "登录失败"
+                                    is_captcha = "机器人验证" in error_msg or "验证码" in error_msg
+                                    if is_captcha:
+                                        append_note("检测到机器人验证，已中断")
+                                        account_updates["status"] = GoogleAccountStatus.LOCKED
+                                        keep_browser_open = False
+                                        error_msg = "需要机器人验证"
+                                    if "手机号验证" in error_msg or "phone" in error_msg:
+                                        append_note("需要手机号验证，需绑卡")
+                                    main_flow_title = "机器人验证" if is_captcha else "登录失败"
+                                    return {
+                                        "success": False,
+                                        "message": f"登录失败: {error_msg}",
+                                        "account_updates": account_updates,
+                                        "failed_step": "login",
+                                        "main_flow_step_num": 1,
+                                        "main_flow_step_title": main_flow_title,
+                                         "keep_browser": False,
+                                     }
+                                account_updates["status"] = GoogleAccountStatus.ACTIVE
+                                account_updates["last_login_at"] = timezone.now()
                         else:
                             task_logger.info(
                                 f"[Account {account_id}] 步骤 1/6: 已完成，跳过"
@@ -434,10 +442,23 @@ def process_single_account(
                         if link:
                             account_updates["sheerid_link"] = link
 
+                        if status in [
+                            "link_ready",
+                            "verified",
+                            "subscribed",
+                            "ineligible",
+                        ]:
+                            new_meta = dict(account.metadata or {})
+                            new_meta["google_one_status"] = status
+                            account_updates["metadata"] = new_meta
+
                         if status == "ineligible":
                             task_logger.info(
                                 f"[Account {account_id}] 学生资格不符合，跳过后续验证/订阅"
                             )
+                            new_meta = dict(account.metadata or {})
+                            new_meta["google_one_status"] = "ineligible"
+                            account_updates["metadata"] = new_meta
                             step4_needed = False
                             step5_needed = False
 
@@ -467,9 +488,23 @@ def process_single_account(
                                     if verify_result.get("status") == "success":
                                         account_updates["sheerid_verified"] = True
                                     else:
-                                        task_logger.warning(
-                                            f"[Account {account_id}] 验证未成功: {verify_result.get('message')}"
+                                        verify_message = str(
+                                            verify_result.get("message") or "验证未成功"
                                         )
+                                        task_logger.warning(
+                                            f"[Account {account_id}] 验证未成功: {verify_message}"
+                                        )
+                                        if "HTTP 404" in verify_message:
+                                            append_note("学生验证失败: HTTP 404")
+                                            return {
+                                                "success": False,
+                                                "message": f"学生验证失败: {verify_message}",
+                                                "account_updates": account_updates,
+                                                "failed_step": "verify",
+                                                "main_flow_step_num": 4,
+                                                "main_flow_step_title": "学生验证失败",
+                                                "keep_browser": False,
+                                            }
                             else:
                                 task_logger.info(
                                     f"[Account {account_id}] 步骤 4/6: 跳过（无验证链接）"
@@ -621,6 +656,22 @@ def process_single_account(
         # 运行异步函数（只做浏览器自动化，不做 ORM 写入）
         result = asyncio.run(_process())
 
+        # best-effort: 关闭 GeekezBrowser 环境（避免批量跑完后大量窗口堆积）
+        try:
+            keep_browser = bool(
+                isinstance(result, dict) and result.get("keep_browser") is True
+            )
+        except Exception:
+            keep_browser = False
+
+        if not keep_browser:
+            try:
+                from apps.integrations.geekez.api import GeekezBrowserAPI
+
+                GeekezBrowserAPI().close_profile(str(browser_id))
+            except Exception:
+                pass
+
         # 把 trace 文件路径附加到结果，方便前端/排查定位
         trace_file = task_logger.trace_rel_path or (
             str(task_logger.trace_file) if task_logger.trace_file else ""
@@ -722,6 +773,14 @@ def process_single_account(
             # 指数退避
             countdown = 2**self.request.retries
             raise self.retry(exc=e, countdown=countdown)
+
+        # 不再重试：best-effort 关闭 GeekezBrowser 环境
+        try:
+            from apps.integrations.geekez.api import GeekezBrowserAPI
+
+            GeekezBrowserAPI().close_profile(str(browser_id))
+        except Exception:
+            pass
 
         return {"success": False, "error": str(e)}
 
@@ -837,9 +896,16 @@ def batch_process_task(
     max_concurrency = int(config.get("max_concurrency") or config.get("concurrency") or 5)
     if max_concurrency <= 0:
         max_concurrency = 1
-    wave_delay = int(config.get("concurrency_delay") or 1)
-    if wave_delay < 0:
-        wave_delay = 0
+    # 任务启动错峰：避免同一时刻大量账号同时打开浏览器/请求 Google
+    # stagger_seconds: 每个账号启动间隔（秒），默认 1s；可设为 2
+    stagger_seconds = int(
+        config.get("stagger_seconds")
+        or config.get("stagger_delay")
+        or config.get("start_stagger")
+        or 1
+    )
+    if stagger_seconds < 0:
+        stagger_seconds = 0
 
     logger.info(
         f"Starting batch task {task_id} with {len(account_ids)} accounts, type={task_type}, concurrency={max_concurrency}"
@@ -921,7 +987,7 @@ def batch_process_task(
                 task_account.save()
 
                 # 创建子任务
-                delay_seconds = (index // max_concurrency) * wave_delay
+                delay_seconds = index * stagger_seconds
                 subtask = (
                     process_single_account.s(
                         task_id, account_id, profile.id, ws_endpoint, task_type, config

@@ -1391,7 +1391,33 @@ class GoogleTaskViewSet(viewsets.ModelViewSet):
         """获取任务日志"""
         task = self.get_object()
 
-        return Response({"task_id": task.id, "log": task.log})
+        log_text = task.log or ""
+        account_id_raw = (request.query_params.get("account_id") or "").strip()
+        email = (request.query_params.get("email") or "").strip()
+
+        account_id: int | None = None
+        if account_id_raw:
+            try:
+                account_id = int(account_id_raw)
+            except Exception:
+                account_id = None
+
+        if (account_id is not None) or email:
+            lines = log_text.splitlines()
+            needles: list[str] = []
+            if account_id is not None:
+                needles.append(f"[acc={account_id}]")
+                needles.append(f"[Account {account_id}]")
+            if email:
+                # 主要依赖日志前缀的 [email] 段，避免误匹配
+                needles.append(f"][{email}]")
+
+            filtered = [
+                ln for ln in lines if any((needle in ln) for needle in needles)
+            ]
+            log_text = "\n".join(filtered)
+
+        return Response({"task_id": task.id, "log": log_text})
 
     @action(detail=True, methods=["get"])
     def accounts(self, request, pk=None):

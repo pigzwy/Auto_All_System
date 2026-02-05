@@ -11,6 +11,8 @@ import asyncio
 
 from cryptography.fernet import Fernet
 from django.conf import settings
+from django.db.models import F, Value
+from django.db.models.functions import Coalesce, Concat
 from django.utils import timezone
 import base64
 import hashlib
@@ -426,11 +428,10 @@ class TaskLogger:
             if not self.task:
                 return
 
-            # 避免并发/跨线程时 self.task 过旧导致覆盖
-            task = self.task.__class__.objects.get(pk=self.task.pk)
-            task.log = (task.log or "") + formatted_message
-            task.save(update_fields=["log"])
-            self.task = task
+            # 并发安全：用数据库原子追加，避免多账号并发写入时互相覆盖
+            self.task.__class__.objects.filter(pk=self.task.pk).update(
+                log=Concat(Coalesce(F("log"), Value("")), Value(formatted_message))
+            )
 
         # 写入数据库：在 async 上下文中用线程执行，避免触发 SynchronousOnlyOperation
         try:

@@ -131,8 +131,8 @@ export const googleTasksApi = {
   },
 
   // 获取任务日志
-  getTaskLog(taskId: number | string): Promise<any> {
-    return request.get(`/plugins/google-business/tasks/${taskId}/log/`)
+  getTaskLog(taskId: number | string, params?: Record<string, any>): Promise<any> {
+    return request.get(`/plugins/google-business/tasks/${taskId}/log/`, { params })
   },
 
   // 获取任务账号执行明细
