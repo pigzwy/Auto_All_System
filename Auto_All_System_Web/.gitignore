@@ -82,5 +82,6 @@ coverage.xml
 # Docker
 *.log
 # Local Geekez profile caches (may contain personal emails/ids)
+backend/geekez-browser/
 backend/geekez-browser/BrowserProfiles/profiles.json
 data/geekez-profiles/profiles.json
