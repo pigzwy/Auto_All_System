@@ -52,7 +52,7 @@ class CardViewSet(viewsets.ModelViewSet):
     @action(detail=False, methods=['get'])
     def available(self, request):
         """获取可用的虚拟卡列表"""
-        cards = self.get_queryset().filter(status='available')
+        cards = self.filter_queryset(self.get_queryset()).filter(status='available')
         
         page = self.paginate_queryset(cards)
         if page is not None:
@@ -119,6 +119,7 @@ class CardViewSet(viewsets.ModelViewSet):
                         cvv=card_data['cvv'],
                         card_type=card_type,
                         bank_name=card_data.get('bank_name', ''),
+                        billing_address=card_data.get('billing_address', {}),
                         balance=card_data.get('balance', 0.00),
                         pool_type=pool_type,
                         owner_user=request.user if pool_type == 'private' else None,

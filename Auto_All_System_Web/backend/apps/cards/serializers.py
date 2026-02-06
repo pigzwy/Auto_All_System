@@ -73,7 +73,7 @@ class CardImportSerializer(serializers.Serializer):
     cards_data = serializers.ListField(
         child=serializers.JSONField(),
         required=True,
-        help_text='卡数据列表，支持对象或字符串 "card_number month year cvv [notes]"'
+        help_text='卡数据列表，支持对象或字符串 "card_number month year cvv [notes] | card_holder | address_line1 | city | state | postal_code | country"'
     )
     pool_type = serializers.ChoiceField(
         choices=['public', 'private'],
@@ -82,17 +82,65 @@ class CardImportSerializer(serializers.Serializer):
     )
 
     def validate_cards_data(self, value):
+        def normalize_billing_address(raw):
+            if isinstance(raw, dict):
+                address_line1 = str(raw.get('address_line1') or raw.get('street') or '').strip()
+                city = str(raw.get('city') or '').strip()
+                state = str(raw.get('state') or '').strip()
+                postal_code = str(raw.get('postal_code') or raw.get('zip') or '').strip()
+                country = str(raw.get('country') or '').strip()
+            elif isinstance(raw, str):
+                address_line1 = raw.strip()
+                city = ''
+                state = ''
+                postal_code = ''
+                country = ''
+            else:
+                return {}
+
+            if not any([address_line1, city, state, postal_code, country]):
+                return {}
+
+            return {
+                'address_line1': address_line1,
+                'street': address_line1,
+                'city': city,
+                'state': state,
+                'postal_code': postal_code,
+                'zip': postal_code,
+                'country': country,
+            }
+
         normalized = []
         for item in value:
             if isinstance(item, str):
-                parts = item.strip().split()
+                raw_parts = [part.strip() for part in item.split('|')]
+                parts = raw_parts[0].split()
                 if len(parts) < 4:
                     raise serializers.ValidationError(f'格式错误，至少包含：卡号 月份 年份 CVV: {item}')
+
+                card_holder = raw_parts[1] if len(raw_parts) > 1 else ''
+                address_line1 = raw_parts[2] if len(raw_parts) > 2 else ''
+                city = raw_parts[3] if len(raw_parts) > 3 else ''
+                state = raw_parts[4] if len(raw_parts) > 4 else ''
+                postal_code = raw_parts[5] if len(raw_parts) > 5 else ''
+                country = raw_parts[6] if len(raw_parts) > 6 else ''
+
+                billing_address = normalize_billing_address({
+                    'address_line1': address_line1,
+                    'city': city,
+                    'state': state,
+                    'postal_code': postal_code,
+                    'country': country,
+                })
+
                 normalized.append({
                     'card_number': parts[0],
                     'expiry_month': int(parts[1]),
                     'expiry_year': int(parts[2]) if len(parts[2]) == 4 else 2000 + int(parts[2]),
                     'cvv': parts[3],
+                    'card_holder': card_holder,
+                    'billing_address': billing_address,
                     'notes': ' '.join(parts[4:]) if len(parts) > 4 else ''
                 })
             elif isinstance(item, dict):
@@ -118,6 +166,7 @@ class CardImportSerializer(serializers.Serializer):
                     'card_type': item.get('card_type', 'visa'),
                     'bank_name': item.get('bank_name', ''),
                     'card_holder': item.get('card_holder', ''),
+                    'billing_address': normalize_billing_address(item.get('billing_address')),
                     'notes': item.get('notes', '')
                 })
             else:

@@ -88,6 +88,14 @@ export const cardsApi = {
       expiry_year: number
       cvv: string
       card_type?: string
+      notes?: string
+      billing_address?: {
+        address_line1?: string
+        city?: string
+        state?: string
+        postal_code?: string
+        country?: string
+      }
     }>, 
     pool_type: string 
   }): Promise<{ 
@@ -133,4 +141,3 @@ export const cardsApi = {
     return request.post(`/cards/api-configs/${id}/set_default/`)
   }
 }
-
