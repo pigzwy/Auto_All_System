@@ -47,6 +47,16 @@ class GoogleSecurityService:
     # 为避免误把页面上的普通英文（例如 "GOOGLEAUTHENTICATOR"）当成 key，这里额外要求长度为 8 的倍数。
     _BASE32_RE = re.compile(r"^[A-Z2-7]{16,64}$")
 
+    # 性能相关参数（在稳定性和速度之间取平衡）
+    SHORT_WAIT_SECONDS = 0.35
+    MEDIUM_WAIT_SECONDS = 0.5
+    REAUTH_PROBE_TIMEOUT_MS = 300
+    CLICK_PROBE_TIMEOUT_MS = 350
+    VISIBLE_PROBE_TIMEOUT_MS = 220
+    LOCATOR_POLL_INTERVAL_SECONDS = 0.15
+    CLICK_TOTAL_BUDGET_MS = 4500
+    MAX_SECRET_EXTRACT_ATTEMPTS = 10
+
     @staticmethod
     def _normalize_base32_secret(raw: str) -> str:
         return (raw or "").replace(" ", "").strip().upper()
@@ -69,11 +79,11 @@ class GoogleSecurityService:
 
         password_input = page.locator('input[type="password"]').first
         try:
-            if await password_input.is_visible():
+            if await password_input.is_visible(timeout=self.REAUTH_PROBE_TIMEOUT_MS):
                 await password_input.fill(password)
                 await page.keyboard.press("Enter")
                 # 等待页面反应，不用固定 sleep 太久
-                await asyncio.sleep(1)
+                await asyncio.sleep(self.SHORT_WAIT_SECONDS)
                 return True
         except Exception:
             return False
@@ -87,14 +97,14 @@ class GoogleSecurityService:
         # Google 常见的 TOTP 输入框
         totp_input = page.locator('input[name="totpPin"], input[type="tel"]').first
         try:
-            if await totp_input.is_visible():
+            if await totp_input.is_visible(timeout=self.REAUTH_PROBE_TIMEOUT_MS):
                 # 这里的 secret 可能来自 DB（加密/明文兼容），必须确保格式正确
                 if not self._is_plausible_base32_secret(totp_secret):
                     return False
                 code = pyotp.TOTP(totp_secret).now()
                 await totp_input.fill(code)
                 await page.keyboard.press("Enter")
-                await asyncio.sleep(1)
+                await asyncio.sleep(self.SHORT_WAIT_SECONDS)
                 return True
         except Exception:
             return False
@@ -111,21 +121,56 @@ class GoogleSecurityService:
         ]
         for loc in candidates:
             try:
-                if await loc.first.is_visible():
-                    await loc.first.click()
-                    await asyncio.sleep(0.5)
+                if await loc.first.is_visible(timeout=self.REAUTH_PROBE_TIMEOUT_MS):
+                    await loc.first.click(timeout=1200)
+                    await asyncio.sleep(0.2)
             except Exception:
                 continue
 
+    async def _needs_reauth(self, page: Page) -> bool:
+        """快速判断是否在 re-auth 场景，避免无意义的重复填充导致变慢。"""
+        url = (getattr(page, "url", "") or "").lower()
+        if any(
+            token in url
+            for token in [
+                "challenge",
+                "identifier",
+                "accounts.google.com/signin/v2",
+            ]
+        ):
+            return True
+
+        checks = [
+            page.locator('input[type="password"]').first,
+            page.locator('input[name="totpPin"], input[type="tel"]').first,
+            page.get_by_role("button", name="Not now").first,
+            page.get_by_role("button", name="Skip").first,
+        ]
+        for loc in checks:
+            try:
+                if await loc.count() > 0 and await loc.is_visible(
+                    timeout=self.REAUTH_PROBE_TIMEOUT_MS
+                ):
+                    return True
+            except Exception:
+                continue
+
+        return False
+
     async def _handle_reauth(self, page: Page, account: Dict[str, Any]) -> None:
         # 重新验证身份：可能出现 password + 2FA
+        if not await self._needs_reauth(page):
+            return
         await self._dismiss_common_prompts(page)
         await self._maybe_fill_password(page, account.get("password", ""))
         await self._maybe_fill_totp(page, account.get("totp_secret", ""))
         await self._dismiss_common_prompts(page)
 
     async def _click_first_visible(
-        self, locators: List[Locator], debug_label: str = ""
+        self,
+        locators: List[Locator],
+        debug_label: str = "",
+        max_total_ms: Optional[int] = None,
     ) -> bool:
         """
         尝试点击第一个可见的元素
@@ -140,9 +185,24 @@ class GoogleSecurityService:
 
         # Playwright 的 locator.is_visible()/is_enabled() 默认会用全局 timeout（常见 30s）。
         # 这里是"试探性"点击：不应为单个 selector 卡太久，否则多 selector 串起来会非常慢。
-        probe_timeout_ms = 500  # 从 1200ms 减少到 500ms
+        probe_timeout_ms = self.CLICK_PROBE_TIMEOUT_MS
+        total_budget_ms = max_total_ms or self.CLICK_TOTAL_BUDGET_MS
 
-        async def _try_click(target: Locator, label: str) -> bool:
+        # 关键优化：按 selector 置信度分层超时。
+        # 列表越靠前通常越精准，给稍长点击预算；兜底 selector 用更短预算，避免总耗时爆炸。
+        def _pick_click_timeout_ms(locator_index: int) -> int:
+            if locator_index <= 1:
+                return 2500
+            if locator_index <= 4:
+                return 1500
+            return 900
+
+        async def _try_click(
+            target: Locator,
+            label: str,
+            click_timeout_ms: int,
+            force_click_timeout_ms: int,
+        ) -> bool:
             """Google 页面经常把文本放在 span 内，真正可点的是祖先 button/role=button。
 
             这里优先常规 click，失败后再点祖先元素，最后才 force click。
@@ -169,7 +229,7 @@ class GoogleSecurityService:
                     except Exception:
                         # 某些元素不支持 enabled 检查，忽略
                         pass
-                    await target.click(timeout=5000)
+                    await target.click(timeout=click_timeout_ms)
                     return True
             except Exception as e:
                 if label:
@@ -190,7 +250,7 @@ class GoogleSecurityService:
                             await anc.scroll_into_view_if_needed()
                         except Exception:
                             pass
-                        await anc.click(timeout=5000)
+                        await anc.click(timeout=click_timeout_ms)
                         return True
                 except Exception as e:
                     if label:
@@ -202,16 +262,30 @@ class GoogleSecurityService:
             # 4) 兜底：force click（避免被内部 span 指针事件影响）
             try:
                 if await target.is_visible(timeout=probe_timeout_ms):
-                    await target.click(timeout=5000, force=True)
+                    await target.click(timeout=force_click_timeout_ms, force=True)
                     return True
             except Exception as e:
                 if label:
                     logger.debug(f"[{label}] force click failed: {e}")
             return False
 
+        loop = asyncio.get_running_loop()
+        all_started_at = loop.time()
+
         for i, loc in enumerate(locators):
             try:
+                if (loop.time() - all_started_at) * 1000 >= total_budget_ms:
+                    if debug_label:
+                        logger.warning(
+                            f"[{debug_label}] click budget exceeded: {total_budget_ms}ms"
+                        )
+                    break
+
                 candidate = loc.first
+                click_timeout_ms = _pick_click_timeout_ms(i)
+                force_click_timeout_ms = min(click_timeout_ms, 900)
+                started_at = loop.time()
+
                 # 先 count 再 is_visible：避免 is_visible 的默认超时导致串行等待过久
                 if await candidate.count() <= 0:
                     continue
@@ -222,9 +296,22 @@ class GoogleSecurityService:
                 if not is_visible:
                     continue
 
-                clicked = await _try_click(candidate, debug_label)
+                clicked = await _try_click(
+                    candidate,
+                    debug_label,
+                    click_timeout_ms,
+                    force_click_timeout_ms,
+                )
+                elapsed_ms = int((loop.time() - started_at) * 1000)
+
+                if debug_label and (clicked or elapsed_ms >= 1500):
+                    logger.info(
+                        f"[{debug_label}] Locator {i}: clicked={clicked} "
+                        f"elapsed_ms={elapsed_ms} click_timeout_ms={click_timeout_ms}"
+                    )
+
                 if clicked:
-                    await asyncio.sleep(1)
+                    await asyncio.sleep(self.SHORT_WAIT_SECONDS)
                     if debug_label:
                         logger.info(f"[{debug_label}] Clicked locator {i} successfully")
                     return True
@@ -421,14 +508,19 @@ class GoogleSecurityService:
 
         all_locs = page_locs + frame_locs
 
+        # 统一显式可见性探测超时，避免某些运行时回落到全局 timeout 造成意外长等待。
+        visible_probe_timeout_ms = self.VISIBLE_PROBE_TIMEOUT_MS
+
         while asyncio.get_running_loop().time() < end_time:
             for loc in all_locs:
                 try:
-                    if await loc.count() > 0 and await loc.is_visible():
+                    if await loc.count() > 0 and await loc.is_visible(
+                        timeout=visible_probe_timeout_ms
+                    ):
                         return loc
                 except Exception:
                     continue
-            await asyncio.sleep(0.25)
+            await asyncio.sleep(self.LOCATOR_POLL_INTERVAL_SECONDS)
 
         return None
 
@@ -451,6 +543,7 @@ class GoogleSecurityService:
         email = account.get("email", "")
         # 旧密钥用于 re-auth（可能出现再次输入当前 2FA）
         current_secret = account.get("totp_secret", "")
+        loop = asyncio.get_running_loop()
 
         if task_logger:
             task_logger.event(
@@ -470,11 +563,12 @@ class GoogleSecurityService:
                     url=self.TWO_STEP_URL,
                 )
             await page.goto(self.TWO_STEP_URL, wait_until="domcontentloaded")
-            await asyncio.sleep(1)
+            await asyncio.sleep(self.SHORT_WAIT_SECONDS)
             await self._handle_reauth(page, {**account, "totp_secret": current_secret})
 
             # 2) 进入 Authenticator app 设置
             # 真实元素: <div class="mMsbvc ">Authenticator</div>
+            auth_click_started_at = loop.time()
             clicked_auth = await self._click_first_visible(
                 [
                     # 精确匹配 Google 页面的 div.mMsbvc
@@ -489,21 +583,60 @@ class GoogleSecurityService:
                 ],
                 debug_label="click_authenticator",
             )
+            auth_click_elapsed_ms = int((loop.time() - auth_click_started_at) * 1000)
+            if task_logger:
+                task_logger.event(
+                    step="2fa",
+                    action="click",
+                    message=(
+                        "clicked Authenticator entry"
+                        if clicked_auth
+                        else "Authenticator entry not clicked"
+                    ),
+                    url=getattr(page, "url", ""),
+                    result={
+                        "clicked_authenticator": clicked_auth,
+                        "elapsed_ms": auth_click_elapsed_ms,
+                    },
+                )
             if clicked_auth:
-                if task_logger:
-                    task_logger.event(
-                        step="2fa",
-                        action="click",
-                        message="clicked Authenticator entry",
-                        url=getattr(page, "url", ""),
-                    )
                 await self._handle_reauth(
                     page, {**account, "totp_secret": current_secret}
                 )
 
             # 3) 点击 "Change authenticator app" 进入更换流程
             # 真实元素: <span jsname="V67aGc" class="mUIrbf-vQzf8d">Change authenticator app</span>
-            await self._click_first_visible(
+            # 先等待一次目标面板就绪，避免太早触发宽泛 fallback 导致串行长超时。
+            change_surface_wait_started_at = loop.time()
+            change_surface = await self._find_first_visible_locator(
+                page,
+                selectors=[
+                    'span.mUIrbf-vQzf8d:has-text("Change authenticator app")',
+                    '.mUIrbf-vQzf8d:has-text("Change authenticator")',
+                    '[jsname="V67aGc"]:has-text("Change")',
+                    'button:has-text("Change phone")',
+                    'button:has-text("Change")',
+                    "text=Change authenticator app",
+                    "text=更改身份验证器",
+                ],
+                timeout_s=3.0,
+            )
+            if task_logger:
+                task_logger.event(
+                    step="2fa",
+                    action="wait",
+                    message="waited change authenticator surface",
+                    url=getattr(page, "url", ""),
+                    result={
+                        "surface_ready": bool(change_surface),
+                        "elapsed_ms": int(
+                            (loop.time() - change_surface_wait_started_at) * 1000
+                        ),
+                    },
+                )
+
+            change_click_started_at = loop.time()
+            clicked_change_authenticator = await self._click_first_visible(
                 [
                     # 精确匹配 Google 页面的 span.mUIrbf-vQzf8d
                     page.locator(
@@ -533,20 +666,31 @@ class GoogleSecurityService:
                 task_logger.event(
                     step="2fa",
                     action="click",
-                    message="clicked Change authenticator app (if present)",
+                    message=(
+                        "clicked Change authenticator app"
+                        if clicked_change_authenticator
+                        else "Change authenticator app not clicked"
+                    ),
                     url=getattr(page, "url", ""),
+                    result={
+                        "clicked_change_authenticator": clicked_change_authenticator,
+                        "elapsed_ms": int((loop.time() - change_click_started_at) * 1000),
+                    },
                 )
             await self._handle_reauth(page, {**account, "totp_secret": current_secret})
 
             # 4) 等待页面加载完成，尝试获取 secret
             # 减少循环次数避免长时间等待
             new_secret: Optional[str] = None
-            for attempt in range(15):
+            for attempt in range(self.MAX_SECRET_EXTRACT_ATTEMPTS):
                 if task_logger:
                     task_logger.event(
                         step="2fa",
                         action="attempt",
-                        message=f"extract setup key attempt {attempt + 1}/15",
+                        message=(
+                            f"extract setup key attempt {attempt + 1}/"
+                            f"{self.MAX_SECRET_EXTRACT_ATTEMPTS}"
+                        ),
                         url=getattr(page, "url", ""),
                     )
                 await self._handle_reauth(
@@ -559,16 +703,19 @@ class GoogleSecurityService:
                     enter_code = page.get_by_text(
                         "Enter the 6-digit code", exact=False
                     ).first
-                    if await enter_code.is_visible():
+                    if await enter_code.is_visible(timeout=self.REAUTH_PROBE_TIMEOUT_MS):
                         back_btn = page.get_by_role("button", name="Back").first
-                        if await back_btn.is_visible():
+                        if await back_btn.is_visible(
+                            timeout=self.REAUTH_PROBE_TIMEOUT_MS
+                        ):
                             await back_btn.click()
-                            await asyncio.sleep(1)
+                            await asyncio.sleep(self.SHORT_WAIT_SECONDS)
                 except Exception:
                     pass
 
                 # 优先尝试点击 "Can't scan it?" 以显示文本 secret
                 # 真实元素: <span jsname="V67aGc" class="mUIrbf-vQzf8d">Can't scan it?</span>
+                cant_scan_click_started_at = loop.time()
                 clicked_cant_scan = await self._click_first_visible(
                     [
                         # 方式1: 精确匹配 Google 页面的 span.mUIrbf-vQzf8d
@@ -606,22 +753,37 @@ class GoogleSecurityService:
                         page.get_by_text("无法扫描", exact=False),
                     ],
                     debug_label="cant_scan_click",
+                    max_total_ms=2800,
                 )
+                cant_scan_click_elapsed_ms = int(
+                    (loop.time() - cant_scan_click_started_at) * 1000
+                )
+                if task_logger and (
+                    clicked_cant_scan or cant_scan_click_elapsed_ms >= 1500
+                ):
+                    task_logger.event(
+                        step="2fa",
+                        action="click_probe",
+                        message=(
+                            "clicked Can't scan it?"
+                            if clicked_cant_scan
+                            else "Can't scan it? not clicked"
+                        ),
+                        url=getattr(page, "url", ""),
+                        result={
+                            "attempt": attempt + 1,
+                            "clicked_cant_scan": clicked_cant_scan,
+                            "elapsed_ms": cant_scan_click_elapsed_ms,
+                        },
+                    )
                 if clicked_cant_scan:
-                    if task_logger:
-                        task_logger.event(
-                            step="2fa",
-                            action="click",
-                            message="clicked Can't scan it?",
-                            url=getattr(page, "url", ""),
-                        )
                     # 等待明文密钥区域渲染
                     try:
                         await page.locator("li.mzEcT strong").first.wait_for(
                             state="visible", timeout=3000
                         )
                     except Exception:
-                        await asyncio.sleep(1)
+                        await asyncio.sleep(self.SHORT_WAIT_SECONDS)
 
                 new_secret = await self._extract_base32_secret(page)
                 if new_secret:
@@ -634,7 +796,7 @@ class GoogleSecurityService:
                         )
                     break
 
-                await asyncio.sleep(1)
+                await asyncio.sleep(self.SHORT_WAIT_SECONDS)
 
             if not new_secret:
                 shot = await self._save_debug_screenshot(
@@ -696,6 +858,7 @@ class GoogleSecurityService:
 
             # 拿到密钥后，进入验证码输入步骤
             # 真实元素: <span jsname="V67aGc" class="VfPpkd-vQzf8d">Next</span>
+            next_click_started_at = loop.time()
             clicked_next = await self._click_first_visible(
                 [
                     # role 定位（优先，避免点到内部 span）
@@ -715,7 +878,8 @@ class GoogleSecurityService:
                 ],
                 debug_label="click_next",
             )
-            await asyncio.sleep(1)
+            next_click_elapsed_ms = int((loop.time() - next_click_started_at) * 1000)
+            await asyncio.sleep(self.MEDIUM_WAIT_SECONDS)
 
             if task_logger:
                 task_logger.event(
@@ -723,7 +887,10 @@ class GoogleSecurityService:
                     action="click",
                     message="clicked Next to open code dialog",
                     url=getattr(page, "url", ""),
-                    result={"clicked_next": clicked_next},
+                    result={
+                        "clicked_next": clicked_next,
+                        "elapsed_ms": next_click_elapsed_ms,
+                    },
                 )
 
             # Google 这一步的输入框有时是 type=text + placeholder=Enter Code，
@@ -798,7 +965,7 @@ class GoogleSecurityService:
                     await page.keyboard.press("Enter")
             except Exception:
                 await page.keyboard.press("Enter")
-            await asyncio.sleep(1)
+            await asyncio.sleep(self.MEDIUM_WAIT_SECONDS)
 
             if task_logger:
                 task_logger.event(
@@ -895,7 +1062,7 @@ class GoogleSecurityService:
             # 再兜底：回到 2FA 页面看看是否仍然需要设置
             try:
                 await page.goto(self.TWO_STEP_URL, wait_until="domcontentloaded")
-                await asyncio.sleep(1)
+                await asyncio.sleep(self.SHORT_WAIT_SECONDS)
             except Exception:
                 pass
 
