@@ -424,6 +424,50 @@ Security / Subscription 任务触发（示例）：
 - new_secret 属于敏感数据；不建议在 Celery result / API 直接回传明文。
 - 推荐策略：只落库；前端展示掩码；导出时再由有权限的后端进行解密输出。
 
+### 11.1 2FA 慢步骤优化（2026-02）
+
+针对 `change_2fa_secret` 出现的“可成功但部分步骤慢（30s/60s 级）”，已做以下落地优化：
+
+1) 点击超时分层（避免 fallback 串行超时累积）
+- 文件：`plugins/google_business/services/security_service.py`
+- 函数：`_click_first_visible`
+- 策略：按 selector 顺序分层点击预算（前高后低）
+  - 高置信 selector（前 2 个）：`2500ms`
+  - 中置信 selector（前 5 个内）：`1500ms`
+  - 兜底 selector：`900ms`
+- `force click` 超时上限也限制为 `<=900ms`，避免在不可交互元素上长时间阻塞。
+
+2) 显式可见性探测超时（避免回落全局 timeout）
+- 函数：`_find_first_visible_locator`
+- `loc.is_visible()` 改为显式 `timeout=400ms`，并保持轮询间隔 `0.25s`。
+
+3) 进入 Change 面板前加“就绪等待”
+- 函数：`change_2fa_secret`
+- 新增步骤：`waited change authenticator surface`
+- 目的：先等待目标区域出现，再执行 Change 点击，减少过早触发宽泛 fallback 导致的串行等待。
+
+4) Trace 增强（用于定位慢点）
+- `clicked Authenticator entry` 增加 `result.clicked_authenticator`、`result.elapsed_ms`
+- `clicked Change authenticator app`（仅真实点击成功才记录 clicked 文案）
+  - 附加 `result.clicked_change_authenticator`、`result.elapsed_ms`
+- `clicked Next to open code dialog` 增加 `result.elapsed_ms`
+- 新增 `action=click_probe`：记录 `Can't scan it?` 的慢探测/点击信息
+  - `result.attempt`、`result.clicked_cant_scan`、`result.elapsed_ms`
+
+5) 关键注释补充
+- 在 `_click_first_visible`、`_find_first_visible_locator`、`change_2fa_secret` 中增加了“为什么这样做”的注释，便于后续维护与继续调优。
+
+#### 11.1.1 Trace 排查建议（慢步骤）
+
+优先看账号级 trace：
+- `GET /api/v1/plugins/google-business/celery-tasks/{task_id}/trace/?email=<target>`
+
+建议按如下日志对照定位：
+- `clicked Authenticator entry` 到下一条关键事件间隔大：优先看 `result.elapsed_ms` 与页面跳转是否滞后。
+- `waited change authenticator surface` 的 `surface_ready=false` 或 `elapsed_ms` 偏大：说明页面尚未进入可点击状态。
+- `clicked Change authenticator app` 的 `clicked_change_authenticator=false`：说明 selector 未命中或元素不可交互。
+- `action=click_probe` 且 `clicked_cant_scan=false`、`elapsed_ms` 高：说明 “Can't scan it?” 仍是慢点，需要继续收窄 selector。
+
 ---
 
 ## 12. 补充：登录状态/资格检测优化建议（可选）
