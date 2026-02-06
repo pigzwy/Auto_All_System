@@ -22,6 +22,36 @@
     </div>
 
     <Panel shadow="hover" class="rounded-xl border border-border bg-card text-card-foreground shadow-sm">
+      <div class="flex items-center gap-3 px-4 pt-4">
+        <span class="text-sm text-muted-foreground">卡池筛选</span>
+        <div class="inline-flex items-center rounded-lg border border-border bg-muted/40 p-1">
+          <button
+            type="button"
+            class="rounded-md px-3 py-1.5 text-xs transition"
+            :class="poolFilter === 'all' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'"
+            @click="poolFilter = 'all'"
+          >
+            全部卡池
+          </button>
+          <button
+            type="button"
+            class="rounded-md px-3 py-1.5 text-xs transition"
+            :class="poolFilter === 'public' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'"
+            @click="poolFilter = 'public'"
+          >
+            公共卡池
+          </button>
+          <button
+            type="button"
+            class="rounded-md px-3 py-1.5 text-xs transition"
+            :class="poolFilter === 'private' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'"
+            @click="poolFilter = 'private'"
+          >
+            私有卡池
+          </button>
+        </div>
+      </div>
+
       <div class="overflow-hidden rounded-xl border border-border">
         <DataTable :data="cards" v-loading="loading" stripe class="w-full">
         <DataColumn prop="id" label="ID" width="80" />
@@ -223,15 +253,47 @@
       <InfoAlert type="info" :closable="false" class="mb-4">
         <template #title>
           <div>
-            格式说明：每行一张卡，格式为
+            基础格式：
             <code class="rounded bg-muted px-1.5 py-0.5 font-mono text-primary">卡号 月份 年份 CVV</code>
             （空格分隔）
           </div>
           <div class="mt-2">
-            示例：
+            扩展格式：
+            <code class="rounded bg-muted px-1.5 py-0.5 font-mono text-primary">卡号 月份 年份 CVV | 持卡人 | 地址1 | 城市 | 州 | 邮编 | 国家</code>
+          </div>
+          <div class="mt-2">
+            示例1：
             <code class="rounded bg-muted px-1.5 py-0.5 font-mono text-primary">4466164106155628 07 28 694</code>
           </div>
+          <div class="mt-2">
+            示例2：
+            <code class="rounded bg-muted px-1.5 py-0.5 font-mono text-primary">5481087143137903 01 32 749 | TOM LEE | 123 Main St | Los Angeles | CA | 90001 | US</code>
+          </div>
           <div class="mt-1 text-xs text-muted-foreground">💡 4开头自动识别为Visa，5开头自动识别为Master</div>
+          <div class="mt-3 flex items-center gap-2">
+            <span class="text-xs text-muted-foreground">示例模板</span>
+            <div class="inline-flex items-center rounded-lg border border-border bg-muted/40 p-1">
+              <button
+                type="button"
+                class="rounded-md px-3 py-1.5 text-xs transition"
+                :class="importExampleMode === 'basic' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'"
+                @click="importExampleMode = 'basic'"
+              >
+                基础模板
+              </button>
+              <button
+                type="button"
+                class="rounded-md px-3 py-1.5 text-xs transition"
+                :class="importExampleMode === 'address' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'"
+                @click="importExampleMode = 'address'"
+              >
+                带地址模板
+              </button>
+            </div>
+            <Button variant="outline" type="button" size="small" @click="fillImportExample">
+              一键填充示例
+            </Button>
+          </div>
         </template>
       </InfoAlert>
       
@@ -241,7 +303,7 @@
             v-model="importForm.cardsText"
             type="textarea"
             :rows="10"
-            placeholder="粘贴卡片数据，每行一张卡&#10;4466164106155628 07 28 694&#10;5481087143137903 01 32 749"
+            :placeholder="importPlaceholder"
           />
         </SimpleFormItem>
         <SimpleFormItem label="卡池类型">
@@ -445,7 +507,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted } from 'vue'
+import { computed, ref, reactive, onMounted, watch } from 'vue'
 import { cardsApi } from '@/api/cards'
 import type { CardApiConfig } from '@/api/cards'
 import { ElMessage } from '@/lib/element'
@@ -458,6 +520,7 @@ const cards = ref<Card[]>([])
 const total = ref(0)
 const currentPage = ref(1)
 const pageSize = ref(20)
+const poolFilter = ref<'all' | 'public' | 'private'>('all')
 const showDialog = ref(false)
 const showImportDialog = ref(false)
 const showRedeemDialog = ref(false)
@@ -482,6 +545,15 @@ const cardForm = reactive({
 const importForm = reactive({
   cardsText: '',
   pool_type: 'public'
+})
+
+const importExampleMode = ref<'basic' | 'address'>('address')
+
+const importPlaceholder = computed(() => {
+  if (importExampleMode.value === 'basic') {
+    return '粘贴卡片数据，每行一张卡\n4466164106155628 07 28 694\n5481087143137903 01 32 749'
+  }
+  return '粘贴卡片数据，每行一张卡\n4466164106155628 07 28 694 | TOM LEE | 123 Main St | Los Angeles | CA | 90001 | US\n5481087143137903 01 32 749 | JANE DOE | 500 5th Ave | New York | NY | 10018 | US'
 })
 
 const redeemForm = reactive({
@@ -528,10 +600,15 @@ const configForm = reactive({
 const fetchCards = async () => {
   loading.value = true
   try {
-    const response = await cardsApi.getCards({
+    const params: Record<string, any> = {
       page: currentPage.value,
       page_size: pageSize.value
-    })
+    }
+    if (poolFilter.value !== 'all') {
+      params.pool_type = poolFilter.value
+    }
+
+    const response = await cardsApi.getCards(params)
     cards.value = response.results
     total.value = response.count
     
@@ -709,28 +786,70 @@ const parseCardsText = (text: string): any[] => {
   const cards: any[] = []
   
   for (const line of lines) {
-    const parts = line.trim().split(/\s+/)
-    if (parts.length === 4) {
-      const [cardNumber, month, year, cvv] = parts
-      const cardType = detectCardType(cardNumber)
-      
-      // 年份处理：如果是两位数，加2000
-      let fullYear = parseInt(year)
-      if (fullYear < 100) {
-        fullYear = 2000 + fullYear
-      }
-      
-      cards.push({
-        card_number: cardNumber,
-        card_holder: cardType, // 使用卡类型作为持卡人
-        expiry_month: parseInt(month),
-        expiry_year: fullYear,
-        cvv: cvv
-      })
+    const sections = line
+      .split('|')
+      .map(part => part.trim())
+      .filter(Boolean)
+
+    const baseParts = (sections[0] || '').split(/\s+/).filter(Boolean)
+    if (baseParts.length < 4) {
+      continue
     }
+
+    const [cardNumber, month, year, cvv, ...noteParts] = baseParts
+    const expiryMonth = parseInt(month, 10)
+    let fullYear = parseInt(year, 10)
+
+    if (Number.isNaN(expiryMonth) || Number.isNaN(fullYear)) {
+      continue
+    }
+
+    if (fullYear < 100) {
+      fullYear = 2000 + fullYear
+    }
+
+    const cardHolder = sections[1] || ''
+    const addressLine1 = sections[2] || ''
+    const city = sections[3] || ''
+    const state = sections[4] || ''
+    const postalCode = sections[5] || ''
+    const country = sections[6] || ''
+
+    const billingAddress = addressLine1 || city || state || postalCode || country
+      ? {
+          address_line1: addressLine1,
+          city,
+          state,
+          postal_code: postalCode,
+          country
+        }
+      : undefined
+
+    cards.push({
+      card_number: cardNumber,
+      card_holder: cardHolder,
+      expiry_month: expiryMonth,
+      expiry_year: fullYear,
+      cvv,
+      card_type: detectCardType(cardNumber),
+      notes: noteParts.join(' '),
+      billing_address: billingAddress
+    })
   }
   
   return cards
+}
+
+const fillImportExample = () => {
+  importForm.cardsText = importExampleMode.value === 'basic'
+    ? [
+        '4466164106155628 07 28 694',
+        '5481087143137903 01 32 749'
+      ].join('\n')
+    : [
+        '4466164106155628 07 28 694 | TOM LEE | 123 Main St | Los Angeles | CA | 90001 | US',
+        '5481087143137903 01 32 749 | JANE DOE | 500 5th Ave | New York | NY | 10018 | US'
+      ].join('\n')
 }
 
 // 批量导入
@@ -755,10 +874,13 @@ const handleImport = async () => {
     // 转换为API需要的格式
     const formattedCards = cardsData.map(card => ({
       card_number: card.card_number,
-      card_holder: card.card_holder,
+      card_holder: card.card_holder || undefined,
       expiry_month: card.expiry_month,
       expiry_year: card.expiry_year,
-      cvv: card.cvv
+      cvv: card.cvv,
+      card_type: card.card_type,
+      notes: card.notes || undefined,
+      billing_address: card.billing_address
     }))
     
     const response = await cardsApi.importCards({
@@ -803,6 +925,11 @@ const handleImport = async () => {
 }
 
 onMounted(() => {
+  fetchCards()
+})
+
+watch(poolFilter, () => {
+  currentPage.value = 1
   fetchCards()
 })
 

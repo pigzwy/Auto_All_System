@@ -16,8 +16,8 @@
 
     <Tabs v-model:modelValue="activeTab" class="w-full" @update:modelValue="handleTabChange">
       <TabsList>
-        <TabsTrigger value="my">我的虚拟卡</TabsTrigger>
-        <TabsTrigger value="public">公共卡池</TabsTrigger>
+          <TabsTrigger value="my">私有卡池</TabsTrigger>
+          <TabsTrigger value="public">公共卡池</TabsTrigger>
       </TabsList>
 
       <TabsContent value="my" class="mt-4">
@@ -212,8 +212,9 @@
           <AlertTitle>格式说明</AlertTitle>
           <AlertDescription>
             <div class="space-y-1 text-sm">
-              <div>每行一张卡，格式为 <code class="rounded bg-muted px-1.5 py-0.5 font-mono text-primary">卡号 月份 年份 CVV</code>（空格分隔）</div>
-              <div>示例：<code class="rounded bg-muted px-1.5 py-0.5 font-mono text-primary">4466164106155628 07 28 694</code></div>
+              <div>基础格式：<code class="rounded bg-muted px-1.5 py-0.5 font-mono text-primary">卡号 月份 年份 CVV</code>（空格分隔）</div>
+              <div>扩展格式：<code class="rounded bg-muted px-1.5 py-0.5 font-mono text-primary">卡号 月份 年份 CVV | 持卡人 | 地址1 | 城市 | 州 | 邮编 | 国家</code></div>
+              <div>示例：<code class="rounded bg-muted px-1.5 py-0.5 font-mono text-primary">4466164106155628 07 28 694 | TOM LEE | 123 Main St | Los Angeles | CA | 90001 | US</code></div>
               <div class="text-xs text-muted-foreground">💡 4开头自动识别为Visa，5开头自动识别为Master</div>
             </div>
           </AlertDescription>
@@ -226,7 +227,7 @@
               v-model="importForm.cardsText"
               rows="10"
               class="min-h-[200px] font-mono text-sm"
-              placeholder="粘贴卡片数据，每行一张卡&#10;4466164106155628 07 28 694&#10;5481087143137903 01 32 749"
+              placeholder="粘贴卡片数据，每行一张卡&#10;4466164106155628 07 28 694&#10;4466164106155628 07 28 694 | TOM LEE | 123 Main St | Los Angeles | CA | 90001 | US"
             />
           </div>
           <div class="grid gap-2">
@@ -352,7 +353,16 @@ const fetchMyCards = async () => {
 const fetchPublicCards = async () => {
   loading.value = true
   try {
-    publicCards.value = await cardsApi.getAvailableCards({ pool_type: 'public' })
+    const response = await cardsApi.getAvailableCards({ pool_type: 'public' }) as any
+    if (Array.isArray(response)) {
+      publicCards.value = response
+    } else if (Array.isArray(response?.data)) {
+      publicCards.value = response.data
+    } else if (Array.isArray(response?.results)) {
+      publicCards.value = response.results
+    } else {
+      publicCards.value = []
+    }
   } catch (error) {
     console.error('Failed to fetch public cards:', error)
   } finally {
@@ -430,14 +440,25 @@ const handleImportCards = async () => {
     const errors: string[] = []
 
     lines.forEach((line, index) => {
-      const parts = line.trim().split(/\s+/)
-      if (parts.length !== 4) {
+      const sections = line
+        .split('|')
+        .map(part => part.trim())
+        .filter(Boolean)
+
+      const parts = (sections[0] || '').split(/\s+/).filter(Boolean)
+      if (parts.length < 4) {
         errors.push(`第 ${index + 1} 行格式不正确: ${line}`)
         return
       }
 
       const [cardNumber, expMonth, expYear, cvv] = parts
-      
+      const cardHolder = sections[1] || ''
+      const addressLine1 = sections[2] || ''
+      const city = sections[3] || ''
+      const state = sections[4] || ''
+      const postalCode = sections[5] || ''
+      const country = sections[6] || ''
+
       let cardType = 'other'
       if (cardNumber.startsWith('4')) {
         cardType = 'visa'
@@ -445,13 +466,25 @@ const handleImportCards = async () => {
         cardType = 'mastercard'
       }
 
+      const billingAddress = (addressLine1 || city || state || postalCode || country)
+        ? {
+            address_line1: addressLine1,
+            city,
+            state,
+            postal_code: postalCode,
+            country
+          }
+        : undefined
+
       cardsData.push({
         card_number: cardNumber,
         expiry_month: parseInt(expMonth),
         expiry_year: parseInt(expYear),
         cvv: cvv,
         card_type: cardType,
-        pool_type: importForm.pool_type
+        card_holder: cardHolder || undefined,
+        notes: parts.slice(4).join(' ') || undefined,
+        billing_address: billingAddress
       })
     })
 
@@ -478,7 +511,11 @@ const handleImportCards = async () => {
     }
 
     if (result.success > 0) {
-      fetchMyCards()
+      if (activeTab.value === 'public') {
+        fetchPublicCards()
+      } else {
+        fetchMyCards()
+      }
       importForm.cardsText = ''
     }
   } catch (error: any) {
