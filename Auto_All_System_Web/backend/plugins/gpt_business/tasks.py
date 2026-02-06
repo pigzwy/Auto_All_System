@@ -165,11 +165,17 @@ def _append_trace_line(
         pass
 
 
-def _get_available_card_for_checkout() -> dict[str, Any] | None:
+def _get_available_card_for_checkout(selected_card_id: int | None = None) -> dict[str, Any] | None:
     """从虚拟卡管理获取一张可用卡用于绑卡"""
     from apps.cards.models import Card
-    
-    card = Card.objects.filter(status="available").order_by("?").first()
+
+    if selected_card_id:
+        card = Card.objects.filter(id=selected_card_id).first()
+        if not card or not card.is_available():
+            return None
+    else:
+        card = Card.objects.filter(status="available").order_by("?").first()
+
     if not card:
         return None
     
@@ -671,9 +677,24 @@ def self_register_task(self, record_id: str):
         except Exception:
             pass
 
-        card_info = _get_available_card_for_checkout()
+        card_mode_raw = str(task_record.get("card_mode") or "random").strip().lower()
+        card_mode = card_mode_raw if card_mode_raw in {"selected", "random", "manual"} else "random"
+        selected_card_raw = task_record.get("selected_card_id")
+        selected_card_id: int | None = None
+        if selected_card_raw not in (None, ""):
+            try:
+                selected_card_id = int(selected_card_raw)
+            except (TypeError, ValueError):
+                selected_card_id = None
+
+        card_info = _get_available_card_for_checkout(selected_card_id if card_mode == "selected" else None)
         if not card_info:
-            _log("no available card: will still try register, skip checkout")
+            if card_mode == "manual":
+                _log("manual card mode: waiting for human card input on checkout")
+            elif card_mode == "selected":
+                _log(f"selected card unavailable: selected_card_id={selected_card_id}")
+            else:
+                _log("random card mode found no available card")
 
         config_id = int(mother.get("cloudmail_config_id") or 0)
         if config_id <= 0:
@@ -784,7 +805,7 @@ def self_register_task(self, record_id: str):
                 session_data = {}
                 used_card_id: int | None = None
                 
-                print(f"[DEBUG] register_ok={register_ok}, starting card check...", flush=True)
+                print(f"[DEBUG] register_ok={register_ok}, starting card check mode={card_mode}...", flush=True)
                 _log(f"register_ok={register_ok}, starting team onboarding check...")
                 
                 if register_ok:
@@ -800,12 +821,25 @@ def self_register_task(self, record_id: str):
                         
                         set_log_callback(_log)
                         
-                        print("[DEBUG] calling run_onboarding_flow with card callback...", flush=True)
+                        def get_checkout_card() -> dict[str, Any] | None:
+                            nonlocal used_card_id
+                            payload = _get_available_card_for_checkout(selected_card_id if card_mode == "selected" else None)
+                            if payload:
+                                card_id = payload.get("card_id")
+                                try:
+                                    used_card_id = int(card_id) if card_id is not None else None
+                                except (TypeError, ValueError):
+                                    used_card_id = None
+                            return payload
+
+                        skip_checkout = card_mode == "manual"
+
+                        print(f"[DEBUG] calling run_onboarding_flow mode={card_mode}...", flush=True)
                         success, session_data = run_onboarding_flow(
                             page=page,
                             email=email,
-                            skip_checkout=False,
-                            get_card_callback=_get_available_card_for_checkout,
+                            skip_checkout=skip_checkout,
+                            get_card_callback=None if skip_checkout else get_checkout_card,
                             card_wait_timeout=300,
                         )
                         print(f"[DEBUG] run_onboarding_flow returned: {success}", flush=True)
@@ -881,7 +915,7 @@ def self_register_task(self, record_id: str):
         )
 
         if used_card_id:
-            pass  # 卡已在 _run_sync 中标记为使用中
+            _mark_card_as_used(used_card_id, mother_id, "self_register")
 
         result: dict[str, Any] = {
             "success": success,

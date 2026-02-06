@@ -71,6 +71,13 @@ export interface GptBusinessAccountsResponse {
   email_domains: string[]
 }
 
+export type SelfRegisterCardMode = 'selected' | 'random' | 'manual'
+
+export interface SelfRegisterOptions {
+  card_mode?: SelfRegisterCardMode
+  selected_card_id?: number
+}
+
 export const gptBusinessApi = {
   getStatistics(): Promise<GptBusinessStatistics> {
     return request.get('/plugins/gpt-business/statistics/')
@@ -175,14 +182,19 @@ export const gptBusinessApi = {
     return request.delete(`/plugins/gpt-business/accounts/${accountId}/`)
   },
 
-  selfRegister(motherAccountId: string): Promise<{ message?: string; task_id?: string }> {
-    return request.post(`/plugins/gpt-business/accounts/${motherAccountId}/self_register/`)
+  selfRegister(
+    motherAccountId: string,
+    data?: SelfRegisterOptions
+  ): Promise<{ message?: string; task_id?: string; record_id?: string }> {
+    return request.post(`/plugins/gpt-business/accounts/${motherAccountId}/self_register/`, data || {})
   },
 
   batchSelfRegister(data: {
     mother_ids: string[]
     concurrency?: number
     open_geekez?: boolean
+    card_mode?: SelfRegisterCardMode
+    selected_card_id?: number
   }): Promise<{ message?: string; results?: any[] }> {
     return request.post('/plugins/gpt-business/accounts/batch/self_register/', data)
   },

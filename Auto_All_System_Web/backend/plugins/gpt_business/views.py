@@ -74,6 +74,32 @@ def _batch_countdown(index: int, concurrency: int) -> int:
     return int(index // concurrency)
 
 
+def _parse_self_register_card_options(data: Any) -> tuple[str, int | None, str | None]:
+    card_mode = str((data or {}).get("card_mode") or "random").strip().lower()
+    if card_mode not in {"selected", "random", "manual"}:
+        return "", None, "card_mode must be one of: selected, random, manual"
+
+    selected_card_id: int | None = None
+    selected_raw = (data or {}).get("selected_card_id")
+    if card_mode == "selected":
+        if selected_raw in (None, ""):
+            return "", None, "selected_card_id is required when card_mode=selected"
+        try:
+            selected_card_id = int(selected_raw)
+        except (TypeError, ValueError):
+            return "", None, "selected_card_id must be an integer"
+
+        from apps.cards.models import Card
+
+        card = Card.objects.filter(id=selected_card_id).first()
+        if not card:
+            return "", None, "selected_card_id not found"
+        if not card.is_available():
+            return "", None, "selected_card_id is not available"
+
+    return card_mode, selected_card_id, None
+
+
 def _mask_secret(value: str) -> str:
     value = str(value or "")
     if not value:
@@ -1119,12 +1145,18 @@ class AccountsViewSet(ViewSet):
         if not isinstance(acc, dict) or str(acc.get("type")) != "mother":
             return Response({"detail": "Mother account not found"}, status=status.HTTP_400_BAD_REQUEST)
 
+        card_mode, selected_card_id, card_error = _parse_self_register_card_options(request.data)
+        if card_error:
+            return Response({"detail": card_error}, status=status.HTTP_400_BAD_REQUEST)
+
         record_id = uuid.uuid4().hex
         now = timezone.now().isoformat()
         add_task({
             "id": record_id,
             "type": "self_register",
             "mother_id": str(pk),
+            "card_mode": card_mode,
+            "selected_card_id": selected_card_id,
             "status": "pending",
             "progress_current": 0,
             "progress_total": 3,
@@ -1274,6 +1306,10 @@ class AccountsViewSet(ViewSet):
         if not mother_ids:
             return Response({"detail": "mother_ids is required"}, status=status.HTTP_400_BAD_REQUEST)
 
+        card_mode, selected_card_id, card_error = _parse_self_register_card_options(request.data)
+        if card_error:
+            return Response({"detail": card_error}, status=status.HTTP_400_BAD_REQUEST)
+
         concurrency = int(request.data.get("concurrency") or 5)
         # open_geekez 参数已废弃，self_register_task 内部会自动启动浏览器
         # 不再单独调用 launch_geekez_task，避免并发冲突
@@ -1293,6 +1329,8 @@ class AccountsViewSet(ViewSet):
                 "id": record_id,
                 "type": "self_register",
                 "mother_id": str(mother_id),
+                "card_mode": card_mode,
+                "selected_card_id": selected_card_id,
                 "status": "pending",
                 "progress_current": 0,
                 "progress_total": 3,

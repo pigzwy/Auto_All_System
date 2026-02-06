@@ -64,11 +64,74 @@
     <main class="mx-auto max-w-[1600px] p-6">
       <AccountsModule />
     </main>
+
+    <Dialog v-model:open="selfRegisterDialogOpen">
+      <DialogContent class="sm:max-w-[540px]">
+        <DialogHeader>
+          <DialogTitle>自动化开通 - 选卡策略</DialogTitle>
+          <DialogDescription>
+            可从卡池选定一张有效卡、随机使用有效卡，或跳过选卡改为手动输入。
+          </DialogDescription>
+        </DialogHeader>
+
+        <div class="space-y-4 py-2">
+          <div class="rounded-lg border border-border/80 bg-muted/20 p-3 text-sm text-muted-foreground">
+            本次将开通 <span class="font-semibold text-foreground">{{ selfRegisterTargetIds.length }}</span> 个母号。
+          </div>
+
+          <div class="space-y-2">
+            <label class="text-sm font-medium text-foreground">选卡方式</label>
+            <Select v-model="selfRegisterCardMode">
+              <SelectTrigger>
+                <SelectValue placeholder="请选择选卡方式" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="selected">指定一张有效卡</SelectItem>
+                <SelectItem value="random">随机有效卡</SelectItem>
+                <SelectItem value="manual">跳过选卡，手动输入</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div v-if="selfRegisterCardMode === 'selected'" class="space-y-2">
+            <label class="text-sm font-medium text-foreground">有效卡</label>
+            <Select :model-value="selfRegisterSelectedCardValue" @update:model-value="(v) => onSelfRegisterCardChange(v)">
+              <SelectTrigger>
+                <SelectValue :placeholder="availableCardsLoading ? '正在加载卡片...' : '请选择一张有效卡'" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem
+                  v-for="card in availableCards"
+                  :key="card.id"
+                  :value="String(card.id)"
+                >
+                  {{ formatCardOption(card) }}
+                </SelectItem>
+              </SelectContent>
+            </Select>
+            <p v-if="!availableCardsLoading && !availableCards.length" class="text-xs text-amber-600">
+              当前没有可用有效卡，请改用“手动输入”或先到卡管理新增可用卡。
+            </p>
+          </div>
+
+          <p v-if="selfRegisterCardMode === 'manual'" class="text-xs text-muted-foreground">
+            付款页将不自动填卡，流程会等待你手动输入卡信息。
+          </p>
+        </div>
+
+        <DialogFooter>
+          <Button variant="outline" :disabled="selfRegisterSubmitting" @click="selfRegisterDialogOpen = false">取消</Button>
+          <Button :disabled="selfRegisterSubmitting" @click="confirmRunSelfRegister">
+            {{ selfRegisterSubmitting ? '启动中...' : '确认开通' }}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, provide, ref } from 'vue'
+import { computed, provide, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from '@/lib/element'
 import {
   ArrowRightToLine,
@@ -80,8 +143,30 @@ import {
   X
 } from 'lucide-vue-next'
 import { Button } from '@/components/ui/button'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle
+} from '@/components/ui/dialog'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue
+} from '@/components/ui/select'
 import ZoneHeader from '@/components/zones/ZoneHeader.vue'
-import { gptBusinessApi, type GptBusinessAccount } from '@/api/gpt_business'
+import { cardsApi } from '@/api/cards'
+import {
+  gptBusinessApi,
+  type GptBusinessAccount,
+  type SelfRegisterCardMode
+} from '@/api/gpt_business'
+import type { Card } from '@/types'
+import type { AcceptableValue } from 'reka-ui'
 import AccountsModule from './gpt-modules/AccountsModule.vue'
 
 // ========== 账号相关状态 ==========
@@ -94,6 +179,14 @@ provide('selectedMotherIds', selectedMotherIds)
 provide('accountsLoading', accountsLoading)
 
 const hasSelection = computed(() => selectedMotherIds.value.length > 0)
+
+const selfRegisterDialogOpen = ref(false)
+const selfRegisterSubmitting = ref(false)
+const availableCardsLoading = ref(false)
+const availableCards = ref<Card[]>([])
+const selfRegisterTargetIds = ref<string[]>([])
+const selfRegisterCardMode = ref<SelfRegisterCardMode>('selected')
+const selfRegisterSelectedCardId = ref<number | null>(null)
 
 const clearSelection = () => {
   selectedMother.value = null
@@ -116,20 +209,92 @@ const getSelectedIds = () => {
   return []
 }
 
-const runSelfRegister = async () => {
-  const ids = getSelectedIds()
+const formatCardOption = (card: Card) => {
+  const masked = card.masked_card_number || `#${card.id}`
+  const holder = card.card_holder ? ` · ${card.card_holder}` : ''
+  const expiry = card.expiry_month && card.expiry_year ? ` · ${String(card.expiry_month).padStart(2, '0')}/${String(card.expiry_year).slice(-2)}` : ''
+  return `${masked}${holder}${expiry}`
+}
+
+const selfRegisterSelectedCardValue = computed(() => {
+  return selfRegisterSelectedCardId.value ? String(selfRegisterSelectedCardId.value) : ''
+})
+
+const onSelfRegisterCardChange = (value: AcceptableValue) => {
+  const parsed = Number(value ?? '')
+  selfRegisterSelectedCardId.value = Number.isFinite(parsed) && parsed > 0 ? parsed : null
+}
+
+const loadAvailableCards = async () => {
+  availableCardsLoading.value = true
+  try {
+    const resp = await cardsApi.getAvailableCards({ page_size: 200 })
+    const rows = Array.isArray(resp) ? resp : Array.isArray((resp as any)?.results) ? (resp as any).results : []
+    availableCards.value = rows
+    if (rows.length > 0 && !selfRegisterSelectedCardId.value) {
+      selfRegisterSelectedCardId.value = rows[0].id
+    }
+  } catch (e: any) {
+    availableCards.value = []
+    selfRegisterSelectedCardId.value = null
+    ElMessage.error(e?.response?.data?.detail || e?.message || '加载可用卡失败')
+  } finally {
+    availableCardsLoading.value = false
+  }
+}
+
+const openSelfRegisterDialog = async (ids: string[]) => {
+  selfRegisterTargetIds.value = [...ids]
+  selfRegisterCardMode.value = 'selected'
+  selfRegisterSelectedCardId.value = null
+  selfRegisterDialogOpen.value = true
+  await loadAvailableCards()
+  if (!availableCards.value.length) {
+    selfRegisterCardMode.value = 'manual'
+  }
+}
+
+watch(selfRegisterDialogOpen, (open) => {
+  if (open) return
+  selfRegisterSubmitting.value = false
+})
+
+const confirmRunSelfRegister = async () => {
+  const ids = [...selfRegisterTargetIds.value]
   if (!ids.length) return
+  if (selfRegisterCardMode.value === 'selected' && !selfRegisterSelectedCardId.value) {
+    ElMessage.warning('请选择一张有效卡')
+    return
+  }
+
+  selfRegisterSubmitting.value = true
   try {
     await gptBusinessApi.batchSelfRegister({
       mother_ids: ids,
       concurrency: 5,
-      open_geekez: true
+      open_geekez: true,
+      card_mode: selfRegisterCardMode.value,
+      selected_card_id: selfRegisterCardMode.value === 'selected' ? selfRegisterSelectedCardId.value || undefined : undefined
     })
-    ElMessage.success(`已启动 ${ids.length} 个母号的自动开通`)
+    const modeText = selfRegisterCardMode.value === 'selected'
+      ? '指定卡'
+      : selfRegisterCardMode.value === 'random'
+        ? '随机卡'
+        : '手动输入'
+    ElMessage.success(`已启动 ${ids.length} 个母号的自动开通（${modeText}）`)
+    selfRegisterDialogOpen.value = false
     refreshAccounts()
   } catch (e: any) {
     ElMessage.error(e?.response?.data?.detail || e?.message || '启动失败')
+  } finally {
+    selfRegisterSubmitting.value = false
   }
+}
+
+const runSelfRegister = async () => {
+  const ids = getSelectedIds()
+  if (!ids.length) return
+  await openSelfRegisterDialog(ids)
 }
 
 const runAutoInvite = async () => {
