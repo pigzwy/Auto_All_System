@@ -1899,42 +1899,47 @@ def sub2api_sink_task(self, record_id: str):
         elif pool_mode in {"s2a", "s2a_oauth"}:
             pool_mode = "s2a_oauth"
 
+        if not trace_email:
+            raise RuntimeError("Mother account missing email")
+
         children_all = [
             a
             for a in list_accounts(settings)
             if isinstance(a, dict) and str(a.get("type")) == "child" and str(a.get("parent_id")) == mother_id
         ]
-        emails_all = [str(a.get("email") or "").strip() for a in children_all]
+        accounts_all = [mother, *children_all]
+
+        emails_all = [str(a.get("email") or "").strip() for a in accounts_all]
         emails_all = [e for e in emails_all if e]
         if not emails_all:
-            raise RuntimeError("No child accounts")
+            raise RuntimeError("No accounts to pool")
 
-        # 已入池（success）的子号直接跳过：避免重复入池/重复授权
-        children: list[dict[str, Any]] = []
+        # 已入池（success）的账号直接跳过：避免重复入池/重复授权
+        accounts: list[dict[str, Any]] = []
         already_pooled: dict[str, Any] = {}
-        for c in children_all:
-            cemail = str(c.get("email") or "").strip()
-            if not cemail:
+        for account in accounts_all:
+            aemail = str(account.get("email") or "").strip()
+            if not aemail:
                 continue
-            pool_status = str(c.get("pool_status") or "").strip()
+            pool_status = str(account.get("pool_status") or "").strip()
             if pool_status == "success":
-                already_pooled[cemail] = {"status": "skipped", "reason": "pool_status_success"}
+                already_pooled[aemail] = {"status": "skipped", "reason": "pool_status_success"}
                 continue
-            children.append(c)
+            accounts.append(account)
 
-        emails = [str(a.get("email") or "").strip() for a in children]
+        emails = [str(a.get("email") or "").strip() for a in accounts]
         emails = [e for e in emails if e]
 
-        # 子号状态：入池中（只标记需要处理的子号；已入池 success 的不动）
+        # 账号状态：入池中（只标记需要处理的账号；已入池 success 的不动）
         now_running = timezone.now().isoformat()
-        for c in children:
-            cid = str(c.get("id") or "").strip()
-            cemail = str(c.get("email") or "").strip()
-            if not cid or not cemail:
+        for account in accounts:
+            aid = str(account.get("id") or "").strip()
+            aemail = str(account.get("email") or "").strip()
+            if not aid or not aemail:
                 continue
             try:
                 patch_account(
-                    cid,
+                    aid,
                     {
                         "pool_status": "running",
                         "pool_last_task": record_id,
@@ -2020,11 +2025,11 @@ def sub2api_sink_task(self, record_id: str):
                 pass
 
         _log_line(
-            f"sub2api_sink start record_id={record_id} mother_id={mother_id} children_total={len(emails_all)} to_process={len(emails)} already_success={len(already_pooled)} pool_mode={pool_mode} s2a_target_key={s2a_target_key or '-'}"
+            f"sub2api_sink start record_id={record_id} mother_id={mother_id} accounts_total={len(emails_all)} to_process={len(emails)} already_success={len(already_pooled)} pool_mode={pool_mode} s2a_target_key={s2a_target_key or '-'}"
         )
         _log_line(f"s2a_api_base={sub2api_api_base}")
 
-        # 如果全部子号都已入池，直接跳过（不强制校验 S2A/CRS 连通性，也不重复入池动作）
+        # 如果全部账号都已入池，直接跳过（不强制校验 S2A/CRS 连通性，也不重复入池动作）
         if not emails:
             sink_result: dict[str, Any] = {
                 "ok": 0,
@@ -2032,7 +2037,7 @@ def sub2api_sink_task(self, record_id: str):
                 "fail": 0,
                 "details": dict(already_pooled),
             }
-            _log_line("no children to process (all pool_status=success); skip")
+            _log_line("no accounts to process (all pool_status=success); skip")
         else:
             if not sub2api_api_base:
                 raise RuntimeError("S2A settings missing api_base")
@@ -2148,7 +2153,7 @@ def sub2api_sink_task(self, record_id: str):
 
                 _log_line("s2a_oauth start")
 
-                for c in children:
+                for c in accounts:
                     cemail = str(c.get("email") or "").strip()
                     cid = str(c.get("id") or "").strip()
                     cpwd = str(c.get("account_password") or "").strip()
@@ -2488,6 +2493,33 @@ def sub2api_sink_task(self, record_id: str):
             skip_n = int(sink_result.get("skip") or 0) if isinstance(sink_result, dict) else 0
             fail_n = int(sink_result.get("fail") or 0) if isinstance(sink_result, dict) else 0
             _log_line(f"sub2api_sink result: ok={ok_n} skip={skip_n} fail={fail_n} return_code={return_code}")
+
+            details_all = sink_result.get("details") if isinstance(sink_result, dict) else None
+            details_lc_all: dict[str, Any] = {}
+            if isinstance(details_all, dict):
+                for k, v in details_all.items():
+                    if isinstance(k, str):
+                        details_lc_all[k.strip().lower()] = v
+
+            for account in accounts_all:
+                aid = str(account.get("id") or "").strip()
+                aemail = str(account.get("email") or "").strip()
+                role = "mother" if aid == mother_id else "child"
+                if not aemail:
+                    _log_line(
+                        f"sub2api_sink account_result role={role} id={aid or '-'} email=- status=skipped reason=missing_email"
+                    )
+                    continue
+                item = (
+                    details_all.get(aemail)
+                    if isinstance(details_all, dict)
+                    else None
+                ) or details_lc_all.get(aemail.lower())
+                status = str(item.get("status") or "") if isinstance(item, dict) else ""
+                reason = str(item.get("reason") or "") if isinstance(item, dict) else ""
+                _log_line(
+                    f"sub2api_sink account_result role={role} id={aid or '-'} email={aemail} status={status or 'unknown'} reason={reason or '-'}"
+                )
         except Exception:
             pass
 
@@ -2508,6 +2540,9 @@ def sub2api_sink_task(self, record_id: str):
                 "pool_updated_at": now,
             },
         )
+        _log_line(
+            f"sub2api_sink writeback role=mother id={mother_id} email={trace_email or '-'} pool_status={'success' if return_code == 0 else 'failed'} source=task_return_code"
+        )
 
         # 子号状态：按邮箱写回入池结果
         details = sink_result.get("details") if isinstance(sink_result, dict) else None
@@ -2516,7 +2551,7 @@ def sub2api_sink_task(self, record_id: str):
             for k, v in details.items():
                 if isinstance(k, str):
                     details_lc[k.strip().lower()] = v
-            for c in children:
+            for c in accounts:
                 cid = str(c.get("id") or "").strip()
                 cemail = str(c.get("email") or "").strip()
                 if not cid or not cemail:
@@ -2541,8 +2576,14 @@ def sub2api_sink_task(self, record_id: str):
                             "pool_updated_at": now,
                         },
                     )
-                except Exception:
-                    pass
+                    role = "mother" if cid == mother_id else "child"
+                    _log_line(
+                        f"sub2api_sink writeback role={role} id={cid} email={cemail} pool_status={pool_status} source=detail"
+                    )
+                except Exception as write_e:
+                    _log_line(
+                        f"sub2api_sink writeback failed role={'mother' if cid == mother_id else 'child'} id={cid or '-'} email={cemail or '-'} err={write_e}"
+                    )
 
         result: dict[str, Any] = {
             "return_code": return_code,
