@@ -804,6 +804,16 @@ data/cards.txt
 
 </div>
 
+### 💰 USDT 赞助
+
+<div align="center">
+
+![USDT-TRC20](resources/OKX.jpg)
+
+**TRON (TRC20)**: `TJUDyB9YKw55X7krmNMZXDYzod7rFa6sG1`
+
+</div>
+
 ---
 
 ## 💳 虚拟卡推荐
@@ -869,7 +879,7 @@ scripts\启动项目.bat
 
 ---
 
-**Version**: 2.0.0 | **Last Updated**: 2026-01-19
+**Version**: 2.1.0 | **Last Updated**: 2026-02-03
 
 Made with ❤️ by Auto All System Team
 
