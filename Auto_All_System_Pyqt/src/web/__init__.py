@@ -5,5 +5,26 @@
 """
 
 from .server import run_server, APIHandler
+from .task_manager import (
+    TaskManager,
+    TaskStatus,
+    start_sheerlink_task,
+    start_bindcard_task,
+    start_auto_process_task,
+    start_change_2fa_task,
+    get_task_status,
+    stop_task,
+)
 
-__all__ = ['run_server', 'APIHandler']
+__all__ = [
+    'run_server',
+    'APIHandler',
+    'TaskManager',
+    'TaskStatus',
+    'start_sheerlink_task',
+    'start_bindcard_task',
+    'start_auto_process_task',
+    'start_change_2fa_task',
+    'get_task_status',
+    'stop_task',
+]

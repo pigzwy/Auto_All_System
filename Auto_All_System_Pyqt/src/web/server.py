@@ -8,7 +8,10 @@ import socketserver
 import json
 import os
 import sys
+import time
 import urllib.parse
+import webbrowser
+import threading
 from typing import Dict, Any, List
 
 # 获取当前目录
@@ -95,7 +98,9 @@ class APIHandler(http.server.SimpleHTTPRequestHandler):
         
         self.send_response(200)
         self.send_header('Content-type', content_types.get(ext, 'application/octet-stream'))
-        self.send_header('Cache-Control', 'public, max-age=86400')
+        self.send_header('Cache-Control', 'no-cache, no-store, must-revalidate')
+        self.send_header('Pragma', 'no-cache')
+        self.send_header('Expires', '0')
         self.end_headers()
         with open(file_path, 'rb') as f:
             self.wfile.write(f.read())
@@ -215,6 +220,20 @@ class APIHandler(http.server.SimpleHTTPRequestHandler):
         except json.JSONDecodeError:
             self.send_json({'success': False, 'error': 'Invalid JSON'}, 400)
             return
+
+        def _parse_concurrency(value: Any) -> int:
+            try:
+                return max(1, int(value))
+            except (TypeError, ValueError):
+                return 1
+
+        def _load_task_manager_module():
+            import importlib
+
+            try:
+                return importlib.import_module('web.task_manager')
+            except ImportError:
+                return importlib.import_module('task_manager')
         
         # ==================== 账号操作 ====================
         if path == '/api/accounts/import':
@@ -402,14 +421,161 @@ class APIHandler(http.server.SimpleHTTPRequestHandler):
             DBManager.export_to_files()
             self.send_json({'success': True, 'message': '已导出到data目录'})
             return
+
+        # ==================== SheerLink 提取任务 ====================
+        if path == '/api/sheerlink/start':
+            try:
+                task_manager = _load_task_manager_module()
+
+                browser_ids = params.get('browser_ids', [])
+                if isinstance(browser_ids, str):
+                    browser_ids = [browser_ids]
+                concurrency = _parse_concurrency(params.get('concurrency', 1))
+
+                if not browser_ids:
+                    self.send_json({'success': False, 'error': '请选择要处理的账号'}, 400)
+                    return
+
+                task = task_manager.start_sheerlink_task(browser_ids, concurrency)
+                DBManager.add_log('sheerlink_start', details=f'启动 SheerLink 提取任务: {task.task_id}')
+
+                self.send_json({
+                    'success': True,
+                    'task_id': task.task_id,
+                    'total': len(browser_ids),
+                })
+            except Exception as e:
+                self.send_json({'success': False, 'error': str(e)}, 500)
+            return
+
+        # ==================== 绑卡任务 ====================
+        if path == '/api/bindcard/start':
+            try:
+                task_manager = _load_task_manager_module()
+
+                browser_ids = params.get('browser_ids', [])
+                if isinstance(browser_ids, str):
+                    browser_ids = [browser_ids]
+                concurrency = _parse_concurrency(params.get('concurrency', 1))
+
+                if not browser_ids:
+                    self.send_json({'success': False, 'error': '请选择要处理的账号'}, 400)
+                    return
+
+                task = task_manager.start_bindcard_task(browser_ids, concurrency)
+                DBManager.add_log('bindcard_start', details=f'启动绑卡任务: {task.task_id}')
+
+                self.send_json({
+                    'success': True,
+                    'task_id': task.task_id,
+                    'total': len(browser_ids),
+                })
+            except Exception as e:
+                self.send_json({'success': False, 'error': str(e)}, 500)
+            return
+
+        # ==================== 批量更改2FA任务 ====================
+        if path == '/api/change2fa/start':
+            try:
+                task_manager = _load_task_manager_module()
+
+                browser_ids = params.get('browser_ids', [])
+                if isinstance(browser_ids, str):
+                    browser_ids = [browser_ids]
+                concurrency = _parse_concurrency(params.get('concurrency', 1))
+
+                if not browser_ids:
+                    self.send_json({'success': False, 'error': '请选择要处理的账号'}, 400)
+                    return
+
+                account_map: Dict[str, Dict[str, Any]] = {}
+                for account in DBManager.get_all_accounts():
+                    browser_key = str(account.get('browser_id') or '').strip()
+                    if browser_key:
+                        account_map[browser_key] = account
+
+                accounts: List[Dict[str, Any]] = []
+                for browser_id in browser_ids:
+                    browser_key = str(browser_id).strip()
+                    account = account_map.get(browser_key)
+                    if not account:
+                        continue
+
+                    accounts.append({
+                        'browser_id': browser_key,
+                        'email': account.get('email', ''),
+                        'password': account.get('password', ''),
+                        'twofa_key': (
+                            account.get('twofa_key')
+                            or account.get('2fa_secret')
+                            or account.get('secret_key')
+                            or account.get('secret')
+                            or ''
+                        ),
+                        'recovery_email': account.get('recovery_email', ''),
+                    })
+
+                if not accounts:
+                    self.send_json({'success': False, 'error': '未找到有效账号'}, 400)
+                    return
+
+                task = task_manager.start_change_2fa_task(accounts, concurrency)
+                DBManager.add_log('change2fa_start', details=f'启动批量更改2FA任务: {task.task_id}')
+
+                self.send_json({
+                    'success': True,
+                    'task_id': task.task_id,
+                    'total': len(accounts),
+                })
+            except Exception as e:
+                self.send_json({'success': False, 'error': str(e)}, 500)
+            return
+
+        # ==================== 通用任务状态查询 ====================
+        if path == '/api/task/status':
+            try:
+                task_manager = _load_task_manager_module()
+
+                task_id = str(params.get('task_id') or '').strip()
+                if not task_id:
+                    self.send_json({'success': False, 'error': '缺少 task_id'}, 400)
+                    return
+
+                status = task_manager.get_task_status(task_id)
+                if status:
+                    self.send_json({'success': True, **status})
+                else:
+                    self.send_json({'success': False, 'error': '任务不存在'}, 404)
+            except Exception as e:
+                self.send_json({'success': False, 'error': str(e)}, 500)
+            return
+
+        # ==================== 通用任务停止 ====================
+        if path == '/api/task/stop':
+            try:
+                task_manager = _load_task_manager_module()
+
+                task_id = str(params.get('task_id') or '').strip()
+                if not task_id:
+                    self.send_json({'success': False, 'error': '缺少 task_id'}, 400)
+                    return
+
+                if task_manager.stop_task(task_id):
+                    self.send_json({'success': True, 'message': '已发送停止请求'})
+                else:
+                    self.send_json({'success': False, 'error': '任务不存在'}, 404)
+            except Exception as e:
+                self.send_json({'success': False, 'error': str(e)}, 500)
+            return
             
         self.send_json({'success': False, 'error': 'API not found'}, 404)
 
 
-def run_server(port: int = 8080):
+def run_server(port: int = 8080, auto_open: bool = False):
     """
     @brief 启动Web Admin服务器
     @param port 服务器端口
+    @param auto_open 是否自动打开浏览器
     """
     # 确保目录存在
     os.makedirs(TEMPLATE_DIR, exist_ok=True)
@@ -426,6 +592,15 @@ def run_server(port: int = 8080):
             print(f"║   🚀 Web Admin Server Started            ║")
             print(f"║   📍 http://localhost:{port:<5}              ║")
             print(f"║   💡 Press Ctrl+C to stop                ║")
+            if auto_open:
+                url = f"http://localhost:{port}"
+
+                def open_browser():
+                    time.sleep(0.5)
+                    webbrowser.open(url)
+
+                threading.Thread(target=open_browser, daemon=True).start()
+                print(f"║   🌐 Opening browser automatically...    ║")
             print(f"╚══════════════════════════════════════════╝")
             httpd.serve_forever()
     except KeyboardInterrupt:

@@ -139,7 +139,12 @@ def run_gui():
     app = QApplication(sys.argv)
     window = MainWindow()
     window.show()
-    sys.exit(app.exec())
+    exit_code = app.exec()
+
+    if is_web_server_running():
+        stop_web_server()
+
+    sys.exit(exit_code)
 
 
 def run_web_admin(port=8080):
@@ -179,5 +184,4 @@ def main():
 
 if __name__ == '__main__':
     main()
-
 
