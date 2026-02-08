@@ -38,10 +38,14 @@
 │     ├── 点击 Sign up 按钮                                        │
 │     ├── 弹窗模式: 输入邮箱 → Continue                             │
 │     ├── 跳转 auth.openai.com                                     │
-│     │   ├── /log-in-or-create-account → 输入邮箱                 │
-│     │   ├── /create-account/password → 输入密码                  │
+│     │   ├── /log-in-or-create-account 或 /u/login/identifier     │
+│     │   │   └── 输入邮箱                                          │
+│     │   ├── /create-account/password 或 /u/login/password        │
+│     │   │   └── 输入密码                                          │
 │     │   ├── /email-verification → 获取验证码并填入                │
 │     │   └── /about-you → 填写姓名和生日                          │
+│     ├── 若卡在 /auth/login：最多 3 次强制跳转 auth0              │
+│     │   └── 超过阈值判定注册失败，避免死循环                       │
 │     └── 注册完成，返回 chatgpt.com                                │
 │                                                                 │
 │  3. 等待虚拟卡 (最多 300 秒)                                      │
@@ -53,7 +57,9 @@
 │     ├── 处理弹窗 (跳过/Skip)                                      │
 │     ├── 注入 JS 调用 /backend-api/payments/checkout               │
 │     │   └── 带优惠码: team-1-month-free                          │
-│     ├── 跳转 pay.openai.com 填写表单                              │
+│     ├── 使用 checkout_session_id 跳转                             │
+│     │   └── chatgpt.com/checkout/openai_llc/{session_id}         │
+│     ├── 进入付款页后填写表单（可能继续跳转 pay.openai.com）        │
 │     │   ├── #email → 邮箱                                        │
 │     │   ├── #cardNumber → 卡号                                   │
 │     │   ├── #cardExpiry → 有效期                                 │

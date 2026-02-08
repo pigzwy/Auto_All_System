@@ -50,7 +50,7 @@ TEST_CHECKOUT_DATA = {
     "card_number": "4242424242424242",
     "card_expiry": "12/28",
     "card_cvc": "123",
-    "cardholder_name": "Test User",
+    "cardholder_name": "",
     # 账单地址 (美国)
     "country": "US",
     "address_line1": "123 Test Street",
@@ -156,6 +156,157 @@ def _wait_for_url(page, url_contains: str, timeout: int = 30) -> bool:
         time.sleep(0.5)
 
     return False
+
+
+def _is_checkout_url(current_url: str) -> bool:
+    url = current_url or ""
+    return (
+        "chatgpt.com/checkout/openai_llc/" in url
+        or "pay.openai.com" in url
+    )
+
+
+def _wait_for_checkout_url(page, timeout: int = 30) -> bool:
+    start_time = time.time()
+
+    while time.time() - start_time < timeout:
+        try:
+            if _is_checkout_url(page.url):
+                return True
+        except Exception:
+            pass
+        time.sleep(0.5)
+
+    return False
+
+
+def _derive_cardholder_from_email(email: str) -> str:
+    local = (email or "").split("@", 1)[0].strip()
+    if not local:
+        return ""
+
+    normalized = local.replace(".", " ").replace("_", " ").replace("-", " ")
+    parts = [part for part in normalized.split() if part]
+    if not parts:
+        return ""
+
+    return " ".join(part.capitalize() for part in parts)
+
+
+def _find_visible_input(context, selectors: list[str], timeout: int = 3):
+    start_time = time.time()
+    while time.time() - start_time < timeout:
+        for selector in selectors:
+            try:
+                element = context.ele(selector, timeout=1)
+                if element and element.states.is_displayed:
+                    return element
+            except Exception:
+                pass
+        time.sleep(0.2)
+    return None
+
+
+def _locate_payment_frame(page, timeout: int = 12):
+    frame_selectors = [
+        'css:iframe[src*="elements-inner-payment"]',
+        'css:iframe[name*="privateStripeFrame"]',
+        'css:iframe[src*="js.stripe.com"]',
+        'css:iframe[src*="stripe"]',
+        'css:iframe[title*="payment"]',
+    ]
+
+    start_time = time.time()
+    while time.time() - start_time < timeout:
+        for selector in frame_selectors:
+            try:
+                iframe = page.ele(selector, timeout=1)
+                if not iframe or not iframe.states.is_displayed:
+                    continue
+
+                frame_page = iframe.ele
+                if not frame_page:
+                    continue
+
+                try:
+                    inner_iframe = frame_page.ele('css:iframe[name*="privateStripeFrame"]', timeout=1)
+                    if inner_iframe and inner_iframe.states.is_displayed and inner_iframe.ele:
+                        return inner_iframe.ele
+                except Exception:
+                    pass
+
+                return frame_page
+            except Exception:
+                pass
+
+        time.sleep(0.3)
+
+    return None
+
+
+def _fill_card_fields_in_iframe(page, data: dict) -> bool:
+    frame_page = _locate_payment_frame(page, timeout=10)
+    if not frame_page:
+        return False
+
+    log.info("  检测到 Stripe iframe，进入 iframe 填写卡信息...")
+
+    card_input = _find_visible_input(
+        frame_page,
+        [
+            'css:input[name="cardnumber"]',
+            'css:input[name="number"]',
+            'css:input[autocomplete="cc-number"]',
+            'input[name="cardnumber"]',
+            'input[autocomplete="cc-number"]',
+        ],
+        timeout=4,
+    )
+    if card_input:
+        _type_slowly(card_input, data["card_number"])
+        log.success("  iframe 卡号已填写")
+    else:
+        log.warning("  iframe 未找到卡号输入框")
+
+    _human_delay()
+
+    expiry_input = _find_visible_input(
+        frame_page,
+        [
+            'css:input[name="exp-date"]',
+            'css:input[name="expiry"]',
+            'css:input[autocomplete="cc-exp"]',
+            'input[name="exp-date"]',
+            'input[autocomplete="cc-exp"]',
+        ],
+        timeout=4,
+    )
+    if expiry_input:
+        _type_slowly(expiry_input, data["card_expiry"])
+        log.success("  iframe 有效期已填写")
+    else:
+        log.warning("  iframe 未找到有效期输入框")
+
+    _human_delay()
+
+    cvc_input = _find_visible_input(
+        frame_page,
+        [
+            'css:input[name="cvc"]',
+            'css:input[name="securityCode"]',
+            'css:input[autocomplete="cc-csc"]',
+            'input[name="cvc"]',
+            'input[autocomplete="cc-csc"]',
+        ],
+        timeout=4,
+    )
+    if cvc_input:
+        _type_slowly(cvc_input, data["card_cvc"])
+        log.success("  iframe CVC 已填写")
+    else:
+        log.warning("  iframe 未找到 CVC 输入框")
+
+    return bool(card_input and expiry_input and cvc_input)
 
 
 def _type_slowly(element, text: str, base_delay: float = 0.08):
@@ -510,9 +661,9 @@ def step_fill_checkout_form(
 ) -> bool:
     log.step("等待支付页面加载...")
 
-    # 等待跳转到 pay.openai.com
-    if not _wait_for_url(page, "pay.openai.com", timeout=30):
-        log.warning("未跳转到支付页面")
+    # 等待跳转到新版 checkout 页面
+    if not _wait_for_checkout_url(page, timeout=30):
+        log.warning(f"未跳转到支付页面，当前URL: {page.url}")
         return False
 
     log.success(f"已进入支付页面: {page.url}")
@@ -541,6 +692,12 @@ def step_fill_checkout_form(
     if state_override:
         data["state"] = state_override
 
+    holder_name = str(data.get("cardholder_name") or "").strip()
+    if not holder_name or holder_name.lower() == "test user":
+        fallback_holder = _derive_cardholder_from_email(email_override or data.get("email", ""))
+        if fallback_holder:
+            data["cardholder_name"] = fallback_holder
+
     log.info("  填写邮箱...")
     email_input = _find_element(page, "css:#email", timeout=5)
     if email_input:
@@ -551,36 +708,37 @@ def step_fill_checkout_form(
 
     _human_delay()
 
-    # 2. 填写银行卡 (#cardNumber)
-    log.info("  填写银行卡...")
-    card_input = _find_element(page, "css:#cardNumber", timeout=5)
-    if card_input:
-        _type_slowly(card_input, data["card_number"])
-        log.success("  银行卡已填写")
-    else:
-        log.warning("  未找到银行卡输入框")
+    # 2-4. 填写卡号/有效期/CVC（优先 iframe，新旧页面双模式）
+    if not _fill_card_fields_in_iframe(page, data):
+        log.info("  回退到 legacy 输入框模式填写卡信息...")
 
-    _human_delay()
+        log.info("  填写银行卡...")
+        card_input = _find_element(page, "css:#cardNumber", timeout=5)
+        if card_input:
+            _type_slowly(card_input, data["card_number"])
+            log.success("  银行卡已填写")
+        else:
+            log.warning("  未找到银行卡输入框")
 
-    # 3. 填写有效期 (#cardExpiry)
-    log.info("  填写有效期...")
-    expiry_input = _find_element(page, "css:#cardExpiry", timeout=5)
-    if expiry_input:
-        _type_slowly(expiry_input, data["card_expiry"])
-        log.success("  有效期已填写")
-    else:
-        log.warning("  未找到有效期输入框")
+        _human_delay()
 
-    _human_delay()
+        log.info("  填写有效期...")
+        expiry_input = _find_element(page, "css:#cardExpiry", timeout=5)
+        if expiry_input:
+            _type_slowly(expiry_input, data["card_expiry"])
+            log.success("  有效期已填写")
+        else:
+            log.warning("  未找到有效期输入框")
 
-    # 4. 填写 CVC (#cardCvc)
-    log.info("  填写 CVC...")
-    cvc_input = _find_element(page, "css:#cardCvc", timeout=5)
-    if cvc_input:
-        _type_slowly(cvc_input, data["card_cvc"])
-        log.success("  CVC 已填写")
-    else:
-        log.warning("  未找到 CVC 输入框")
+        _human_delay()
+
+        log.info("  填写 CVC...")
+        cvc_input = _find_element(page, "css:#cardCvc", timeout=5)
+        if cvc_input:
+            _type_slowly(cvc_input, data["card_cvc"])
+            log.success("  CVC 已填写")
+        else:
+            log.warning("  未找到 CVC 输入框")
 
     _human_delay()
 
@@ -718,8 +876,12 @@ def step_payment_success_continue(page) -> bool:
                 success_detected = True
                 break
                 
-            # 可选: 检测是否还在 stripe/支付中间页
-            if "pay.openai.com" in current_url or "stripe.com" in current_url:
+            # 可选: 检测是否还在支付流程中
+            if (
+                "chatgpt.com/checkout/openai_llc/" in current_url
+                or "pay.openai.com" in current_url
+                or "stripe.com" in current_url
+            ):
                 # 还在支付流程中，继续等待
                 pass
             
@@ -867,7 +1029,7 @@ def step_inject_promo_checkout(page) -> bool:
             const p = {
                 plan_name: "chatgptteamplan",
                 team_plan_data: {
-                    workspace_name: "MyTeam",
+                    workspace_name: "Fangmu",
                     price_interval: "month",
                     seat_quantity: 5
                 },
@@ -875,7 +1037,7 @@ def step_inject_promo_checkout(page) -> bool:
                     promo_campaign_id: "team-1-month-free",
                     is_coupon_from_query_param: true
                 },
-                checkout_ui_mode: "redirect"
+                checkout_ui_mode: "custom"
             };
             const r = await fetch("https://chatgpt.com/backend-api/payments/checkout", {
                 method: "POST",
@@ -886,8 +1048,8 @@ def step_inject_promo_checkout(page) -> bool:
                 body: JSON.stringify(p)
             });
             const d = await r.json();
-            if (d.url) {
-                window.location.href = d.url;
+            if (d.checkout_session_id) {
+                window.location.href = "https://chatgpt.com/checkout/openai_llc/" + d.checkout_session_id;
                 return "SUCCESS";
             } else {
                 return "ERROR: " + (d.detail || JSON.stringify(d));
@@ -912,8 +1074,8 @@ def step_inject_promo_checkout(page) -> bool:
             return False
             
         # 等待跳转
-        if _wait_for_url(page, "pay.openai.com", timeout=20):
-            log.success("成功跳转到优惠结算页")
+        if _wait_for_checkout_url(page, timeout=25):
+            log.success(f"成功跳转到结算页: {page.url}")
             return True
             
         log.warning("未跳转到支付页面 (JS执行看似成功但URL未变)")
@@ -993,20 +1155,25 @@ def run_onboarding_flow(
         if not skip_checkout:
             # 如果有卡信息，使用卡信息覆盖
             if card_info:
+                cardholder_value = card_info.get("cardholder_name", "") or cardholder_name
                 step_fill_checkout_form(
                     page,
                     email_override=email,
                     card_number_override=card_info.get("card_number", ""),
                     card_expiry_override=card_info.get("card_expiry", ""),
                     card_cvc_override=card_info.get("card_cvc", ""),
-                    cardholder_override=card_info.get("cardholder_name", ""),
+                    cardholder_override=cardholder_value,
                     address_override=card_info.get("address_line1", ""),
                     city_override=card_info.get("city", ""),
                     postal_override=card_info.get("postal_code", ""),
                     state_override=card_info.get("state", ""),
                 )
             else:
-                step_fill_checkout_form(page, email_override=email)
+                step_fill_checkout_form(
+                    page,
+                    email_override=email,
+                    cardholder_override=cardholder_name,
+                )
         else:
             log.info("跳过结算表单填写")
 

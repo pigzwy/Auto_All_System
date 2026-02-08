@@ -469,9 +469,25 @@ def register_openai_account(
 
         _shot("03_after_email.png")
 
+        def _is_auth0_email_page(url_text: str) -> bool:
+            return (
+                "auth.openai.com/log-in-or-create-account" in url_text
+                or "auth.openai.com/u/login/identifier" in url_text
+            )
+
+        def _is_auth0_password_page(url_text: str) -> bool:
+            return (
+                "auth.openai.com/log-in/password" in url_text
+                or "auth.openai.com/create-account/password" in url_text
+                or "auth.openai.com/u/login/password" in url_text
+                or "auth.openai.com/u/signup/password" in url_text
+            )
+
         # 状态机循环处理注册流程
         max_steps = 15
         fallback_auth_login_done = False
+        force_auth0_count = 0
+        max_force_auth0_count = 3
         for step in range(max_steps):
             current_url = page.url
             _log(f"注册流程步骤 {step + 1}: {current_url}")
@@ -521,17 +537,22 @@ def register_openai_account(
 
             # 明确处理：卡在 chatgpt.com/auth/login 时，直接跳转 auth0（避免按钮点击无反应）
             if "chatgpt.com/auth/login" in current_url:
+                if force_auth0_count >= max_force_auth0_count:
+                    _log("多次强制跳转 auth0 仍失败，终止注册流程")
+                    _shot("force_auth0_exceeded.png")
+                    return False
                 try:
                     _log("卡在 /auth/login，尝试直接打开 auth.openai.com/log-in-or-create-account")
                     page.get("https://auth.openai.com/log-in-or-create-account")
                     wait_for_page_stable(page, timeout=8)
                     _shot("force_auth0_from_auth_login.png")
+                    force_auth0_count += 1
                     continue
                 except Exception:
                     pass
 
             # 步骤1: 输入邮箱
-            if "auth.openai.com/log-in-or-create-account" in current_url:
+            if _is_auth0_email_page(current_url):
                 _log("邮箱输入页面")
                 email_input = wait_for_element(
                     page,
@@ -543,7 +564,7 @@ def register_openai_account(
                     return False
 
                 human_delay()
-                type_slowly(page, 'css:input[type="email"]', email)
+                type_slowly(page, email_input, email)
                 _log("邮箱已输入")
 
                 human_delay(0.5, 1.2)
@@ -555,7 +576,7 @@ def register_openai_account(
                 continue
 
             # 步骤2: 输入密码
-            if "auth.openai.com/log-in/password" in current_url or "auth.openai.com/create-account/password" in current_url:
+            if _is_auth0_password_page(current_url):
                 _log("密码输入页面")
                 _shot(f"step{step}_password.png")
                 
@@ -565,7 +586,7 @@ def register_openai_account(
                     return False
 
                 human_delay()
-                type_slowly(page, 'css:input[type="password"]', password)
+                type_slowly(page, password_input, password)
                 _log("密码已输入")
 
                 human_delay(0.5, 1.2)
