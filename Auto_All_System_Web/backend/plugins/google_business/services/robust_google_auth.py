@@ -100,11 +100,9 @@ async def detect_captcha(page: Page) -> bool:
     captcha_indicators = [
         'iframe[src*="recaptcha"]',
         'iframe[title*="reCAPTCHA"]',
-        'text="Verify it\'s you"',
         'text="验证您不是机器人"',
         'text="Confirm you\'re not a robot"',
         "#captchaimg",
-        'text="Before you continue"',
         'text="Unusual traffic"',
         "[data-recaptcha]",
     ]
@@ -131,6 +129,9 @@ async def detect_error_message(page: Page) -> Optional[str]:
         ".Ekjuhf",
         'text="Wrong password"',
         'text="密码错误"',
+        'text=/Your password was changed/i',
+        'text=/password was changed/i',
+        'text="您的密码已更改"',
         'text="Couldn\'t find your Google Account"',
         'text="找不到您的 Google 帐号"',
     ]
@@ -399,10 +400,33 @@ async def robust_google_login(
                 re.IGNORECASE,
             )
 
+            async def _seems_logged_in_now() -> bool:
+                try:
+                    if await check_google_login_by_avatar(page, timeout=2):
+                        return True
+                except Exception:
+                    pass
+
+                try:
+                    current = (page.url or "").lower()
+                    if "myaccount.google.com" in current and "signin/challenge" not in current:
+                        return True
+                except Exception:
+                    pass
+                return False
+
             async def _totp_still_challenge(input_locator) -> bool:
                 """判断是否仍停留在 TOTP challenge 页面。"""
                 try:
-                    if await input_locator.is_visible(timeout=500):
+                    current = (page.url or "").lower()
+                    if "myaccount.google.com" in current and "signin/challenge" not in current:
+                        return False
+                except Exception:
+                    pass
+
+                try:
+                    wrong_hint = page.get_by_text(wrong_code_patterns, exact=False).first
+                    if await wrong_hint.is_visible(timeout=500):
                         return True
                 except Exception:
                     pass
@@ -415,8 +439,7 @@ async def robust_google_login(
                     pass
 
                 try:
-                    wrong_hint = page.get_by_text(wrong_code_patterns, exact=False).first
-                    if await wrong_hint.is_visible(timeout=500):
+                    if await input_locator.is_visible(timeout=300):
                         return True
                 except Exception:
                     pass
@@ -439,12 +462,16 @@ async def robust_google_login(
 
                             # 点击下一步
                             next_btn = page.locator("#totpNext >> button")
-                            if await next_btn.count() > 0:
-                                await next_btn.click()
+                            if await next_btn.count() > 0 and await next_btn.first.is_visible(timeout=500):
+                                await next_btn.first.click(timeout=3500)
                             else:
                                 await totp_input.first.press("Enter")
 
                             await asyncio.sleep(2)
+
+                            if await _seems_logged_in_now():
+                                log("检测到已登录，跳过 2FA 重试")
+                                break
 
                             # 首次登录常见场景：验证码在提交时过期。
                             # 若仍在 challenge 页面，等待下一个窗口后再重试一次（单次兜底，避免死循环）。
@@ -454,19 +481,52 @@ async def robust_google_login(
                                 log(f"2FA 可能过期/错误，等待 {wait_s}s 后重试一次")
                                 await asyncio.sleep(wait_s)
 
+                                if await _seems_logged_in_now():
+                                    log("等待后检测到已登录，跳过 2FA 重试")
+                                    break
+
+                                if not await _totp_still_challenge(totp_input.first):
+                                    log("检测到已离开 challenge，跳过 2FA 重试")
+                                    break
+
                                 retry_code = totp.now()
                                 log(f"重试 2FA 验证码: {retry_code[:3]}***")
-                                await totp_input.first.fill(retry_code)
+                                retry_input = totp_input
+                                if not (
+                                    await retry_input.count() > 0
+                                    and await retry_input.first.is_visible(timeout=500)
+                                ):
+                                    retry_input = page.locator('input[name="totpPin"], input[id="totpPin"], input[type="tel"][name="Pin"]')
+                                if not (
+                                    await retry_input.count() > 0
+                                    and await retry_input.first.is_visible(timeout=500)
+                                ):
+                                    if await _seems_logged_in_now():
+                                        log("重试阶段检测到已登录，跳过补提交流程")
+                                        break
+                                    raise RuntimeError("2FA 重试输入框不可用")
+
+                                await retry_input.first.fill(retry_code)
                                 await asyncio.sleep(0.5)
 
-                                if await next_btn.count() > 0:
-                                    await next_btn.click()
+                                if await next_btn.count() > 0 and await next_btn.first.is_visible(timeout=500):
+                                    await next_btn.first.click(timeout=3500)
                                 else:
-                                    await totp_input.first.press("Enter")
+                                    await retry_input.first.press("Enter")
 
                                 await asyncio.sleep(2)
+
+                                if await _seems_logged_in_now():
+                                    log("2FA 重试后检测到已登录")
+                                    break
                         except Exception as e:
-                            return False, f"2FA 验证失败: {e}"
+                            if (
+                                await check_google_login_by_avatar(page, timeout=2)
+                                or "myaccount.google.com" in (page.url or "")
+                            ):
+                                log("2FA 提交后页面已登录，忽略重试点击异常")
+                            else:
+                                return False, f"2FA 验证失败: {e}"
                     else:
                         return False, "需要 2FA 验证但未提供密钥"
                     break

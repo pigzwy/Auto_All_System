@@ -237,14 +237,34 @@ class BrowserPool:
                     return False
 
                 instance = self.pool[browser_id]
+                profile_closed = True
 
                 if close:
                     # 关闭并移除
                     await instance.disconnect()
                     del self.pool[browser_id]
+
+                    # 释放 Playwright 连接后，额外关闭外部浏览器环境（BitBrowser/Geekez Profile）
+                    # 否则会出现“任务结束但环境仍在运行”的现象。
+                    try:
+                        api = self.browser_manager.get_api(instance.browser_type)
+                        profile_closed = bool(api.close_profile(str(browser_id)))
+                        if not profile_closed:
+                            self.logger.warning(
+                                f"Failed to close browser profile {browser_id} after disconnect"
+                            )
+                    except Exception as e:
+                        profile_closed = False
+                        self.logger.warning(
+                            f"Error closing browser profile {browser_id}: {e}",
+                            exc_info=True,
+                        )
+
                     self.logger.info(
                         f"Closed and removed browser {browser_id} from pool (pool size: {len(self.pool)})"
                     )
+                    if not profile_closed:
+                        return False
                 else:
                     # 只标记为空闲
                     instance.mark_idle()
@@ -481,11 +501,12 @@ class BrowserPool:
             # 释放 BrowserInstance
             result = await self.release(profile.id, close=close)
 
-            # 如果需要关闭，也关闭浏览器
-            if close:
+            # 当实例不在池中时，release() 会返回 False；这里做兜底关闭。
+            if close and not result:
                 closed = api.close_profile(profile.id)
                 if not closed:
                     self.logger.warning(f"Failed to close browser profile for {email}")
+                return closed
 
             return result
 

@@ -348,6 +348,27 @@ def process_single_account(
                             updated = f"{current}\n{note}".strip() if current else note
                             account_updates["notes"] = updated
 
+                        def clear_login_failure_notes() -> None:
+                            """清理历史登录失败标记，避免已恢复账号仍显示 login_failed。"""
+                            source_notes = account_updates.get("notes")
+                            if source_notes is None:
+                                source_notes = account.notes or ""
+                            text = str(source_notes or "").strip()
+                            if not text:
+                                return
+
+                            fail_markers = ("机器人验证", "验证码", "登录失败")
+                            cleaned_lines = [
+                                line
+                                for line in text.splitlines()
+                                if line.strip()
+                                and not any(marker in line for marker in fail_markers)
+                            ]
+                            cleaned = "\n".join(cleaned_lines).strip()
+
+                            if cleaned != text:
+                                account_updates["notes"] = cleaned
+
                         # 主流程（6步）
                         # 1. 登录账号
                         if needs_login:
@@ -358,36 +379,106 @@ def process_single_account(
                                 task_logger.info(f"[Account {account_id}] 已检测到登录态，跳过登录")
                                 account_updates["status"] = GoogleAccountStatus.ACTIVE
                                 account_updates["last_login_at"] = timezone.now()
+                                clear_login_failure_notes()
                             else:
                                 login_result = await login_service.login(
                                     page, account_info, task_logger, exit_on_captcha=True
                                 )
                                 if not login_result.get("success"):
                                     error_msg = login_result.get("error") or "登录失败"
-                                    is_captcha = "机器人验证" in error_msg or "验证码" in error_msg
-                                    if is_captcha:
-                                        append_note("检测到机器人验证，已中断")
-                                        account_updates["status"] = GoogleAccountStatus.LOCKED
-                                        keep_browser_open = False
-                                        error_msg = "需要机器人验证"
-                                    if "手机号验证" in error_msg or "phone" in error_msg:
-                                        append_note("需要手机号验证，需绑卡")
-                                    main_flow_title = "机器人验证" if is_captcha else "登录失败"
-                                    return {
-                                        "success": False,
-                                        "message": f"登录失败: {error_msg}",
-                                        "account_updates": account_updates,
-                                        "failed_step": "login",
-                                        "main_flow_step_num": 1,
-                                        "main_flow_step_title": main_flow_title,
-                                         "keep_browser": False,
-                                     }
+                                    recovered_logged_in = False
+                                    if (
+                                        "2FA" in error_msg
+                                        or "Timeout" in error_msg
+                                        or "超时" in error_msg
+                                    ):
+                                        try:
+                                            recovered_logged_in = (
+                                                await login_service.check_login_status(page)
+                                            )
+                                        except Exception:
+                                            recovered_logged_in = False
+
+                                    if recovered_logged_in:
+                                        task_logger.event(
+                                            step="login",
+                                            action="recover",
+                                            level="warning",
+                                            message="login returned failure but logged-in state detected, continue one_click",
+                                            url=getattr(page, "url", ""),
+                                            result={"error": error_msg},
+                                        )
+                                        account_updates["status"] = GoogleAccountStatus.ACTIVE
+                                        account_updates["last_login_at"] = timezone.now()
+                                        clear_login_failure_notes()
+                                    else:
+                                        lower_error = (error_msg or "").lower()
+                                        is_captcha = any(
+                                            marker in lower_error
+                                            for marker in (
+                                                "机器人验证",
+                                                "检测到机器人验证",
+                                                "captcha",
+                                                "recaptcha",
+                                                "not a robot",
+                                                "unusual traffic",
+                                            )
+                                        )
+                                        is_password_issue = any(
+                                            marker in lower_error
+                                            for marker in (
+                                                "your password was changed",
+                                                "password was changed",
+                                                "wrong password",
+                                                "incorrect password",
+                                                "密码错误",
+                                                "密码已更改",
+                                                "密码被更改",
+                                            )
+                                        )
+                                        if is_captcha:
+                                            append_note("检测到机器人验证，已中断")
+                                            account_updates[
+                                                "status"
+                                            ] = GoogleAccountStatus.LOCKED
+                                            keep_browser_open = False
+                                            error_msg = "需要机器人验证"
+                                        elif is_password_issue:
+                                            append_note(f"密码相关登录失败: {error_msg}")
+                                            account_updates[
+                                                "status"
+                                            ] = GoogleAccountStatus.LOCKED
+                                            keep_browser_open = False
+                                        if "手机号验证" in error_msg or "phone" in error_msg:
+                                            append_note("需要手机号验证，需绑卡")
+                                        main_flow_title = (
+                                            "机器人验证"
+                                            if is_captcha
+                                            else ("密码错误" if is_password_issue else "登录失败")
+                                        )
+                                        return {
+                                            "success": False,
+                                            "message": f"登录失败: {error_msg}",
+                                            "account_updates": account_updates,
+                                            "failed_step": "login",
+                                            "main_flow_step_num": 1,
+                                            "main_flow_step_title": main_flow_title,
+                                            "keep_browser": False,
+                                        }
                                 account_updates["status"] = GoogleAccountStatus.ACTIVE
                                 account_updates["last_login_at"] = timezone.now()
+                                clear_login_failure_notes()
                         else:
                             task_logger.info(
                                 f"[Account {account_id}] 步骤 1/6: 已完成，跳过"
                             )
+                            # 续跑到已完成路径时也可能带着历史登录失败备注，
+                            # 会导致前端/筛选继续命中 login_failed。仅在非锁定态清理。
+                            current_status = str(
+                                account_updates.get("status") or account.status or ""
+                            ).lower()
+                            if current_status not in {"locked", "disabled"}:
+                                clear_login_failure_notes()
 
                         # 2. 打开 Google One
                         if step2_needed:
