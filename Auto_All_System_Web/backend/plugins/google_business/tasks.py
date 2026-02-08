@@ -1346,6 +1346,19 @@ def security_change_2fa_task(
                 },
             )
 
+            # 登录失败时补写账号状态，避免前端列表保持灰色 pending。
+            if (not ok) and isinstance(msg, str) and msg.startswith("登录失败"):
+                fail_note = msg.strip() or "登录失败"
+                current_notes = (account.notes or "").strip()
+                if fail_note not in current_notes:
+                    account.notes = (
+                        f"{current_notes}\n{fail_note}".strip()
+                        if current_notes
+                        else fail_note
+                    )
+                account.status = GoogleAccountStatus.LOCKED
+                account.save(update_fields=["status", "notes"])
+
             if ok and new_secret:
                 # 更新数据库
                 account.two_fa_secret = EncryptionUtil.encrypt(new_secret)

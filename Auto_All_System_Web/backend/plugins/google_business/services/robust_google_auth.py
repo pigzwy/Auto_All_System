@@ -13,6 +13,7 @@ Google账号认证和登录模块 (统一健壮版本)
 import asyncio
 import re
 import logging
+import time
 from typing import Tuple, Optional, Dict, Any
 from playwright.async_api import Page
 
@@ -393,6 +394,34 @@ async def robust_google_login(
             ]
 
             totp_found = False
+            wrong_code_patterns = re.compile(
+                r"Wrong code|Try again|incorrect|Invalid|代码错误|验证码错误",
+                re.IGNORECASE,
+            )
+
+            async def _totp_still_challenge(input_locator) -> bool:
+                """判断是否仍停留在 TOTP challenge 页面。"""
+                try:
+                    if await input_locator.is_visible(timeout=500):
+                        return True
+                except Exception:
+                    pass
+
+                try:
+                    current = (page.url or "").lower()
+                    if "challenge/totp" in current or "signin/challenge" in current:
+                        return True
+                except Exception:
+                    pass
+
+                try:
+                    wrong_hint = page.get_by_text(wrong_code_patterns, exact=False).first
+                    if await wrong_hint.is_visible(timeout=500):
+                        return True
+                except Exception:
+                    pass
+
+                return False
             for selector in totp_selectors:
                 totp_input = page.locator(selector)
                 if await totp_input.count() > 0 and await totp_input.first.is_visible():
@@ -415,7 +444,27 @@ async def robust_google_login(
                             else:
                                 await totp_input.first.press("Enter")
 
-                            await asyncio.sleep(3)
+                            await asyncio.sleep(2)
+
+                            # 首次登录常见场景：验证码在提交时过期。
+                            # 若仍在 challenge 页面，等待下一个窗口后再重试一次（单次兜底，避免死循环）。
+                            if await _totp_still_challenge(totp_input.first):
+                                wait_s = 30 - (int(time.time()) % 30)
+                                wait_s = max(2, min(wait_s + 1, 31))
+                                log(f"2FA 可能过期/错误，等待 {wait_s}s 后重试一次")
+                                await asyncio.sleep(wait_s)
+
+                                retry_code = totp.now()
+                                log(f"重试 2FA 验证码: {retry_code[:3]}***")
+                                await totp_input.first.fill(retry_code)
+                                await asyncio.sleep(0.5)
+
+                                if await next_btn.count() > 0:
+                                    await next_btn.click()
+                                else:
+                                    await totp_input.first.press("Enter")
+
+                                await asyncio.sleep(2)
                         except Exception as e:
                             return False, f"2FA 验证失败: {e}"
                     else:

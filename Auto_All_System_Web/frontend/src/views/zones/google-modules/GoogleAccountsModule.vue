@@ -1303,7 +1303,10 @@ const decRunningAccounts = (ids: number[]) => {
 
 const taskStatusPollingTimers = new Map<number, number>()
 const taskAccountIdsByTaskId = new Map<number, number[]>()
+const celeryTaskStatusPollingTimers = new Map<string, number>()
+const celeryTaskAccountIdsByTaskId = new Map<string, number[]>()
 let taskStatusPollingInFlight = false
+let celeryTaskStatusPollingInFlight = false
 let lastAccountsAutoRefreshAt = 0
 const ACCOUNTS_AUTO_REFRESH_MS = 5000
 
@@ -1322,6 +1325,22 @@ const stopAllTaskStatusPolling = () => {
     stopTaskStatusPolling(taskId)
   }
   runningAccountCounts.clear()
+}
+
+const stopCeleryTaskStatusPolling = (taskId: string) => {
+  const timer = celeryTaskStatusPollingTimers.get(taskId)
+  if (timer) window.clearInterval(timer)
+  celeryTaskStatusPollingTimers.delete(taskId)
+
+  const ids = celeryTaskAccountIdsByTaskId.get(taskId) || []
+  celeryTaskAccountIdsByTaskId.delete(taskId)
+  if (ids.length > 0) decRunningAccounts(ids)
+}
+
+const stopAllCeleryTaskStatusPolling = () => {
+  for (const [taskId] of celeryTaskStatusPollingTimers) {
+    stopCeleryTaskStatusPolling(taskId)
+  }
 }
 
 const startTaskStatusPolling = (taskId: number, accountIds: number[]) => {
@@ -1368,6 +1387,52 @@ const getCreatedTaskId = (res: any) => {
   const raw = res?.task_id ?? res?.data?.task_id ?? res?.id ?? res?.data?.id
   const n = Number(raw)
   return Number.isFinite(n) && n > 0 ? n : null
+}
+
+const getCreatedCeleryTaskId = (res: any) => {
+  const raw = res?.task_id ?? res?.data?.task_id
+  const s = String(raw ?? '').trim()
+  return s ? s : null
+}
+
+const startCeleryTaskStatusPolling = (taskId: string, accountIds: number[]) => {
+  const normalizedTaskId = String(taskId || '').trim()
+  if (!normalizedTaskId) return
+  if (celeryTaskStatusPollingTimers.has(normalizedTaskId)) return
+
+  celeryTaskAccountIdsByTaskId.set(normalizedTaskId, accountIds)
+  if (accountIds.length > 0) incRunningAccounts(accountIds)
+
+  const timer = window.setInterval(async () => {
+    if (celeryTaskStatusPollingInFlight) return
+    celeryTaskStatusPollingInFlight = true
+    try {
+      const res: any = await googleCeleryTasksApi.getTask(normalizedTaskId)
+      const stateRaw = String(res?.state || '').trim()
+      const state = stateRaw.toUpperCase()
+      const ids = celeryTaskAccountIdsByTaskId.get(normalizedTaskId) || accountIds
+
+      const isTerminal = ['SUCCESS', 'FAILURE', 'REVOKED', 'COMPLETED', 'FAILED', 'CANCELLED'].includes(state)
+      const now = Date.now()
+
+      if (isTerminal || now - lastAccountsAutoRefreshAt >= ACCOUNTS_AUTO_REFRESH_MS) {
+        lastAccountsAutoRefreshAt = now
+        await fetchAccounts()
+        if (showTasksDrawer.value && selectedAccount.value && ids.includes(selectedAccount.value.id)) {
+          await viewTasks(selectedAccount.value)
+        }
+      }
+
+      if (!isTerminal) return
+      stopCeleryTaskStatusPolling(normalizedTaskId)
+    } catch {
+      // ignore
+    } finally {
+      celeryTaskStatusPollingInFlight = false
+    }
+  }, 2000)
+
+  celeryTaskStatusPollingTimers.set(normalizedTaskId, timer)
 }
 
 // 统计信息
@@ -1700,6 +1765,7 @@ onBeforeUnmount(() => {
   stopTracePolling()
   stopLogPolling()
   stopAllTaskStatusPolling()
+  stopAllCeleryTaskStatusPolling()
 })
 
 const sheerIDForm = reactive({
@@ -1963,19 +2029,28 @@ const handleSecurityCommand = async (command: string) => {
   try {
     if (command === 'change_2fa') {
       await ElMessageBox.confirm('确定修改 2FA 密钥吗？将自动生成新密钥。', '修改 2FA')
-      await googleSecurityApi.change2fa({ account_ids: ids })
+      const res = await googleSecurityApi.change2fa({ account_ids: ids })
+      const celeryTaskId = getCreatedCeleryTaskId(res)
+      if (celeryTaskId) startCeleryTaskStatusPolling(celeryTaskId, ids)
       ElMessage.success('任务已提交')
+      fetchAccounts()
     } else if (command === 'change_recovery') {
       newRecoveryEmail.value = ''
       showRecoveryEmailDialog.value = true
     } else if (command === 'get_backup_codes') {
       await ElMessageBox.confirm('确定获取备份验证码吗？', '获取备份码')
-      await googleSecurityApi.getBackupCodes({ account_ids: ids })
+      const res = await googleSecurityApi.getBackupCodes({ account_ids: ids })
+      const celeryTaskId = getCreatedCeleryTaskId(res)
+      if (celeryTaskId) startCeleryTaskStatusPolling(celeryTaskId, ids)
       ElMessage.success('任务已提交')
+      fetchAccounts()
     } else if (command === 'one_click_update') {
       await ElMessageBox.confirm('确定执行一键安全更新（修改密码/辅助邮箱/2FA）吗？', '一键安全更新', { type: 'warning' })
-      await googleSecurityApi.oneClickUpdate({ account_ids: ids })
+      const res = await googleSecurityApi.oneClickUpdate({ account_ids: ids })
+      const celeryTaskId = getCreatedCeleryTaskId(res)
+      if (celeryTaskId) startCeleryTaskStatusPolling(celeryTaskId, ids)
       ElMessage.success('任务已提交')
+      fetchAccounts()
     }
   } catch (e: any) {
     if (e !== 'cancel') ElMessage.error('操作失败: ' + (e.message || '未知错误'))
@@ -2085,12 +2160,16 @@ const submitChangeRecoveryEmail = async () => {
     return
   }
   try {
-    await googleSecurityApi.changeRecoveryEmail({
+    const ids = getSelectedIds()
+    const res = await googleSecurityApi.changeRecoveryEmail({
       account_ids: getSelectedIds(),
       new_email: newRecoveryEmail.value
     })
+    const celeryTaskId = getCreatedCeleryTaskId(res)
+    if (celeryTaskId) startCeleryTaskStatusPolling(celeryTaskId, ids)
     ElMessage.success('任务已提交')
     showRecoveryEmailDialog.value = false
+    fetchAccounts()
   } catch (e: any) {
     ElMessage.error('操作失败: ' + e.message)
   }

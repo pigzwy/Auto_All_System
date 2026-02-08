@@ -6,8 +6,11 @@ Google 账号安全设置服务
 """
 
 import asyncio
+import base64
+import binascii
 import logging
 import re
+import time
 from pathlib import Path
 import pyotp
 from typing import Dict, Any, Optional, Tuple, List
@@ -57,9 +60,14 @@ class GoogleSecurityService:
     CLICK_TOTAL_BUDGET_MS = 4500
     MAX_SECRET_EXTRACT_ATTEMPTS = 10
 
+    # TOTP 窗口保护：剩余时间太短时，先等到下一窗口，避免刚提交就过期。
+    TOTP_SAFE_REMAINING_SECONDS = 6
+
     @staticmethod
     def _normalize_base32_secret(raw: str) -> str:
-        return (raw or "").replace(" ", "").strip().upper()
+        # Google 展示 key 时常带空格/短横线分组；统一清洗后再验证。
+        cleaned = re.sub(r"[\s\-_]", "", raw or "")
+        return cleaned.strip().upper()
 
     def _is_plausible_base32_secret(self, cand: str) -> bool:
         c = self._normalize_base32_secret(cand)
@@ -67,24 +75,65 @@ class GoogleSecurityService:
             return False
         if not self._BASE32_RE.match(c):
             return False
-        # Base32 无 padding 时，长度应为 8 的倍数；否则很容易触发 pyotp/base32 的 Incorrect padding
-        if len(c) % 8 != 0:
+        if len(c) < 16:
+            return False
+        # Base32 长度并非必须是 8 的倍数，但 mod 1/3/6 无法通过标准 padding 补齐。
+        if len(c) % 8 in {1, 3, 6}:
+            return False
+        # 最终以可解码性为准，避免后续 pyotp 抛 Incorrect padding。
+        try:
+            base64.b32decode(self._to_pyotp_secret(c), casefold=True)
+        except (binascii.Error, ValueError):
             return False
         return True
+
+    def _to_pyotp_secret(self, cand: str) -> str:
+        """将无 padding 的 Base32 secret 规范化为 pyotp 可用格式。"""
+        c = self._normalize_base32_secret(cand)
+        if not c:
+            return ""
+        remainder = len(c) % 8
+        if remainder:
+            c = c + ("=" * (8 - remainder))
+        return c
 
     async def _maybe_fill_password(self, page: Page, password: str) -> bool:
         password = (password or "").strip()
         if not password:
             return False
 
-        password_input = page.locator('input[type="password"]').first
+        url = (getattr(page, "url", "") or "").lower()
+        probe_timeout_ms = self.REAUTH_PROBE_TIMEOUT_MS
+        if "challenge/pwd" in url:
+            probe_timeout_ms = max(probe_timeout_ms, 1500)
+
+        password_input: Optional[Locator] = None
+        for selector in ['input[name="Passwd"]', 'input[type="password"]']:
+            candidates = page.locator(selector)
+            try:
+                count = await candidates.count()
+            except Exception:
+                count = 0
+            for idx in range(min(count, 3)):
+                candidate = candidates.nth(idx)
+                try:
+                    if await candidate.is_visible(timeout=probe_timeout_ms):
+                        password_input = candidate
+                        break
+                except Exception:
+                    continue
+            if password_input is not None:
+                break
+
+        if password_input is None:
+            return False
+
         try:
-            if await password_input.is_visible(timeout=self.REAUTH_PROBE_TIMEOUT_MS):
-                await password_input.fill(password)
-                await page.keyboard.press("Enter")
-                # 等待页面反应，不用固定 sleep 太久
-                await asyncio.sleep(self.SHORT_WAIT_SECONDS)
-                return True
+            await password_input.fill(password)
+            await page.keyboard.press("Enter")
+            # 等待页面反应，不用固定 sleep 太久
+            await asyncio.sleep(self.SHORT_WAIT_SECONDS)
+            return True
         except Exception:
             return False
         return False
@@ -94,21 +143,81 @@ class GoogleSecurityService:
         if not totp_secret:
             return False
 
-        # Google 常见的 TOTP 输入框
-        totp_input = page.locator('input[name="totpPin"], input[type="tel"]').first
+        # Google challenge 页面经常先渲染隐藏输入，再替换为可见输入；
+        # 不能只拿 .first，否则容易漏填“第二次 reauth”的 TOTP。
+        url = (getattr(page, "url", "") or "").lower()
+        probe_timeout_ms = self.REAUTH_PROBE_TIMEOUT_MS
+        if "challenge/totp" in url:
+            probe_timeout_ms = max(probe_timeout_ms, 1500)
+
+        totp_input: Optional[Locator] = None
+        for selector in [
+            'input[name="totpPin"]',
+            'input[autocomplete="one-time-code"]',
+            'input[type="tel"]',
+        ]:
+            candidates = page.locator(selector)
+            try:
+                count = await candidates.count()
+            except Exception:
+                count = 0
+            for idx in range(min(count, 4)):
+                candidate = candidates.nth(idx)
+                try:
+                    if await candidate.is_visible(timeout=probe_timeout_ms):
+                        totp_input = candidate
+                        break
+                except Exception:
+                    continue
+            if totp_input is not None:
+                break
+
+        if totp_input is None:
+            return False
+
+        async def _still_on_totp_challenge() -> bool:
+            cur_url = (getattr(page, "url", "") or "").lower()
+            if "challenge/totp" in cur_url:
+                return True
+            # URL 未及时更新时，仍可通过输入框可见性判断
+            try:
+                return await page.locator(
+                    'input[name="totpPin"], input[autocomplete="one-time-code"], input[type="tel"]'
+                ).first.is_visible(timeout=220)
+            except Exception:
+                return False
+
         try:
-            if await totp_input.is_visible(timeout=self.REAUTH_PROBE_TIMEOUT_MS):
-                # 这里的 secret 可能来自 DB（加密/明文兼容），必须确保格式正确
-                if not self._is_plausible_base32_secret(totp_secret):
-                    return False
-                code = pyotp.TOTP(totp_secret).now()
-                await totp_input.fill(code)
+            # 这里的 secret 可能来自 DB（加密/明文兼容），必须确保格式正确
+            if not self._is_plausible_base32_secret(totp_secret):
+                return False
+
+            totp = pyotp.TOTP(self._to_pyotp_secret(totp_secret))
+
+            # attempt 1
+            now_ts = int(time.time())
+            remaining = 30 - (now_ts % 30)
+            if remaining < self.TOTP_SAFE_REMAINING_SECONDS:
+                await asyncio.sleep(remaining + 1)
+
+            code = totp.now()
+            await totp_input.fill(code)
+            await page.keyboard.press("Enter")
+            await asyncio.sleep(self.SHORT_WAIT_SECONDS)
+
+            # challenge/totp 仍在时，等待到下一个窗口再重试一次，避免无限重试。
+            if await _still_on_totp_challenge():
+                now_ts = int(time.time())
+                wait_s = 30 - (now_ts % 30) + 1
+                await asyncio.sleep(wait_s)
+                code_retry = totp.now()
+                await totp_input.fill(code_retry)
                 await page.keyboard.press("Enter")
                 await asyncio.sleep(self.SHORT_WAIT_SECONDS)
-                return True
+
+            return True
         except Exception:
             return False
-        return False
 
     async def _dismiss_common_prompts(self, page: Page) -> None:
         # 一些常见的“跳过/稍后”弹窗（不保证覆盖全部）
@@ -161,10 +270,24 @@ class GoogleSecurityService:
         # 重新验证身份：可能出现 password + 2FA
         if not await self._needs_reauth(page):
             return
-        await self._dismiss_common_prompts(page)
-        await self._maybe_fill_password(page, account.get("password", ""))
-        await self._maybe_fill_totp(page, account.get("totp_secret", ""))
-        await self._dismiss_common_prompts(page)
+
+        # challenge 页面常见 pwd -> totp 串联跳转，这里做有限次数的处理，
+        # 避免单轮探测错过可见输入框后直接放弃。
+        for _ in range(3):
+            if not await self._needs_reauth(page):
+                return
+
+            await self._dismiss_common_prompts(page)
+            filled_password = await self._maybe_fill_password(
+                page, account.get("password", "")
+            )
+            filled_totp = await self._maybe_fill_totp(page, account.get("totp_secret", ""))
+            await self._dismiss_common_prompts(page)
+
+            if not (filled_password or filled_totp):
+                await asyncio.sleep(0.35)
+            else:
+                await asyncio.sleep(self.SHORT_WAIT_SECONDS)
 
     async def _click_first_visible(
         self,
@@ -396,8 +519,8 @@ class GoogleSecurityService:
                 if txt:
                     m = re.search(r"([a-zA-Z2-7]{16,64})", txt.replace(" ", ""))
                     if m:
-                        cand = m.group(1).upper()
-                        if self._BASE32_RE.match(cand):
+                        cand = self._normalize_base32_secret(m.group(1))
+                        if self._is_plausible_base32_secret(cand):
                             logger.info(f"从 'this key' 附近提取到密钥: {cand[:8]}...")
                             return cand
         except Exception:
@@ -416,8 +539,10 @@ class GoogleSecurityService:
                 txt = await container.text_content()
                 if txt:
                     m = re.search(r"([A-Z2-7]{16,64})", txt.replace(" ", "").upper())
-                    if m and self._BASE32_RE.match(m.group(1)):
-                        return m.group(1)
+                    if m:
+                        cand = self._normalize_base32_secret(m.group(1))
+                        if self._is_plausible_base32_secret(cand):
+                            return cand
         except Exception:
             pass
 
@@ -427,8 +552,8 @@ class GoogleSecurityService:
             if await el.is_visible():
                 val = await el.get_attribute("data-secret")
                 if isinstance(val, str):
-                    cand = val.replace(" ", "").strip().upper()
-                    if self._BASE32_RE.match(cand):
+                    cand = self._normalize_base32_secret(val)
+                    if self._is_plausible_base32_secret(cand):
                         return cand
         except Exception:
             pass
@@ -450,13 +575,11 @@ class GoogleSecurityService:
                 continue
 
         for raw in candidates:
-            cand = (
-                raw.replace(" ", "").replace("\n", "").replace("\r", "").strip().upper()
-            )
+            cand = self._normalize_base32_secret(raw)
             m = re.search(r"([A-Z2-7]{16,64})", cand)
             if m:
                 v = m.group(1)
-                if self._BASE32_RE.match(v):
+                if self._is_plausible_base32_secret(v):
                     return v
 
         # 方式7: 兜底从完整 HTML 中提取
@@ -468,11 +591,12 @@ class GoogleSecurityService:
                 or "enter a setup key" in html.lower()
             ):
                 for v in re.findall(r"[A-Z2-7]{16,64}", html.upper()):
-                    if not self._BASE32_RE.match(v):
+                    cand = self._normalize_base32_secret(v)
+                    if not self._is_plausible_base32_secret(cand):
                         continue
                     try:
-                        pyotp.TOTP(v).now()
-                        return v
+                        pyotp.TOTP(self._to_pyotp_secret(cand)).now()
+                        return cand
                     except Exception:
                         continue
         except Exception:
@@ -565,6 +689,8 @@ class GoogleSecurityService:
             await page.goto(self.TWO_STEP_URL, wait_until="domcontentloaded")
             await asyncio.sleep(self.SHORT_WAIT_SECONDS)
             await self._handle_reauth(page, {**account, "totp_secret": current_secret})
+            if await self._needs_reauth(page):
+                await self._handle_reauth(page, {**account, "totp_secret": current_secret})
 
             # 2) 进入 Authenticator app 设置
             # 真实元素: <div class="mMsbvc ">Authenticator</div>
@@ -607,6 +733,7 @@ class GoogleSecurityService:
             # 3) 点击 "Change authenticator app" 进入更换流程
             # 真实元素: <span jsname="V67aGc" class="mUIrbf-vQzf8d">Change authenticator app</span>
             # 先等待一次目标面板就绪，避免太早触发宽泛 fallback 导致串行长超时。
+            # 该步骤是成败关键：若 Change 没点到，后续提取 setup key 基本会空转。
             change_surface_wait_started_at = loop.time()
             change_surface = await self._find_first_visible_locator(
                 page,
@@ -618,8 +745,9 @@ class GoogleSecurityService:
                     'button:has-text("Change")',
                     "text=Change authenticator app",
                     "text=更改身份验证器",
+                    "text=Zmień aplikację uwierzytelniającą",
                 ],
-                timeout_s=3.0,
+                timeout_s=5.0,
             )
             if task_logger:
                 task_logger.event(
@@ -660,6 +788,7 @@ class GoogleSecurityService:
                     page.get_by_text("Zmień", exact=False),
                 ],
                 debug_label="click_change_authenticator",
+                max_total_ms=6200,
             )
 
             if task_logger:
@@ -677,6 +806,146 @@ class GoogleSecurityService:
                         "elapsed_ms": int((loop.time() - change_click_started_at) * 1000),
                     },
                 )
+
+            if not clicked_change_authenticator:
+                # 兜底：再走一次 twosv 页面重进 + 更宽预算点击，避免因阶段性渲染延迟漏点。
+                if task_logger:
+                    task_logger.event(
+                        step="2fa",
+                        action="retry",
+                        level="warning",
+                        message="retry entering change authenticator flow",
+                        url=getattr(page, "url", ""),
+                    )
+
+                try:
+                    await page.goto(self.TWO_STEP_URL, wait_until="domcontentloaded")
+                    await asyncio.sleep(self.SHORT_WAIT_SECONDS)
+                except Exception:
+                    pass
+
+                await self._handle_reauth(page, {**account, "totp_secret": current_secret})
+                if await self._needs_reauth(page):
+                    await self._handle_reauth(
+                        page, {**account, "totp_secret": current_secret}
+                    )
+
+                await self._click_first_visible(
+                    [
+                        page.locator('div.mMsbvc:has-text("Authenticator")'),
+                        page.locator('.mMsbvc:has-text("Authenticator")'),
+                        page.get_by_text("Authenticator", exact=True),
+                        page.get_by_text("Authenticator app", exact=False),
+                        page.get_by_text("身份验证器", exact=False),
+                    ],
+                    debug_label="click_authenticator_retry",
+                    max_total_ms=6200,
+                )
+
+                retry_started_at = loop.time()
+                clicked_change_authenticator = await self._click_first_visible(
+                    [
+                        page.locator(
+                            'span.mUIrbf-vQzf8d:has-text("Change authenticator app")'
+                        ),
+                        page.locator('.mUIrbf-vQzf8d:has-text("Change authenticator")'),
+                        page.locator('[jsname="V67aGc"]:has-text("Change")'),
+                        page.get_by_text("Change authenticator app", exact=False),
+                        page.get_by_text("Change authenticator", exact=False),
+                        page.locator('button:has-text("Change phone")'),
+                        page.locator('button:has-text("Change")'),
+                        page.locator('button:has-text("Set up")'),
+                        page.get_by_text("更改身份验证器", exact=False),
+                        page.locator('button:has-text("更改")'),
+                        page.locator('span.mUIrbf-vQzf8d:has-text("Zmień aplikację")'),
+                        page.get_by_text("Zmień aplikację", exact=False),
+                        page.get_by_text("Zmień", exact=False),
+                    ],
+                    debug_label="click_change_authenticator_retry",
+                    max_total_ms=8000,
+                )
+
+                if task_logger:
+                    task_logger.event(
+                        step="2fa",
+                        action="click",
+                        level="warning" if not clicked_change_authenticator else "info",
+                        message=(
+                            "clicked Change authenticator app (retry)"
+                            if clicked_change_authenticator
+                            else "Change authenticator app not clicked after retry"
+                        ),
+                        url=getattr(page, "url", ""),
+                        result={
+                            "clicked_change_authenticator": clicked_change_authenticator,
+                            "elapsed_ms": int((loop.time() - retry_started_at) * 1000),
+                        },
+                    )
+
+            if not clicked_change_authenticator:
+                # 仍在 challenge 页时先尝试一次 reauth，再做最后一次 Change 点击。
+                # 目的：避免“二次 TOTP 还没填/还未生效”就直接 fail-fast。
+                if await self._needs_reauth(page):
+                    await self._handle_reauth(
+                        page, {**account, "totp_secret": current_secret}
+                    )
+                    reauth_retry_started_at = loop.time()
+                    clicked_change_authenticator = await self._click_first_visible(
+                        [
+                            page.locator(
+                                'span.mUIrbf-vQzf8d:has-text("Change authenticator app")'
+                            ),
+                            page.locator(
+                                '.mUIrbf-vQzf8d:has-text("Change authenticator")'
+                            ),
+                            page.locator('[jsname="V67aGc"]:has-text("Change")'),
+                            page.get_by_text("Change authenticator app", exact=False),
+                            page.get_by_text("Change authenticator", exact=False),
+                            page.locator('button:has-text("Change")'),
+                            page.locator('button:has-text("Set up")'),
+                        ],
+                        debug_label="click_change_authenticator_after_reauth",
+                        max_total_ms=6200,
+                    )
+                    if task_logger:
+                        task_logger.event(
+                            step="2fa",
+                            action="click",
+                            level="warning" if not clicked_change_authenticator else "info",
+                            message=(
+                                "clicked Change authenticator app after reauth"
+                                if clicked_change_authenticator
+                                else "Change authenticator app still not clicked after reauth"
+                            ),
+                            url=getattr(page, "url", ""),
+                            result={
+                                "clicked_change_authenticator": clicked_change_authenticator,
+                                "elapsed_ms": int(
+                                    (loop.time() - reauth_retry_started_at) * 1000
+                                ),
+                            },
+                        )
+
+            if not clicked_change_authenticator:
+                shot = await self._save_debug_screenshot(page, "security_change_2fa", email)
+                url = getattr(page, "url", "")
+                msg = "未进入 Change authenticator 流程，无法提取新的 2FA 密钥"
+                if url:
+                    msg += f" (url={url})"
+                if shot:
+                    msg += f" (screenshot={shot})"
+                if task_logger:
+                    task_logger.event(
+                        step="2fa",
+                        action="fail",
+                        level="error",
+                        message=msg,
+                        url=url,
+                        screenshot=shot,
+                        result={"reason": "change_authenticator_not_clicked"},
+                    )
+                return False, msg, None
+
             await self._handle_reauth(page, {**account, "totp_secret": current_secret})
 
             # 4) 等待页面加载完成，尝试获取 secret
@@ -787,6 +1056,26 @@ class GoogleSecurityService:
 
                 new_secret = await self._extract_base32_secret(page)
                 if new_secret:
+                    normalized_secret = self._normalize_base32_secret(new_secret)
+                    if not self._is_plausible_base32_secret(normalized_secret):
+                        if task_logger:
+                            task_logger.event(
+                                step="2fa",
+                                action="extract_secret_invalid",
+                                level="warning",
+                                message="extracted setup key candidate failed validation, continue probing",
+                                url=getattr(page, "url", ""),
+                                result={
+                                    "attempt": attempt + 1,
+                                    "candidate_masked": TaskLogger._mask_secret(
+                                        normalized_secret
+                                    ),
+                                },
+                            )
+                        await asyncio.sleep(self.SHORT_WAIT_SECONDS)
+                        continue
+
+                    new_secret = normalized_secret
                     if task_logger:
                         task_logger.event(
                             step="2fa",
@@ -827,7 +1116,7 @@ class GoogleSecurityService:
                         page, "security_change_2fa", email
                     )
                     url = getattr(page, "url", "")
-                    msg = "提取到的 2FA key 格式异常（可能未打开 Can't scan it? 或页面结构变化）"
+                    msg = "提取到的 2FA key 无法通过校验（可能页面内容混入非密钥文本）"
                     if url:
                         msg += f" (url={url})"
                     if shot:
@@ -846,7 +1135,7 @@ class GoogleSecurityService:
                         )
                     return False, msg, None
 
-                code = pyotp.TOTP(new_secret).now()
+                code = pyotp.TOTP(self._to_pyotp_secret(new_secret)).now()
             except Exception as e:
                 shot = await self._save_debug_screenshot(
                     page, "security_change_2fa", email
@@ -1158,7 +1447,7 @@ class GoogleSecurityService:
                     'input[type="tel"], input[name="totpPin"]'
                 ).first
                 if await totp_input.is_visible():
-                    totp = pyotp.TOTP(totp_secret)
+                    totp = pyotp.TOTP(self._to_pyotp_secret(totp_secret))
                     await totp_input.fill(totp.now())
                     await page.keyboard.press("Enter")
                     await asyncio.sleep(3)
