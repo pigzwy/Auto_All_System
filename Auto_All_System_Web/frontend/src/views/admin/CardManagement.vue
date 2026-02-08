@@ -415,7 +415,7 @@
     </Modal>
 
     <!-- API 配置管理对话框 -->
-    <Modal v-model="showApiConfigDialog" title="API 配置管理" width="800px">
+    <Modal v-model="showApiConfigDialog" title="API 配置管理" width="800px" @open="loadApiConfigs">
       <div class="mb-4">
         <Button  variant="default" type="button" size="small" @click="resetConfigForm(); showAddConfigForm = true">
           添加配置
@@ -933,6 +933,11 @@ watch(poolFilter, () => {
   fetchCards()
 })
 
+watch([showRedeemDialog, showApiConfigDialog], ([redeemOpen, configOpen]) => {
+  if (!redeemOpen && !configOpen) return
+  loadApiConfigs()
+})
+
 const formatBillingAddress = (address: any): string => {
   if (!address || Object.keys(address).length === 0) return '-'
   const parts = [
@@ -1008,8 +1013,9 @@ const loadApiConfigs = async () => {
     } else {
       apiConfigs.value = []
     }
-  } catch (error) {
+  } catch (error: any) {
     console.error('加载 API 配置失败', error)
+    ElMessage.error(error?.response?.data?.message || error?.message || '加载 API 配置失败')
   } finally {
     loadingConfigs.value = false
   }
