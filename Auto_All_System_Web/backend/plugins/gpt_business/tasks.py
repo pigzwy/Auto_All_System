@@ -42,6 +42,14 @@ def _mask_secret(value: str, prefix: int = 4, suffix: int = 4) -> str:
     return f"{v[:prefix]}***{v[-suffix:]}"
 
 
+def _generate_random_profile_name(email: str) -> str:
+    local_part = str(email or "").split("@")[0].strip().lower()
+    normalized = "".join(ch if ch.isalnum() else "_" for ch in local_part).strip("_")
+    prefix = (normalized or "acct")[:24]
+    suffix = "".join(secrets.choice(string.ascii_lowercase + string.digits) for _ in range(8))
+    return f"gpt_{prefix}_{suffix}"
+
+
 def _set_task_progress(record_id: str, current: int, total: int, label: str) -> None:
     try:
         total_int = max(int(total), 1)
@@ -734,7 +742,7 @@ def self_register_task(self, record_id: str):
             return None
 
         proxy_str = _proxy_to_str((settings.get("browser") or {}).get("proxy"))
-        profile_name = f"gpt_{email}"
+        profile_name = _generate_random_profile_name(email)
 
         from apps.integrations.geekez.api import GeekezBrowserAPI
         from plugins.gpt_business.services.openai_register import (
@@ -747,7 +755,7 @@ def self_register_task(self, record_id: str):
             api = GeekezBrowserAPI()
             
             # 创建或获取 profile
-            _log(f"creating/updating profile: {profile_name}")
+            _log(f"creating new random profile: {profile_name}")
             profile = api.create_or_update_profile(name=profile_name, proxy=proxy_str)
             _log(f"profile ready: id={profile.id}, name={profile.name}")
             
@@ -1007,19 +1015,14 @@ def _launch_geekez_for_account(account_id: str) -> dict[str, Any]:
     if not api.health_check():
         raise RuntimeError("GeekezBrowser 服务不在线")
 
-    profile_name_new = f"gpt_{email}"
-    created_profile = False
+    profile_name = _generate_random_profile_name(email)
+    created_profile = True
 
-    profile = api.get_profile_by_name(profile_name_new)
-    if not profile:
-        profile = api.get_profile_by_name(email)
-    if not profile:
-        created_profile = True
-        profile = api.create_or_update_profile(
-            name=profile_name_new,
-            proxy=None,
-            metadata={"account": {"email": email}},
-        )
+    profile = api.create_or_update_profile(
+        name=profile_name,
+        proxy=None,
+        metadata={"account": {"email": email, "profile_strategy": "random_new"}},
+    )
 
     launch_info = api.launch_profile(profile.id)
     if not launch_info:

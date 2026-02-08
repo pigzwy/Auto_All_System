@@ -74,6 +74,14 @@ def _batch_countdown(index: int, concurrency: int) -> int:
     return int(index // concurrency)
 
 
+def _generate_random_profile_name(email: str) -> str:
+    local_part = str(email or "").split("@")[0].strip().lower()
+    normalized = "".join(ch if ch.isalnum() else "_" for ch in local_part).strip("_")
+    prefix = (normalized or "acct")[:24]
+    suffix = "".join(secrets.choice(string.ascii_lowercase + string.digits) for _ in range(8))
+    return f"gpt_{prefix}_{suffix}"
+
+
 def _parse_self_register_card_options(data: Any) -> tuple[str, int | None, str | None]:
     card_mode = str((data or {}).get("card_mode") or "random").strip().lower()
     if card_mode not in {"selected", "random", "manual"}:
@@ -736,18 +744,26 @@ class AccountsViewSet(ViewSet):
 
         # 读取一次 Geekez profiles.json，供前端展示“Geek 环境是否存在”。
         geekez_names: set[str] = set()
+        geekez_profile_ids: set[str] = set()
         try:
             from apps.integrations.browser_base import BrowserType, get_browser_manager
 
             manager = get_browser_manager()
             api = manager.get_api(BrowserType.GEEKEZ)
+            profiles = api.list_profiles()
             geekez_names = {
                 str(p.name)
-                for p in api.list_profiles()
+                for p in profiles
                 if getattr(p, "name", None)
+            }
+            geekez_profile_ids = {
+                str(p.id)
+                for p in profiles
+                if getattr(p, "id", None)
             }
         except Exception:
             geekez_names = set()
+            geekez_profile_ids = set()
 
         def _get_email_domains() -> list[str]:
             try:
@@ -768,9 +784,15 @@ class AccountsViewSet(ViewSet):
             geekez_profile = acc.get("geekez_profile")
             # 兼容新旧两种 profile name 格式：gpt_{email} 和 {email}
             profile_name_new = f"gpt_{email}" if email else ""
+            profile_id_saved = ""
+            profile_name_saved = ""
+            if isinstance(geekez_profile, dict):
+                profile_id_saved = str(geekez_profile.get("profile_id") or "").strip()
+                profile_name_saved = str(geekez_profile.get("profile_name") or "").strip()
+
             has_profile = bool(
-                isinstance(geekez_profile, dict) and geekez_profile.get("profile_id")
-            ) or bool(profile_name_new and profile_name_new in geekez_names) or bool(email and email in geekez_names)
+                profile_id_saved and profile_id_saved in geekez_profile_ids
+            ) or bool(profile_name_saved and profile_name_saved in geekez_names) or bool(profile_name_new and profile_name_new in geekez_names) or bool(email and email in geekez_names)
 
             # 状态字段兜底（兼容旧数据）
             open_status = str(acc.get("open_status") or "").strip()
@@ -1038,11 +1060,24 @@ class AccountsViewSet(ViewSet):
                     manager = get_browser_manager()
                     api = manager.get_api(BrowserType.GEEKEZ)
                     if api.health_check():
-                        # 尝试删除新格式 profile (gpt_{email})
                         profile_name_new = f"gpt_{email}"
-                        api.delete_profile(profile_name_new)
-                        # 尝试删除旧格式 profile ({email})
-                        api.delete_profile(email)
+                        geekez_profile = acc.get("geekez_profile")
+                        delete_targets: list[str] = []
+                        if isinstance(geekez_profile, dict):
+                            saved_profile_id = str(geekez_profile.get("profile_id") or "").strip()
+                            saved_profile_name = str(geekez_profile.get("profile_name") or "").strip()
+                            if saved_profile_id:
+                                delete_targets.append(saved_profile_id)
+                            if saved_profile_name:
+                                delete_targets.append(saved_profile_name)
+                        delete_targets.extend([profile_name_new, email])
+                        seen: set[str] = set()
+                        for target in delete_targets:
+                            t = str(target or "").strip()
+                            if not t or t in seen:
+                                continue
+                            seen.add(t)
+                            api.delete_profile(t)
                 except Exception:
                     pass  # 静默失败，不阻止账号删除
         
@@ -1075,23 +1110,13 @@ class AccountsViewSet(ViewSet):
         if not api.health_check():
             return Response({"detail": "GeekezBrowser 服务不在线"}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
 
-        # 统一使用 gpt_ 前缀作为 profile name（新格式）
-        profile_name_new = f"gpt_{email}"
-
-        # 优先复用已有 profile（避免重复创建环境）
-        # 先尝试新格式 gpt_{email}，再尝试旧格式 {email}
-        created_profile = False
-        profile = api.get_profile_by_name(profile_name_new)
-        if not profile:
-            # 兼容旧格式：直接用邮箱作为 profile name
-            profile = api.get_profile_by_name(email)
-        if not profile:
-            created_profile = True
-            profile = api.create_or_update_profile(
-                name=profile_name_new,
-                proxy=None,
-                metadata={"account": {"email": email}},
-            )
+        profile_name = _generate_random_profile_name(email)
+        created_profile = True
+        profile = api.create_or_update_profile(
+            name=profile_name,
+            proxy=None,
+            metadata={"account": {"email": email, "profile_strategy": "random_new"}},
+        )
 
         launch_info = api.launch_profile(profile.id)
         if not launch_info:
