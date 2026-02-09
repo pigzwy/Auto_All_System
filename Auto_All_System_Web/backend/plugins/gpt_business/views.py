@@ -74,14 +74,6 @@ def _batch_countdown(index: int, concurrency: int) -> int:
     return int(index // concurrency)
 
 
-def _generate_random_profile_name(email: str) -> str:
-    local_part = str(email or "").split("@")[0].strip().lower()
-    normalized = "".join(ch if ch.isalnum() else "_" for ch in local_part).strip("_")
-    prefix = (normalized or "acct")[:24]
-    suffix = "".join(secrets.choice(string.ascii_lowercase + string.digits) for _ in range(8))
-    return f"gpt_{prefix}_{suffix}"
-
-
 def _parse_self_register_card_options(data: Any) -> tuple[str, int | None, str | None]:
     card_mode = str((data or {}).get("card_mode") or "random").strip().lower()
     if card_mode not in {"selected", "random", "manual"}:
@@ -1110,13 +1102,21 @@ class AccountsViewSet(ViewSet):
         if not api.health_check():
             return Response({"detail": "GeekezBrowser 服务不在线"}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
 
-        profile_name = _generate_random_profile_name(email)
-        created_profile = True
-        profile = api.create_or_update_profile(
-            name=profile_name,
-            proxy=None,
-            metadata={"account": {"email": email, "profile_strategy": "random_new"}},
-        )
+        profile_name_new = f"gpt_{email}"
+
+        # 优先复用已有 profile（保留 cookie）
+        # 先尝试新格式 gpt_{email}，再尝试旧格式 {email}
+        created_profile = False
+        profile = api.get_profile_by_name(profile_name_new)
+        if not profile:
+            profile = api.get_profile_by_name(email)
+        if not profile:
+            created_profile = True
+            profile = api.create_or_update_profile(
+                name=profile_name_new,
+                proxy=None,
+                metadata={"account": {"email": email}},
+            )
 
         launch_info = api.launch_profile(profile.id)
         if not launch_info:

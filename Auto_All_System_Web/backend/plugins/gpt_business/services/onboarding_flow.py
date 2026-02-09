@@ -1018,6 +1018,9 @@ def step_inject_promo_checkout(page) -> bool:
     使用 team-1-month-free 优惠码直接调用 API
     """
     log.step("注入优惠码并跳转结算页...")
+
+    workspace_name = f"pigll{random.randint(0, 99999):05d}"
+    log.info(f"本次工作区名称: {workspace_name}")
     
     js_code = """
     (async function (){
@@ -1029,7 +1032,7 @@ def step_inject_promo_checkout(page) -> bool:
             const p = {
                 plan_name: "chatgptteamplan",
                 team_plan_data: {
-                    workspace_name: "Fangmu",
+                    workspace_name: "__WORKSPACE_NAME__",
                     price_interval: "month",
                     seat_quantity: 5
                 },
@@ -1059,6 +1062,8 @@ def step_inject_promo_checkout(page) -> bool:
         }
     })();
     """
+
+    js_code = js_code.replace("__WORKSPACE_NAME__", workspace_name)
     
     try:
         # 确保先加载主页以获取 context
