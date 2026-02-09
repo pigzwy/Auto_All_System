@@ -679,6 +679,17 @@ def self_register_task(self, record_id: str):
 
         card_mode_raw = str(task_record.get("card_mode") or "random").strip().lower()
         card_mode = card_mode_raw if card_mode_raw in {"selected", "random", "manual"} else "random"
+
+        keep_profile_raw = task_record.get("keep_profile_on_fail")
+        if isinstance(keep_profile_raw, bool):
+            keep_profile_on_fail = keep_profile_raw
+        elif isinstance(keep_profile_raw, (int, float)):
+            keep_profile_on_fail = bool(keep_profile_raw)
+        elif isinstance(keep_profile_raw, str):
+            keep_profile_on_fail = keep_profile_raw.strip().lower() in {"1", "true", "yes", "on"}
+        else:
+            keep_profile_on_fail = False
+
         selected_card_raw = task_record.get("selected_card_id")
         selected_card_id: int | None = None
         if selected_card_raw not in (None, ""):
@@ -761,6 +772,8 @@ def self_register_task(self, record_id: str):
             _log(f"browser launched, debug_port={debug_port}")
             
             page = None
+            register_ok = False
+            checkout_ok: bool | None = None
             try:
                 # 用 DrissionPage 连接到 Geekez 浏览器
                 page = connect_to_browser(debug_port)
@@ -800,7 +813,6 @@ def self_register_task(self, record_id: str):
                 _log(f"register_openai_account returned: {register_ok}")
                 
                 # Team 开通逻辑
-                checkout_ok: bool | None = None
                 checkout_err = ""
                 session_data = {}
                 used_card_id: int | None = None
@@ -860,26 +872,40 @@ def self_register_task(self, record_id: str):
                         shot_callback("checkout_error.png")
                         checkout_ok = False
                 
+                profile_kept_open = keep_profile_on_fail and (not register_ok or checkout_ok is False)
                 return {
                     "profile_id": profile.id,
+                    "profile_name": profile.name,
                     "register_ok": register_ok,
                     "checkout_ok": checkout_ok,
                     "checkout_error": checkout_err,
                     "session_data": session_data,
                     "used_card_id": used_card_id,
+                    "profile_kept_open": profile_kept_open,
+                    "keep_profile_on_fail": keep_profile_on_fail,
                 }
             finally:
+                profile_kept_open = keep_profile_on_fail and (not register_ok or checkout_ok is False)
+                if profile_kept_open:
+                    _log(
+                        f"debug keep-profile enabled: skip closing profile {profile.id} (register_ok={register_ok}, checkout_ok={checkout_ok})"
+                    )
+                    continue_close = False
+                else:
+                    continue_close = True
+
                 # 关闭浏览器
-                if page:
+                if page and continue_close:
                     try:
                         page.quit()
                     except Exception:
                         pass
-                try:
-                    api.close_profile(profile.id)
-                    _log(f"closed profile: {profile.id}")
-                except Exception as e:
-                    _log(f"failed to close profile: {e}")
+                if continue_close:
+                    try:
+                        api.close_profile(profile.id)
+                        _log(f"closed profile: {profile.id}")
+                    except Exception as e:
+                        _log(f"failed to close profile: {e}")
 
         flow_result = _run_sync()
         _set_task_progress(record_id, 2, 3, "初始化环境")

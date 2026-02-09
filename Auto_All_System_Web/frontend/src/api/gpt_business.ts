@@ -76,6 +76,7 @@ export type SelfRegisterCardMode = 'selected' | 'random' | 'manual'
 export interface SelfRegisterOptions {
   card_mode?: SelfRegisterCardMode
   selected_card_id?: number
+  keep_profile_on_fail?: boolean
 }
 
 export const gptBusinessApi = {
@@ -195,6 +196,7 @@ export const gptBusinessApi = {
     open_geekez?: boolean
     card_mode?: SelfRegisterCardMode
     selected_card_id?: number
+    keep_profile_on_fail?: boolean
   }): Promise<{ message?: string; results?: any[] }> {
     return request.post('/plugins/gpt-business/accounts/batch/self_register/', data)
   },

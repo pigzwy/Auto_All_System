@@ -117,6 +117,20 @@
           <p v-if="selfRegisterCardMode === 'manual'" class="text-xs text-muted-foreground">
             付款页将不自动填卡，流程会等待你手动输入卡信息。
           </p>
+
+          <div class="rounded-lg border border-border/80 bg-muted/10 p-3">
+            <label class="flex cursor-pointer items-start gap-3">
+              <Checkbox
+                :checked="selfRegisterKeepProfileOnFail"
+                @update:checked="selfRegisterKeepProfileOnFail = Boolean($event)"
+                class="mt-0.5"
+              />
+              <span class="space-y-1">
+                <span class="block text-sm font-medium text-foreground">失败时保留 Geekez 环境（调试）</span>
+                <span class="block text-xs text-muted-foreground">开启后失败不会自动关闭环境，方便直接查看卡在哪一步。</span>
+              </span>
+            </label>
+          </div>
         </div>
 
         <DialogFooter>
@@ -143,6 +157,7 @@ import {
   X
 } from 'lucide-vue-next'
 import { Button } from '@/components/ui/button'
+import { Checkbox } from '@/components/ui/checkbox'
 import {
   Dialog,
   DialogContent,
@@ -187,6 +202,7 @@ const availableCards = ref<Card[]>([])
 const selfRegisterTargetIds = ref<string[]>([])
 const selfRegisterCardMode = ref<SelfRegisterCardMode>('selected')
 const selfRegisterSelectedCardId = ref<number | null>(null)
+const selfRegisterKeepProfileOnFail = ref(true)
 
 const clearSelection = () => {
   selectedMother.value = null
@@ -247,6 +263,7 @@ const openSelfRegisterDialog = async (ids: string[]) => {
   selfRegisterTargetIds.value = [...ids]
   selfRegisterCardMode.value = 'selected'
   selfRegisterSelectedCardId.value = null
+  selfRegisterKeepProfileOnFail.value = true
   selfRegisterDialogOpen.value = true
   await loadAvailableCards()
   if (!availableCards.value.length) {
@@ -274,14 +291,16 @@ const confirmRunSelfRegister = async () => {
       concurrency: 5,
       open_geekez: true,
       card_mode: selfRegisterCardMode.value,
-      selected_card_id: selfRegisterCardMode.value === 'selected' ? selfRegisterSelectedCardId.value || undefined : undefined
+      selected_card_id: selfRegisterCardMode.value === 'selected' ? selfRegisterSelectedCardId.value || undefined : undefined,
+      keep_profile_on_fail: selfRegisterKeepProfileOnFail.value
     })
     const modeText = selfRegisterCardMode.value === 'selected'
       ? '指定卡'
       : selfRegisterCardMode.value === 'random'
         ? '随机卡'
         : '手动输入'
-    ElMessage.success(`已启动 ${ids.length} 个母号的自动开通（${modeText}）`)
+    const keepText = selfRegisterKeepProfileOnFail.value ? '失败保留环境' : '失败自动关闭环境'
+    ElMessage.success(`已启动 ${ids.length} 个母号的自动开通（${modeText}，${keepText}）`)
     selfRegisterDialogOpen.value = false
     refreshAccounts()
   } catch (e: any) {

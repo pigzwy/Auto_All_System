@@ -100,6 +100,17 @@ def _parse_self_register_card_options(data: Any) -> tuple[str, int | None, str |
     return card_mode, selected_card_id, None
 
 
+def _parse_keep_profile_on_fail(data: Any) -> bool:
+    raw = (data or {}).get("keep_profile_on_fail")
+    if isinstance(raw, bool):
+        return raw
+    if isinstance(raw, (int, float)):
+        return bool(raw)
+    if isinstance(raw, str):
+        return raw.strip().lower() in {"1", "true", "yes", "on"}
+    return False
+
+
 def _mask_secret(value: str) -> str:
     value = str(value or "")
     if not value:
@@ -1173,6 +1184,7 @@ class AccountsViewSet(ViewSet):
         card_mode, selected_card_id, card_error = _parse_self_register_card_options(request.data)
         if card_error:
             return Response({"detail": card_error}, status=status.HTTP_400_BAD_REQUEST)
+        keep_profile_on_fail = _parse_keep_profile_on_fail(request.data)
 
         record_id = uuid.uuid4().hex
         now = timezone.now().isoformat()
@@ -1182,6 +1194,7 @@ class AccountsViewSet(ViewSet):
             "mother_id": str(pk),
             "card_mode": card_mode,
             "selected_card_id": selected_card_id,
+            "keep_profile_on_fail": keep_profile_on_fail,
             "status": "pending",
             "progress_current": 0,
             "progress_total": 3,
@@ -1334,6 +1347,7 @@ class AccountsViewSet(ViewSet):
         card_mode, selected_card_id, card_error = _parse_self_register_card_options(request.data)
         if card_error:
             return Response({"detail": card_error}, status=status.HTTP_400_BAD_REQUEST)
+        keep_profile_on_fail = _parse_keep_profile_on_fail(request.data)
 
         concurrency = int(request.data.get("concurrency") or 5)
         # open_geekez 参数已废弃，self_register_task 内部会自动启动浏览器
@@ -1356,6 +1370,7 @@ class AccountsViewSet(ViewSet):
                 "mother_id": str(mother_id),
                 "card_mode": card_mode,
                 "selected_card_id": selected_card_id,
+                "keep_profile_on_fail": keep_profile_on_fail,
                 "status": "pending",
                 "progress_current": 0,
                 "progress_total": 3,
