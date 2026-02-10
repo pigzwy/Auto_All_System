@@ -292,6 +292,11 @@ class GoogleAccountViewSet(viewsets.ModelViewSet):
         if search:
             queryset = queryset.filter(email__icontains=search)
 
+        # 兼容 email 参数（与 search 一致按包含匹配）
+        email = (self.request.query_params.get("email") or "").strip()
+        if email:
+            queryset = queryset.filter(email__icontains=email)
+
         # 过滤分组（使用 group_name 字符串字段）
         group_name = self.request.query_params.get("group_name")
         if group_name is not None:
@@ -305,7 +310,15 @@ class GoogleAccountViewSet(viewsets.ModelViewSet):
         type_tag = self.request.query_params.get(
             "type_tag"
         ) or self.request.query_params.get("type")
+        login_result = (self.request.query_params.get("login_result") or "").strip().lower()
         if type_tag:
+            login_failed_q = (
+                Q(status__in=["locked", "disabled"])
+                | Q(notes__icontains="机器人验证")
+                | Q(notes__icontains="验证码")
+                | Q(notes__icontains="登录失败")
+            )
+
             if type_tag == "ineligible":
                 queryset = queryset.filter(
                     Q(metadata__google_one_status="ineligible") | Q(status="ineligible")
@@ -343,8 +356,8 @@ class GoogleAccountViewSet(viewsets.ModelViewSet):
                     | Q(status="subscribed")
                 )
             # === 主线流程状态筛选 ===
-            elif type_tag == "pending":
-                # 待处理：未登录过，无任何进度
+            elif type_tag in ["pending", "unopened"]:
+                # 未开/待处理：未登录过，无任何进度
                 queryset = queryset.filter(
                     Q(last_login_at__isnull=True)
                     & Q(sheerid_verified=False)
@@ -353,16 +366,45 @@ class GoogleAccountViewSet(viewsets.ModelViewSet):
                     & ~Q(metadata__google_one_status__in=["link_ready", "verified", "subscribed", "ineligible"])
                 )
             elif type_tag == "logged_in":
-                # 已登录：有登录记录但未到检测资格阶段
-                queryset = queryset.filter(
+                # 登录账号（宽口径）：只要“登录过”都算，包含登录失败与后续阶段账号。
+                # 业务约定：不再把 logged_in 视为“中间阶段”，而是“曾登录过”。
+                logged_once_q = (
                     Q(last_login_at__isnull=False)
-                    & Q(sheerid_verified=False)
-                    & Q(card_bound=False)
-                    & ~Q(metadata__google_one_status__in=["link_ready", "verified", "subscribed", "ineligible"])
-                    & ~Q(status__in=["link_ready", "verified", "subscribed", "ineligible"])
+                    | Q(
+                        status__in=[
+                            "logged_in",
+                            "link_ready",
+                            "verified",
+                            "subscribed",
+                            "ineligible",
+                            "locked",
+                            "disabled",
+                        ]
+                    )
+                    | Q(
+                        metadata__google_one_status__in=[
+                            "logged_in",
+                            "opened",
+                            "link_ready",
+                            "verified",
+                            "subscribed",
+                            "ineligible",
+                        ]
+                    )
+                    | (Q(sheerid_link__isnull=False) & ~Q(sheerid_link=""))
+                    | Q(sheerid_verified=True)
+                    | Q(card_bound=True)
+                    | Q(gemini_status="active")
+                    | login_failed_q
                 )
+                if login_result == "success":
+                    queryset = queryset.filter(logged_once_q & ~login_failed_q)
+                elif login_result == "failed":
+                    queryset = queryset.filter(logged_once_q & login_failed_q)
+                else:
+                    queryset = queryset.filter(logged_once_q)
             elif type_tag == "link_ready":
-                # 已检测/链接就绪：有 sheerid_link 或 google_one_status=link_ready，但未验证
+                # 已检测/链接就绪：严格按进度语义，仅保留 link_ready 阶段账号。
                 queryset = queryset.filter(
                     (Q(sheerid_link__isnull=False) & ~Q(sheerid_link=""))
                     | Q(metadata__google_one_status="link_ready")
@@ -394,12 +436,7 @@ class GoogleAccountViewSet(viewsets.ModelViewSet):
                 )
             elif type_tag == "login_failed":
                 # 登录失败：status=locked/disabled 或 notes 包含失败关键词
-                queryset = queryset.filter(
-                    Q(status__in=["locked", "disabled"])
-                    | Q(notes__icontains="机器人验证")
-                    | Q(notes__icontains="验证码")
-                    | Q(notes__icontains="登录失败")
-                )
+                queryset = queryset.filter(login_failed_q)
             elif type_tag == "verify_failed":
                 # 验证失败
                 queryset = queryset.filter(
@@ -1528,11 +1565,47 @@ class StatisticsView(viewsets.ViewSet):
         accounts = GoogleAccount.objects.filter(owner_user=user)
 
         # 状态值在不同模块/迁移版本里可能存在差异，这里做兼容统计。
+        login_failed_q = (
+            Q(status__in=["locked", "disabled"])
+            | Q(notes__icontains="机器人验证")
+            | Q(notes__icontains="验证码")
+            | Q(notes__icontains="登录失败")
+        )
+        logged_in_q = (
+            Q(last_login_at__isnull=False)
+            | Q(
+                status__in=[
+                    "logged_in",
+                    "link_ready",
+                    "verified",
+                    "subscribed",
+                    "ineligible",
+                    "locked",
+                    "disabled",
+                ]
+            )
+            | Q(
+                metadata__google_one_status__in=[
+                    "logged_in",
+                    "opened",
+                    "link_ready",
+                    "verified",
+                    "subscribed",
+                    "ineligible",
+                ]
+            )
+            | (Q(sheerid_link__isnull=False) & ~Q(sheerid_link=""))
+            | Q(sheerid_verified=True)
+            | Q(card_bound=True)
+            | Q(gemini_status="active")
+            | login_failed_q
+        )
+
         stats = {
             "total": accounts.count(),
             # pending: 兼容 pending_check
             "pending": accounts.filter(status__in=["pending", "pending_check"]).count(),
-            "logged_in": accounts.filter(status="logged_in").count(),
+            "logged_in": accounts.filter(logged_in_q).count(),
             "link_ready": accounts.filter(status="link_ready").count(),
             "verified": accounts.filter(status="verified").count(),
             "subscribed": accounts.filter(status="subscribed").count(),
@@ -1756,6 +1829,43 @@ class SecurityViewSet(viewsets.ViewSet):
             or get_browser_manager()._default_type.value
         )
 
+        def _to_int(value, default):
+            try:
+                if value is None or value == "":
+                    return default
+                return int(value)
+            except (TypeError, ValueError):
+                return default
+
+        max_concurrency = max(
+            1, min(_to_int(request.data.get("max_concurrency"), 5), 20)
+        )
+        stagger_seconds = max(
+            0, min(_to_int(request.data.get("stagger_seconds"), 1), 60)
+        )
+        rest_min_minutes = max(
+            0,
+            min(
+                _to_int(
+                    request.data.get("rest_min_minutes"),
+                    _to_int(request.data.get("rest_minutes"), 5),
+                ),
+                180,
+            ),
+        )
+        rest_max_minutes = max(
+            0,
+            min(
+                _to_int(
+                    request.data.get("rest_max_minutes"),
+                    _to_int(request.data.get("rest_minutes"), 10),
+                ),
+                180,
+            ),
+        )
+        if rest_max_minutes < rest_min_minutes:
+            rest_max_minutes = rest_min_minutes
+
         if not account_ids:
             return Response({"error": "请选择账号"}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -1766,6 +1876,10 @@ class SecurityViewSet(viewsets.ViewSet):
             account_ids=account_ids,
             user_id=request.user.id,
             browser_type=browser_type,
+            max_concurrency=max_concurrency,
+            stagger_seconds=stagger_seconds,
+            rest_min_minutes=rest_min_minutes,
+            rest_max_minutes=rest_max_minutes,
         )
 
         # 记录到账号 metadata（用于账号管理页展示最近操作历史）
@@ -1781,6 +1895,10 @@ class SecurityViewSet(viewsets.ViewSet):
                     "celery_task_id": task.id,
                     "created_at": now_iso,
                     "browser_type": browser_type,
+                    "max_concurrency": max_concurrency,
+                    "stagger_seconds": stagger_seconds,
+                    "rest_min_minutes": rest_min_minutes,
+                    "rest_max_minutes": rest_max_minutes,
                 }
             )
             meta["google_zone_actions"] = actions[-50:]
@@ -1940,6 +2058,43 @@ class SecurityViewSet(viewsets.ViewSet):
             or get_browser_manager()._default_type.value
         )
 
+        def _to_int(value, default):
+            try:
+                if value is None or value == "":
+                    return default
+                return int(value)
+            except (TypeError, ValueError):
+                return default
+
+        max_concurrency = max(
+            1, min(_to_int(request.data.get("max_concurrency"), 5), 20)
+        )
+        stagger_seconds = max(
+            0, min(_to_int(request.data.get("stagger_seconds"), 1), 60)
+        )
+        rest_min_minutes = max(
+            0,
+            min(
+                _to_int(
+                    request.data.get("rest_min_minutes"),
+                    _to_int(request.data.get("rest_minutes"), 5),
+                ),
+                180,
+            ),
+        )
+        rest_max_minutes = max(
+            0,
+            min(
+                _to_int(
+                    request.data.get("rest_max_minutes"),
+                    _to_int(request.data.get("rest_minutes"), 10),
+                ),
+                180,
+            ),
+        )
+        if rest_max_minutes < rest_min_minutes:
+            rest_max_minutes = rest_min_minutes
+
         if not account_ids:
             return Response({"error": "请选择账号"}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -1950,6 +2105,10 @@ class SecurityViewSet(viewsets.ViewSet):
             new_recovery_email=new_recovery_email,
             user_id=request.user.id,
             browser_type=browser_type,
+            max_concurrency=max_concurrency,
+            stagger_seconds=stagger_seconds,
+            rest_min_minutes=rest_min_minutes,
+            rest_max_minutes=rest_max_minutes,
         )
 
         now_iso = timezone.now().isoformat()
@@ -1965,6 +2124,10 @@ class SecurityViewSet(viewsets.ViewSet):
                     "created_at": now_iso,
                     "browser_type": browser_type,
                     "new_recovery_email": new_recovery_email,
+                    "max_concurrency": max_concurrency,
+                    "stagger_seconds": stagger_seconds,
+                    "rest_min_minutes": rest_min_minutes,
+                    "rest_max_minutes": rest_max_minutes,
                 }
             )
             meta["google_zone_actions"] = actions[-50:]

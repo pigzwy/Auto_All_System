@@ -4,7 +4,7 @@ Celery异步任务
 """
 
 import logging
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 
 from celery import shared_task, group, chord
 from django.db import transaction
@@ -30,8 +30,8 @@ def process_single_account(
     self,
     task_id: int,
     account_id: int,
-    browser_id: str,
-    ws_endpoint: str,
+    browser_id: Optional[str],
+    ws_endpoint: Optional[str],
     task_type: str,
     config: Dict[str, Any],
 ) -> Dict[str, Any]:
@@ -110,6 +110,38 @@ def process_single_account(
         task_account.status = "processing"
         task_account.started_at = timezone.now()
         task_account.save()
+
+        # 延迟启动：没有上游 ws_endpoint 时，在子任务内按需创建/启动浏览器。
+        # 这样可以避免父任务一次性预热全部账号环境，确保并发配置真正生效。
+        if not ws_endpoint:
+            from apps.integrations.geekez.api import GeekezBrowserAPI, GeekezBrowserManager
+
+            geek_api = GeekezBrowserAPI()
+            if not geek_api.health_check():
+                raise RuntimeError("GeekezBrowser 未运行，请先启动 GeekezBrowser 应用")
+
+            geek_api.ensure_remote_debugging()
+            geek_manager = GeekezBrowserManager(geek_api)
+
+            launch_account_info = {
+                "email": account.email,
+                "password": password,
+                "recovery_email": account.recovery_email or "",
+                "2fa_secret": secret,
+            }
+
+            profile = geek_manager.ensure_profile_for_account(
+                email=account.email,
+                account_info=launch_account_info,
+                proxy=None,
+            )
+
+            launch_info = geek_manager.launch_by_email(account.email)
+            if not launch_info:
+                raise RuntimeError("无法启动浏览器")
+
+            browser_id = profile.id
+            ws_endpoint = launch_info.ws_endpoint or launch_info.cdp_endpoint
 
         # 使用浏览器启动信息连接并执行任务
         async def _process():
@@ -342,7 +374,10 @@ def process_single_account(
                         account_updates: Dict[str, Any] = {}
 
                         def append_note(note: str) -> None:
-                            current = (account.notes or "").strip()
+                            source_notes = account_updates.get("notes")
+                            if source_notes is None:
+                                source_notes = account.notes or ""
+                            current = str(source_notes or "").strip()
                             if note in current:
                                 return
                             updated = f"{current}\n{note}".strip() if current else note
@@ -960,188 +995,233 @@ def _mark_card_used(card: Card, user, success: bool, purpose: str) -> None:
         logger.warning("Failed to update card usage", exc_info=True)
 
 
+def _to_int(value: Any, default: int) -> int:
+    try:
+        if value is None or value == "":
+            return default
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _normalize_batch_schedule(
+    config: Dict[str, Any],
+) -> tuple[int, int, int, int]:
+    max_concurrency = max(
+        1,
+        min(_to_int(config.get("max_concurrency") or config.get("concurrency"), 5), 20),
+    )
+    stagger_seconds = max(
+        0,
+        min(
+            _to_int(
+                config.get("stagger_seconds")
+                or config.get("stagger_delay")
+                or config.get("start_stagger"),
+                1,
+            ),
+            60,
+        ),
+    )
+    rest_min_minutes = max(
+        0,
+        min(
+            _to_int(
+                config.get("rest_min_minutes"),
+                _to_int(config.get("rest_minutes"), 5),
+            ),
+            180,
+        ),
+    )
+    rest_max_minutes = max(
+        0,
+        min(
+            _to_int(
+                config.get("rest_max_minutes"),
+                _to_int(config.get("rest_minutes"), 10),
+            ),
+            180,
+        ),
+    )
+    if rest_max_minutes < rest_min_minutes:
+        rest_max_minutes = rest_min_minutes
+    return max_concurrency, stagger_seconds, rest_min_minutes, rest_max_minutes
+
+
+@shared_task
+def dispatch_task_batch(
+    task_id: int,
+    account_ids: List[int],
+    task_type: str,
+    config: Dict[str, Any],
+    start_index: int = 0,
+) -> Dict[str, Any]:
+    """严格分批派发：上一批完成后才派发下一批。"""
+    import random
+
+    max_concurrency, stagger_seconds, rest_min_minutes, rest_max_minutes = (
+        _normalize_batch_schedule(config)
+    )
+
+    total_accounts = len(account_ids)
+    if total_accounts <= 0 or start_index >= total_accounts:
+        return {
+            "success": True,
+            "task_id": task_id,
+            "dispatched": 0,
+            "next_index": start_index,
+        }
+
+    task = GoogleTask.objects.get(id=task_id)
+    batch_ids = account_ids[start_index : start_index + max_concurrency]
+    subtasks = []
+
+    for local_index, account_id in enumerate(batch_ids):
+        try:
+            # 仅校验账号和 task_account 存在；环境在子任务内按需启动
+            GoogleAccount.objects.get(id=account_id)
+            GoogleTaskAccount.objects.get(task=task, account_id=account_id)
+
+            subtask = (
+                process_single_account.s(
+                    task_id,
+                    account_id,
+                    None,
+                    None,
+                    task_type,
+                    config,
+                )
+                .set(countdown=local_index * stagger_seconds)
+            )
+            subtasks.append(subtask)
+        except GoogleAccount.DoesNotExist:
+            logger.error(f"Account {account_id} not found")
+            continue
+        except Exception as e:
+            logger.error(f"Error preparing account {account_id}: {e}", exc_info=True)
+            try:
+                task_account = GoogleTaskAccount.objects.get(task=task, account_id=account_id)
+                task_account.status = "failed"
+                task_account.error_message = str(e)
+                task_account.completed_at = timezone.now()
+                task_account.save(
+                    update_fields=["status", "error_message", "completed_at"]
+                )
+
+                with transaction.atomic():
+                    locked_task = GoogleTask.objects.select_for_update().get(id=task_id)
+                    locked_task.failed_count += 1
+                    done_count = GoogleTaskAccount.objects.filter(
+                        task_id=task_id,
+                        status__in=["success", "failed", "skipped"],
+                    ).count()
+                    if done_count >= locked_task.total_count:
+                        locked_task.status = (
+                            "completed" if locked_task.success_count > 0 else "failed"
+                        )
+                        locked_task.completed_at = timezone.now()
+                    locked_task.save()
+            except Exception:
+                logger.warning("Failed to mark task_account prepare error", exc_info=True)
+            continue
+
+    next_index = start_index + len(batch_ids)
+    has_more = next_index < total_accounts
+
+    if subtasks:
+        if has_more:
+            rest_seconds = 0
+            if rest_max_minutes > 0:
+                rest_minutes = (
+                    rest_min_minutes
+                    if rest_max_minutes == rest_min_minutes
+                    else random.randint(rest_min_minutes, rest_max_minutes)
+                )
+                rest_seconds = rest_minutes * 60
+
+            callback = dispatch_task_batch.si(
+                task_id,
+                account_ids,
+                task_type,
+                config,
+                next_index,
+            )
+            if rest_seconds > 0:
+                callback = callback.set(countdown=rest_seconds)
+
+            chord(subtasks)(callback)
+        else:
+            group(subtasks).apply_async()
+    elif has_more:
+        # 当前批次全部无效时，继续推进到下一批，避免任务卡住。
+        dispatch_task_batch.apply_async(
+            args=[task_id, account_ids, task_type, config, next_index],
+            countdown=1,
+        )
+
+    return {
+        "success": True,
+        "task_id": task_id,
+        "dispatched": len(subtasks),
+        "next_index": next_index,
+        "has_more": has_more,
+    }
+
+
 @shared_task
 def batch_process_task(
     task_id: int, account_ids: List[int], task_type: str, config: Dict[str, Any]
 ) -> Dict[str, Any]:
-    """
-    批量处理任务 (使用 GeekezBrowser)
-
-    Args:
-        task_id: 任务ID
-        account_ids: 账号ID列表
-        task_type: 任务类型 (one_click, verify, bind_card, get_link, login)
-        config: 任务配置
-
-    Returns:
-        Dict: 批量处理结果
-    """
-    from apps.integrations.geekez.api import GeekezBrowserAPI, GeekezBrowserManager
-    from .utils import EncryptionUtil
+    """批量处理任务（严格分批门控）。"""
+    from apps.integrations.geekez.api import GeekezBrowserAPI
 
     task = GoogleTask.objects.get(id=task_id)
     task.status = "running"
     task.started_at = timezone.now()
-    task.save()
+    task.save(update_fields=["status", "started_at"])
 
-    max_concurrency = int(config.get("max_concurrency") or config.get("concurrency") or 5)
-    if max_concurrency <= 0:
-        max_concurrency = 1
-    # 任务启动错峰：避免同一时刻大量账号同时打开浏览器/请求 Google
-    # stagger_seconds: 每个账号启动间隔（秒），默认 1s；可设为 2
-    stagger_seconds = int(
-        config.get("stagger_seconds")
-        or config.get("stagger_delay")
-        or config.get("start_stagger")
-        or 1
+    max_concurrency, stagger_seconds, rest_min_minutes, rest_max_minutes = (
+        _normalize_batch_schedule(config)
     )
-    if stagger_seconds < 0:
-        stagger_seconds = 0
 
     logger.info(
-        f"Starting batch task {task_id} with {len(account_ids)} accounts, type={task_type}, concurrency={max_concurrency}"
+        f"Starting batch task {task_id} with {len(account_ids)} accounts, "
+        f"type={task_type}, concurrency={max_concurrency}, stagger={stagger_seconds}s, "
+        f"rest={rest_min_minutes}-{rest_max_minutes}m"
     )
 
     try:
         geek_api = GeekezBrowserAPI()
-        geek_manager = GeekezBrowserManager(geek_api)
-
-        # 检查 GeekezBrowser 是否在线
         if not geek_api.health_check():
             raise RuntimeError("GeekezBrowser 未运行，请先启动 GeekezBrowser 应用")
-
-        # 确保启用远程调试
         geek_api.ensure_remote_debugging()
 
-        # 创建子任务列表
-        subtasks = []
-
-        for index, account_id in enumerate(account_ids):
-            try:
-                # 获取账号信息
-                account = GoogleAccount.objects.get(id=account_id)
-                task_account = GoogleTaskAccount.objects.get(
-                    task=task, account_id=account_id
-                )
-
-                # 解密密码
-                try:
-                    password = EncryptionUtil.decrypt(account.password)
-                except Exception as e:
-                    logger.warning(
-                        f"Password decryption failed for {account.email}: {e}, using raw value"
-                    )
-                    password = account.password  # 可能未加密
-
-                # 解密 2FA 密钥
-                try:
-                    two_fa_secret = (
-                        EncryptionUtil.decrypt(account.two_fa_secret)
-                        if getattr(account, "two_fa_secret", "")
-                        else ""
-                    )
-                except Exception as e:
-                    logger.warning(
-                        f"2FA secret decryption failed for {account.email}: {e}, using raw value"
-                    )
-                    two_fa_secret = getattr(account, "two_fa_secret", "") or ""
-
-                # 准备账号信息
-                account_info = {
-                    "email": account.email,
-                    "password": password,
-                    "recovery_email": account.recovery_email or "",
-                    "2fa_secret": two_fa_secret,
-                }
-
-                # 创建/更新 Profile
-                profile = geek_manager.ensure_profile_for_account(
-                    email=account.email,
-                    account_info=account_info,
-                    proxy=None,  # TODO: 从配置或账号获取代理
-                )
-
-                # 启动浏览器
-                launch_info = geek_manager.launch_by_email(account.email)
-                if not launch_info:
-                    logger.error(f"Failed to launch browser for {account.email}")
-                    task_account.status = "failed"
-                    task_account.error_message = "无法启动浏览器"
-                    task_account.save()
-                    continue
-
-                # 优先使用 ws_endpoint（launch_profile 已做 host rewrite），没有则退回 http cdp_endpoint
-                ws_endpoint = launch_info.ws_endpoint or launch_info.cdp_endpoint
-
-                # 更新 task_account 的浏览器信息
-                task_account.browser_id = profile.id
-                task_account.save()
-
-                # 创建子任务
-                delay_seconds = index * stagger_seconds
-                subtask = (
-                    process_single_account.s(
-                        task_id, account_id, profile.id, ws_endpoint, task_type, config
-                    )
-                    .set(countdown=delay_seconds)
-                )
-                subtasks.append(subtask)
-
-            except GoogleAccount.DoesNotExist:
-                logger.error(f"Account {account_id} not found")
-                continue
-            except Exception as e:
-                logger.error(
-                    f"Error preparing account {account_id}: {e}", exc_info=True
-                )
-                try:
-                    task_account = GoogleTaskAccount.objects.get(
-                        task=task, account_id=account_id
-                    )
-                    task_account.status = "failed"
-                    task_account.error_message = str(e)
-                    task_account.save()
-                except Exception:
-                    pass
-                continue
-
-        # 并发执行子任务（使用group）
-        if subtasks:
-            job = group(subtasks)
-            result = job.apply_async()
-            logger.info(f"Started {len(subtasks)} subtasks for task {task_id}")
-        else:
-            # 没有成功启动的子任务
+        if not account_ids:
             task.status = "failed"
             task.completed_at = timezone.now()
             task.error_message = "没有可执行的账号"
-            task.save()
+            task.save(update_fields=["status", "completed_at", "error_message"])
             return {"success": False, "task_id": task_id, "error": "没有可执行的账号"}
 
-        # 注意：不在这里标记完成，由子任务完成后更新
-        # 检查是否所有子任务都立即失败了
-        if len(subtasks) == 0:
-            task.status = "completed"
-            task.completed_at = timezone.now()
-            task.save()
+        total_batches = (len(account_ids) + max_concurrency - 1) // max_concurrency
+        dispatch_task_batch.delay(task_id, account_ids, task_type, config, 0)
 
-        logger.info(f"Batch task {task_id} dispatched")
-
+        logger.info(
+            f"Batch task {task_id} dispatched with strict gating, batches={total_batches}"
+        )
         return {
             "success": True,
             "task_id": task_id,
             "total": len(account_ids),
-            "started": len(subtasks),
+            "started": min(len(account_ids), max_concurrency),
+            "batches": total_batches,
         }
-
     except Exception as e:
         logger.error(f"Batch task {task_id} failed: {e}", exc_info=True)
-
         task.status = "failed"
         task.completed_at = timezone.now()
         task.error_message = str(e)
-        task.save()
-
+        task.save(update_fields=["status", "completed_at", "error_message"])
         return {"success": False, "task_id": task_id, "error": str(e)}
 
 
@@ -1210,38 +1290,98 @@ def update_task_statistics(task_id: int):
 # ==================== 安全设置任务 ====================
 
 
-@shared_task(bind=True, name="google_business.security_change_2fa")
+@shared_task(
+    bind=True,
+    name="google_business.security_change_2fa",
+    soft_time_limit=7 * 60 * 60,
+    time_limit=8 * 60 * 60,
+)
 def security_change_2fa_task(
     self,
     account_ids: list,
     user_id: int,
     browser_type: str | None = None,
+    max_concurrency: int = 5,
+    stagger_seconds: int = 1,
+    rest_min_minutes: int = 5,
+    rest_max_minutes: int = 10,
 ):
     """
     修改 2FA 密钥任务
     """
     import asyncio
+    import random
+    import time
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    from django.db import close_old_connections
 
     from .services import browser_pool
     from .services.security_service import GoogleSecurityService
     from apps.integrations.browser_base import BrowserType
 
-    logger.info(f"Starting 2FA change task for {len(account_ids)} accounts")
+    logger.info(
+        "Starting 2FA change task",
+        extra={
+            "total_accounts": len(account_ids),
+            "max_concurrency": max_concurrency,
+            "stagger_seconds": stagger_seconds,
+            "rest_min_minutes": rest_min_minutes,
+            "rest_max_minutes": rest_max_minutes,
+        },
+    )
+
+    def _to_int(value, default):
+        try:
+            if value is None or value == "":
+                return default
+            return int(value)
+        except (TypeError, ValueError):
+            return default
+
+    max_concurrency = max(1, min(_to_int(max_concurrency, 5), 20))
+    stagger_seconds = max(0, min(_to_int(stagger_seconds, 1), 60))
+    rest_min_minutes = max(0, min(_to_int(rest_min_minutes, 5), 180))
+    rest_max_minutes = max(0, min(_to_int(rest_max_minutes, 10), 180))
+    if rest_max_minutes < rest_min_minutes:
+        rest_max_minutes = rest_min_minutes
 
     bt = BrowserType(browser_type) if browser_type else None
     security_service = GoogleSecurityService(browser_type=bt)
-    results = []
+
+    total = len(account_ids)
+    if total == 0:
+        return {
+            "success": True,
+            "results": [],
+            "total": 0,
+            "succeeded": 0,
+        }
+
+    celery_task_id = str(self.request.id)
+    results_by_index: list[dict | None] = [None] * total
 
     # 防止任务长期卡在 PROGRESS：按账号级别设置硬超时
     per_account_timeout_s = 300
 
-    for i, account_id in enumerate(account_ids):
+    def _process_single_account(
+        global_index: int,
+        account_id: int,
+        start_delay_seconds: int = 0,
+    ) -> dict:
+        close_old_connections()
+        account = None
+        task_logger = None
+
         try:
+            if start_delay_seconds > 0:
+                time.sleep(start_delay_seconds)
+
             account = GoogleAccount.objects.get(id=account_id)
 
             task_logger = TaskLogger(
                 None,
-                celery_task_id=str(self.request.id),
+                celery_task_id=celery_task_id,
                 account_id=account_id,
                 email=account.email,
                 kind="security_change_2fa",
@@ -1279,15 +1419,6 @@ def security_change_2fa_task(
                 if isinstance(geekez_profile, dict):
                     profile_id = geekez_profile.get("profile_id")
 
-            self.update_state(
-                state="PROGRESS",
-                meta={
-                    "current": i + 1,
-                    "total": len(account_ids),
-                    "email": account.email,
-                },
-            )
-
             # 重要：Playwright 对象绑定 event loop，必须在同一个 asyncio.run() 生命周期内
             # 完成 acquire -> login -> action -> release，避免跨 loop 使用导致挂死。
             async def run_all():
@@ -1297,7 +1428,7 @@ def security_change_2fa_task(
                 if profile_id:
                     instance = await browser_pool.acquire_by_profile_id(
                         profile_id=str(profile_id),
-                        task_id=str(self.request.id),
+                        task_id=celery_task_id,
                         browser_type=bt,
                     )
                     if instance:
@@ -1313,7 +1444,7 @@ def security_change_2fa_task(
                 if not instance:
                     instance = await browser_pool.acquire_by_email(
                         email=account.email,
-                        task_id=str(self.request.id),
+                        task_id=celery_task_id,
                         account_info=account_info,
                         browser_type=bt,
                     )
@@ -1381,19 +1512,24 @@ def security_change_2fa_task(
                         task_logger=task_logger,
                     )
                 finally:
+                    release_ok = False
+                    forced_close_ok = False
+                    release_error = ""
+                    release_path = "profile_id" if used_profile_id else "email"
                     try:
                         if used_profile_id:
-                            await asyncio.wait_for(
+                            release_ok = await asyncio.wait_for(
                                 asyncio.shield(
                                     browser_pool.release(
                                         used_profile_id,
                                         close=True,
+                                        browser_type=bt,
                                     )
                                 ),
                                 timeout=30,
                             )
                         else:
-                            await asyncio.wait_for(
+                            release_ok = await asyncio.wait_for(
                                 asyncio.shield(
                                     browser_pool.release_by_email(
                                         account.email,
@@ -1403,10 +1539,60 @@ def security_change_2fa_task(
                                 ),
                                 timeout=30,
                             )
-                    except Exception:
+                    except Exception as exc:
+                        release_error = str(exc)
                         logger.warning(
                             "Failed to release browser instance (2fa)",
                             exc_info=True,
+                        )
+
+                    if not release_ok:
+                        try:
+                            api = browser_pool.browser_manager.get_api(
+                                bt or browser_pool.browser_manager._default_type
+                            )
+                            if used_profile_id:
+                                forced_close_ok = bool(
+                                    api.close_profile(str(used_profile_id))
+                                )
+                            else:
+                                profile = api.get_profile_by_name(account.email)
+                                forced_close_ok = bool(
+                                    profile and api.close_profile(str(profile.id))
+                                )
+
+                            if not forced_close_ok:
+                                logger.warning(
+                                    "Forced close profile failed (2fa)",
+                                    extra={
+                                        "email": account.email,
+                                        "profile_id": used_profile_id,
+                                    },
+                                )
+                        except Exception:
+                            logger.warning(
+                                "Forced close profile raised error (2fa)",
+                                exc_info=True,
+                            )
+
+                    if task_logger:
+                        task_logger.event(
+                            step="browser",
+                            action="release",
+                            level="info" if (release_ok or forced_close_ok) else "warning",
+                            message=(
+                                "browser release completed"
+                                if (release_ok or forced_close_ok)
+                                else "browser release may be incomplete"
+                            ),
+                            url=getattr(instance.page, "url", ""),
+                            result={
+                                "release_ok": release_ok,
+                                "forced_close_ok": forced_close_ok,
+                                "release_path": release_path,
+                                "profile_id": used_profile_id or "",
+                                "release_error": release_error,
+                            },
                         )
 
             async def run_with_timeout():
@@ -1476,35 +1662,96 @@ def security_change_2fa_task(
                     update_fields=["two_fa_secret", "two_fa_enabled", "metadata"]
                 )
 
-            results.append(
-                {
-                    "email": account.email,
-                    "success": ok,
-                    "message": msg,
-                    "new_secret": new_secret if ok else None,
-                    "trace_file": trace_file,
-                }
-            )
+            return {
+                "account_id": account_id,
+                "email": account.email,
+                "success": ok,
+                "message": msg,
+                "new_secret": new_secret if ok else None,
+                "trace_file": trace_file,
+            }
 
         except Exception as e:
             logger.error(
                 f"2FA change failed for account {account_id}: {e}", exc_info=True
             )
-            results.append(
-                {
-                    "account_id": account_id,
-                    "success": False,
-                    "message": str(e),
-                }
-            )
+            return {
+                "account_id": account_id,
+                "success": False,
+                "message": str(e),
+            }
         finally:
-            # release 已在 run_all() 内完成
-            pass
+            close_old_connections()
+
+    completed = 0
+    for batch_start in range(0, total, max_concurrency):
+        batch_account_ids = account_ids[batch_start : batch_start + max_concurrency]
+
+        with ThreadPoolExecutor(max_workers=max_concurrency) as executor:
+            future_to_index = {}
+            for local_index, account_id in enumerate(batch_account_ids):
+                global_index = batch_start + local_index
+                start_delay_seconds = local_index * stagger_seconds
+                future = executor.submit(
+                    _process_single_account,
+                    global_index,
+                    account_id,
+                    start_delay_seconds,
+                )
+                future_to_index[future] = global_index
+
+            for future in as_completed(future_to_index):
+                global_index = future_to_index[future]
+                account_id = account_ids[global_index]
+
+                try:
+                    result = future.result()
+                except Exception as e:
+                    logger.error(
+                        f"2FA batch future failed for account {account_id}: {e}",
+                        exc_info=True,
+                    )
+                    result = {
+                        "account_id": account_id,
+                        "success": False,
+                        "message": str(e),
+                    }
+
+                results_by_index[global_index] = result
+                completed += 1
+                self.update_state(
+                    state="PROGRESS",
+                    meta={
+                        "current": completed,
+                        "total": total,
+                        "email": result.get("email", ""),
+                    },
+                )
+
+        has_next_batch = batch_start + max_concurrency < total
+        if has_next_batch and rest_max_minutes > 0:
+            rest_minutes = random.randint(rest_min_minutes, rest_max_minutes)
+            if rest_minutes > 0:
+                logger.info(
+                    f"2FA batch finished. Resting {rest_minutes} minute(s) before next batch."
+                )
+                time.sleep(rest_minutes * 60)
+
+    results = []
+    for idx, account_id in enumerate(account_ids):
+        item = results_by_index[idx]
+        if item is None:
+            item = {
+                "account_id": account_id,
+                "success": False,
+                "message": "任务未执行",
+            }
+        results.append(item)
 
     return {
         "success": True,
         "results": results,
-        "total": len(account_ids),
+        "total": total,
         "succeeded": sum(1 for r in results if r.get("success")),
     }
 
@@ -1955,17 +2202,52 @@ def security_one_click_task(
     new_recovery_email: str | None = None,
     user_id: int | None = None,
     browser_type: str | None = None,
+    max_concurrency: int = 5,
+    stagger_seconds: int = 1,
+    rest_min_minutes: int = 5,
+    rest_max_minutes: int = 10,
 ):
     """
     一键安全设置任务
     """
     import asyncio
+    import random
+    import time
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    from django.db import close_old_connections
 
     from .services import browser_pool
     from .services.security_service import GoogleSecurityService
     from apps.integrations.browser_base import BrowserType
 
-    logger.info(f"Starting one-click security task for {len(account_ids)} accounts")
+    account_ids = list(account_ids or [])
+    if not account_ids:
+        return {"success": True, "results": [], "total": 0, "succeeded": 0}
+
+    def _to_int(value, default):
+        try:
+            if value is None or value == "":
+                return default
+            return int(value)
+        except (TypeError, ValueError):
+            return default
+
+    max_concurrency = max(1, min(_to_int(max_concurrency, 5), 20))
+    stagger_seconds = max(0, min(_to_int(stagger_seconds, 1), 120))
+    rest_min_minutes = max(0, min(_to_int(rest_min_minutes, 5), 180))
+    rest_max_minutes = max(0, min(_to_int(rest_max_minutes, 10), 180))
+    if rest_max_minutes < rest_min_minutes:
+        rest_max_minutes = rest_min_minutes
+
+    logger.info(
+        "Starting one-click security task for %s accounts (concurrency=%s, stagger=%ss, rest=%s-%s min)",
+        len(account_ids),
+        max_concurrency,
+        stagger_seconds,
+        rest_min_minutes,
+        rest_max_minutes,
+    )
 
     bt = BrowserType(browser_type) if browser_type else None
     security_service = GoogleSecurityService(browser_type=bt)
@@ -1973,10 +2255,36 @@ def security_one_click_task(
 
     # 一键会做多步动作，给更长超时但仍防止无限等待
     per_account_timeout_s = 420
+    total_accounts = len(account_ids)
 
-    for i, account_id in enumerate(account_ids):
+    def _process_one_account(account_id: int, start_delay_seconds: int = 0):
+        close_old_connections()
+        task_logger = None
         try:
+            if start_delay_seconds > 0:
+                time.sleep(start_delay_seconds)
+
             account = GoogleAccount.objects.get(id=account_id)
+
+            task_logger = TaskLogger(
+                None,
+                celery_task_id=str(self.request.id),
+                account_id=account_id,
+                email=account.email,
+                kind="security_one_click",
+            )
+            task_logger.event(
+                step="task",
+                action="start",
+                message="start security_one_click",
+                result={
+                    "start_delay_seconds": start_delay_seconds,
+                    "max_concurrency": max_concurrency,
+                    "stagger_seconds": stagger_seconds,
+                    "rest_min_minutes": rest_min_minutes,
+                    "rest_max_minutes": rest_max_minutes,
+                },
+            )
 
             try:
                 password = EncryptionUtil.decrypt(account.password)
@@ -1997,15 +2305,6 @@ def security_one_click_task(
                 "password": password,
                 "totp_secret": totp_secret,
             }
-
-            self.update_state(
-                state="PROGRESS",
-                meta={
-                    "current": i + 1,
-                    "total": len(account_ids),
-                    "email": account.email,
-                },
-            )
 
             # 重要：Playwright 对象绑定 event loop，必须在同一个 asyncio.run() 生命周期内
             # 完成 acquire -> login -> action -> release，避免跨 loop 使用导致挂死。
@@ -2030,9 +2329,7 @@ def security_one_click_task(
 
                     login_service = GoogleLoginService()
                     try:
-                        logged_in = await login_service.check_login_status(
-                            instance.page
-                        )
+                        logged_in = await login_service.check_login_status(instance.page)
                     except Exception:
                         logged_in = False
 
@@ -2054,9 +2351,7 @@ def security_one_click_task(
                             task_logger,
                         )
                         if not login_res.get("success"):
-                            err = (
-                                login_res.get("error") or login_res.get("message") or ""
-                            )
+                            err = login_res.get("error") or login_res.get("message") or ""
                             task_logger.event(
                                 step="login",
                                 action="result",
@@ -2126,9 +2421,7 @@ def security_one_click_task(
             if ok and data:
                 update_fields = []
                 if data.get("new_2fa_secret"):
-                    account.two_fa_secret = EncryptionUtil.encrypt(
-                        data["new_2fa_secret"]
-                    )
+                    account.two_fa_secret = EncryptionUtil.encrypt(data["new_2fa_secret"])
                     account.two_fa_enabled = True
                     update_fields.extend(["two_fa_secret", "two_fa_enabled"])
                 if data.get("new_recovery_email"):
@@ -2137,31 +2430,102 @@ def security_one_click_task(
                 if update_fields:
                     account.save(update_fields=list(set(update_fields)))
 
-            results.append(
-                {
-                    "email": account.email,
-                    "success": ok,
-                    "message": msg,
-                    "data": data if ok else None,
-                    "trace_file": trace_file,
-                }
-            )
+            return {
+                "email": account.email,
+                "success": ok,
+                "message": msg,
+                "data": data if ok else None,
+                "trace_file": trace_file,
+            }
 
         except Exception as e:
             logger.error(
                 f"One-click security failed for account {account_id}: {e}",
                 exc_info=True,
             )
-            results.append(
-                {
-                    "account_id": account_id,
-                    "success": False,
-                    "message": str(e),
-                }
-            )
+            if task_logger is not None:
+                task_logger.event(
+                    step="task",
+                    action="exception",
+                    level="error",
+                    message="security_one_click exception",
+                    result={"error": str(e)},
+                )
+            return {
+                "account_id": account_id,
+                "success": False,
+                "message": str(e),
+            }
         finally:
-            # release 已在 run_all() 内完成
-            pass
+            close_old_connections()
+
+    completed = 0
+    total_batches = (total_accounts + max_concurrency - 1) // max_concurrency
+
+    for batch_index, batch_start in enumerate(
+        range(0, total_accounts, max_concurrency), start=1
+    ):
+        batch_ids = account_ids[batch_start : batch_start + max_concurrency]
+        batch_result_map = {}
+
+        with ThreadPoolExecutor(max_workers=len(batch_ids)) as executor:
+            futures = {
+                executor.submit(
+                    _process_one_account,
+                    account_id,
+                    local_index * stagger_seconds,
+                ): local_index
+                for local_index, account_id in enumerate(batch_ids)
+            }
+
+            for future in as_completed(futures):
+                local_index = futures[future]
+                account_id = batch_ids[local_index]
+                try:
+                    one_result = future.result()
+                except Exception as e:
+                    logger.error(
+                        "Unhandled one-click worker exception for account %s: %s",
+                        account_id,
+                        e,
+                        exc_info=True,
+                    )
+                    one_result = {
+                        "account_id": account_id,
+                        "success": False,
+                        "message": str(e),
+                    }
+
+                batch_result_map[local_index] = one_result
+                completed += 1
+                self.update_state(
+                    state="PROGRESS",
+                    meta={
+                        "current": completed,
+                        "total": total_accounts,
+                        "email": one_result.get("email"),
+                        "batch": batch_index,
+                        "batches": total_batches,
+                    },
+                )
+
+        for local_index in range(len(batch_ids)):
+            if local_index in batch_result_map:
+                results.append(batch_result_map[local_index])
+
+        if batch_index < total_batches and rest_max_minutes > 0:
+            rest_minutes = (
+                rest_min_minutes
+                if rest_max_minutes == rest_min_minutes
+                else random.randint(rest_min_minutes, rest_max_minutes)
+            )
+            logger.info(
+                "One-click security batch %s/%s done, resting %s minutes before next batch",
+                batch_index,
+                total_batches,
+                rest_minutes,
+            )
+            time.sleep(rest_minutes * 60)
 
     return {
         "success": True,

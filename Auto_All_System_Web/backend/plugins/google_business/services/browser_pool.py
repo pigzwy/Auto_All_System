@@ -219,7 +219,12 @@ class BrowserPool:
                 )
                 return None
 
-    async def release(self, browser_id: str, close: bool = False) -> bool:
+    async def release(
+        self,
+        browser_id: str,
+        close: bool = False,
+        browser_type: Optional[BrowserType] = None,
+    ) -> bool:
         """
         释放浏览器实例
 
@@ -233,6 +238,28 @@ class BrowserPool:
         async with self._lock:
             try:
                 if browser_id not in self.pool:
+                    if close:
+                        # 即使实例不在池中，也尝试关闭外部 profile，避免环境残留。
+                        try:
+                            bt = browser_type or self.browser_manager._default_type
+                            api = self.browser_manager.get_api(bt)
+                            closed = bool(api.close_profile(str(browser_id)))
+                            if closed:
+                                self.logger.info(
+                                    f"Browser {browser_id} not in pool, but profile closed directly"
+                                )
+                            else:
+                                self.logger.warning(
+                                    f"Browser {browser_id} not in pool and direct close_profile failed"
+                                )
+                            return closed
+                        except Exception as e:
+                            self.logger.warning(
+                                f"Browser {browser_id} not in pool and direct close_profile raised error: {e}",
+                                exc_info=True,
+                            )
+                            return False
+
                     self.logger.warning(f"Browser {browser_id} not in pool")
                     return False
 
@@ -247,7 +274,11 @@ class BrowserPool:
                     # 释放 Playwright 连接后，额外关闭外部浏览器环境（BitBrowser/Geekez Profile）
                     # 否则会出现“任务结束但环境仍在运行”的现象。
                     try:
-                        api = self.browser_manager.get_api(instance.browser_type)
+                        api = self.browser_manager.get_api(
+                            instance.browser_type
+                            if instance.browser_type
+                            else (browser_type or self.browser_manager._default_type)
+                        )
                         profile_closed = bool(api.close_profile(str(browser_id)))
                         if not profile_closed:
                             self.logger.warning(
@@ -499,7 +530,7 @@ class BrowserPool:
                 return False
 
             # 释放 BrowserInstance
-            result = await self.release(profile.id, close=close)
+            result = await self.release(profile.id, close=close, browser_type=bt)
 
             # 当实例不在池中时，release() 会返回 False；这里做兜底关闭。
             if close and not result:

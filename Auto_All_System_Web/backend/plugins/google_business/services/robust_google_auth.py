@@ -356,6 +356,69 @@ async def robust_google_login(
 
         # ========== 5. 循环处理各种验证步骤 ==========
         max_checks = 10
+
+        async def _click_first_visible(selectors: list[str], timeout_ms: int = 600) -> bool:
+            for selector in selectors:
+                try:
+                    locator = page.locator(selector).first
+                    if await locator.count() > 0 and await locator.is_visible(timeout=timeout_ms):
+                        await locator.click(timeout=2500)
+                        return True
+                except Exception:
+                    continue
+            return False
+
+        async def _handle_challenge_method_selection() -> bool:
+            """处理 challenge 认证方式选择页（先选方式，再进入输入框）。"""
+            current_url = (page.url or "").lower()
+            if "signin/challenge" not in current_url:
+                return False
+
+            # 已经进入具体输入步骤时不重复选择方式
+            direct_inputs = page.locator(
+                'input[name="totpPin"], '
+                'input[id="totpPin"], '
+                'input[id="knowledge-preregistered-email-response"], '
+                'input[name="knowledgePreregisteredEmailResponse"], '
+                'input[type="password"]'
+            )
+            try:
+                if await direct_inputs.count() > 0 and await direct_inputs.first.is_visible(timeout=300):
+                    return False
+            except Exception:
+                pass
+
+            # 优先走 2FA（有 secret 时）
+            if secret and pyotp:
+                auth_selectors = [
+                    'div[role="button"]:has-text("Google Authenticator")',
+                    'div[role="link"]:has-text("Google Authenticator")',
+                    'button:has-text("Google Authenticator")',
+                    'div.l5PPKe:has-text("Google Authenticator")',
+                    'text=/Get a verification code from.*Google Authenticator/i',
+                    'text=/Google Authenticator app/i',
+                ]
+                if await _click_first_visible(auth_selectors):
+                    log("检测到认证方式选择页，已选择 Google Authenticator")
+                    await asyncio.sleep(2)
+                    return True
+
+            # 无 2FA 或 2FA 选择不可用时，尝试辅助邮箱方式
+            if backup_email:
+                recovery_selectors = [
+                    'div[role="button"]:has-text("Confirm your recovery email")',
+                    'div[role="link"]:has-text("Confirm your recovery email")',
+                    'button:has-text("Confirm your recovery email")',
+                    'text=/Confirm your recovery email/i',
+                    'text=/Enter recovery email/i',
+                ]
+                if await _click_first_visible(recovery_selectors):
+                    log("检测到认证方式选择页，已选择辅助邮箱验证")
+                    await asyncio.sleep(2)
+                    return True
+
+            return False
+
         for i in range(max_checks):
             log(f"检查验证步骤 ({i + 1}/{max_checks})...")
 
@@ -385,6 +448,10 @@ async def robust_google_login(
                     return False, "检测到机器人验证"
                 log("⚠️ 检测到验证码，等待人工处理...")
                 await asyncio.sleep(5)
+                continue
+
+            # C2. challenge 方式选择页（先选方式，再进入 TOTP/辅助邮箱输入）
+            if await _handle_challenge_method_selection():
                 continue
 
             # D. 检测 2FA (TOTP)

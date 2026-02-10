@@ -103,45 +103,84 @@ class GoogleAccountSerializer(serializers.ModelSerializer):
         return meta.get("google_one_status")
 
     def get_type_tag(self, obj: GoogleAccount):
-        """派生账号类型（用于列表标签/筛选）。
-
-        规则（优先级从高到低）：
-        - ineligible: Google One 状态为 ineligible，或历史 status 为 ineligible
-        - unbound_card: 已验证 (sheerid_verified 或 google_one_status=verified) 但未绑卡
-        - success: 已订阅 (gemini_status=active 或 google_one_status=subscribed)
-        - other: 其他
-        """
-
+        """派生账号状态标签（与列表筛选 type_tag 口径尽量一致）。"""
         meta = getattr(obj, "metadata", None) or {}
         google_one_status = meta.get("google_one_status")
         status = getattr(obj, "status", "")
+        notes = getattr(obj, "notes", "") or ""
+        last_login_at = getattr(obj, "last_login_at", None)
+        sheerid_link = (getattr(obj, "sheerid_link", "") or "").strip()
+        sheerid_verified = bool(getattr(obj, "sheerid_verified", False))
+        card_bound = bool(getattr(obj, "card_bound", False))
+        gemini_status = getattr(obj, "gemini_status", "")
+
+        login_failed = (
+            status in ["locked", "disabled"]
+            or "机器人验证" in notes
+            or "验证码" in notes
+            or "登录失败" in notes
+        )
+        verify_failed = "学生验证失败" in notes
+        bindcard_failed = (
+            "订阅失败" in notes or "绑卡失败" in notes or "绑卡过程出错" in notes
+        )
+
+        link_ready_signal = bool(sheerid_link) or google_one_status == "link_ready" or status == "link_ready"
+        verified_signal = sheerid_verified or google_one_status == "verified" or status == "verified"
+        subscribed_signal = (
+            gemini_status == "active"
+            or google_one_status == "subscribed"
+            or status == "subscribed"
+        )
+        logged_in_signal = (
+            bool(last_login_at)
+            or status == "logged_in"
+            or google_one_status in ["logged_in", "opened"]
+        )
 
         if google_one_status == "ineligible" or status == "ineligible":
             return "ineligible"
 
-        verified_like = (
-            bool(getattr(obj, "sheerid_verified", False))
-            or google_one_status == "verified"
-        )
-        if verified_like and not bool(getattr(obj, "card_bound", False)):
-            return "unbound_card"
+        if login_failed:
+            return "login_failed"
 
-        if (
-            getattr(obj, "gemini_status", "") == "active"
-            or google_one_status == "subscribed"
-        ):
-            return "success"
+        if bindcard_failed:
+            return "bindcard_failed"
 
-        return "other"
+        if verify_failed:
+            return "verify_failed"
+
+        if subscribed_signal:
+            return "subscribed"
+
+        if card_bound and not subscribed_signal:
+            return "card_bound"
+
+        if verified_signal and not card_bound:
+            return "verified"
+
+        if link_ready_signal and not verified_signal and not card_bound:
+            return "link_ready"
+
+        if logged_in_signal and not link_ready_signal and not verified_signal and not card_bound:
+            return "logged_in"
+
+        return "unopened"
 
     def get_type_display(self, obj: GoogleAccount):
         mapping = {
             "ineligible": "无资格",
-            "unbound_card": "未绑卡",
-            "success": "成功",
-            "other": "其他",
+            "login_failed": "登录失败",
+            "verify_failed": "验证失败",
+            "bindcard_failed": "绑卡失败",
+            "subscribed": "完成处理",
+            "card_bound": "订阅服务",
+            "verified": "学生验证",
+            "link_ready": "检查学生资格",
+            "logged_in": "登录账号",
+            "unopened": "未开",
         }
-        return mapping.get(self.get_type_tag(obj), "其他")
+        return mapping.get(self.get_type_tag(obj), "未开")
 
     def get_geekez_profile_exists(self, obj: GoogleAccount):
         """Geekez 环境是否存在（Geekez profiles.json 中是否有同名 profile）。

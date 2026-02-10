@@ -52,6 +52,13 @@
     <Card class="bg-card text-card-foreground">
       <CardContent class="p-4">
         <div class="flex flex-wrap items-center gap-3">
+          <Input
+            :model-value="filterEmail"
+            placeholder="邮箱模糊搜索"
+            class="h-9 w-56"
+            @update:modelValue="(v) => onFilterEmailChange(v)"
+          />
+
           <Select :model-value="filterType" @update:modelValue="(v) => onFilterTypeChange(v)">
             <SelectTrigger class="h-9 w-36">
               <SelectValue placeholder="状态筛选" />
@@ -64,71 +71,59 @@
                 </span>
               </SelectItem>
 
-              <!-- 主线流程状态 -->
+              <!-- 主线流程状态（与列表步骤一致） -->
               <div class="px-2 py-1.5 text-xs font-medium text-muted-foreground">流程状态</div>
-              <SelectItem value="pending">
+              <SelectItem value="unopened">
                 <span class="flex items-center gap-2">
                   <span class="h-2 w-2 rounded-full bg-slate-300" />
-                  待处理
+                  未开
                 </span>
               </SelectItem>
               <SelectItem value="logged_in">
                 <span class="flex items-center gap-2">
                   <span class="h-2 w-2 rounded-full bg-blue-400" />
-                  已登录
+                  登录账号
                 </span>
               </SelectItem>
               <SelectItem value="link_ready">
                 <span class="flex items-center gap-2">
                   <span class="h-2 w-2 rounded-full bg-cyan-500" />
-                  已检测
+                  检查学生资格
                 </span>
               </SelectItem>
               <SelectItem value="verified">
                 <span class="flex items-center gap-2">
                   <span class="h-2 w-2 rounded-full bg-violet-500" />
-                  已验证
+                  学生验证
                 </span>
               </SelectItem>
               <SelectItem value="card_bound">
                 <span class="flex items-center gap-2">
                   <span class="h-2 w-2 rounded-full bg-amber-500" />
-                  已绑卡
+                  订阅服务
                 </span>
               </SelectItem>
               <SelectItem value="subscribed">
                 <span class="flex items-center gap-2">
                   <span class="h-2 w-2 rounded-full bg-emerald-500" />
-                  已完成
+                  完成处理
                 </span>
               </SelectItem>
+            </SelectContent>
+          </Select>
 
-              <!-- 失败状态 -->
-              <div class="px-2 py-1.5 text-xs font-medium text-muted-foreground">异常状态</div>
-              <SelectItem value="ineligible">
-                <span class="flex items-center gap-2">
-                  <span class="h-2 w-2 rounded-full bg-rose-500" />
-                  无资格
-                </span>
-              </SelectItem>
-              <SelectItem value="login_failed">
-                <span class="flex items-center gap-2">
-                  <span class="h-2 w-2 rounded-full bg-red-400" />
-                  登录失败
-                </span>
-              </SelectItem>
-              <SelectItem value="verify_failed">
-                <span class="flex items-center gap-2">
-                  <span class="h-2 w-2 rounded-full bg-orange-500" />
-                  验证失败
-                </span>
-              </SelectItem>
-              <SelectItem value="bindcard_failed">
-                <span class="flex items-center gap-2">
-                  <span class="h-2 w-2 rounded-full bg-pink-500" />
-                  绑卡失败
-                </span>
-              </SelectItem>
+          <Select
+            v-if="filterType === 'logged_in'"
+            :model-value="filterLoginResult"
+            @update:modelValue="(v) => onFilterLoginResultChange(v)"
+          >
+            <SelectTrigger class="h-9 w-32">
+              <SelectValue placeholder="登录结果" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">全部结果</SelectItem>
+              <SelectItem value="success">登录成功</SelectItem>
+              <SelectItem value="failed">登录失败</SelectItem>
             </SelectContent>
           </Select>
 
@@ -1025,11 +1020,118 @@
             <label class="text-sm font-medium">增项：修改辅助邮箱</label>
             <Input v-model="oneClickForm.security_new_recovery_email" placeholder="可选，不填则不修改" />
           </div>
+
+          <Alert>
+            <AlertTitle>调度模型</AlertTitle>
+            <AlertDescription>默认：并发 5，批内错峰 1 秒，批间随机休息 5-10 分钟</AlertDescription>
+          </Alert>
+
+          <div class="grid gap-2">
+            <label class="text-sm font-medium">调度模型</label>
+            <Select
+              :model-value="oneClickForm.preset"
+              @update:modelValue="(v) => onOneClickPresetChange(v)"
+            >
+              <SelectTrigger class="w-full">
+                <SelectValue placeholder="选择模型" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="recommended">推荐（稳定）</SelectItem>
+                <SelectItem value="fast">快速（更高并发）</SelectItem>
+                <SelectItem value="safe">稳健（更长休息）</SelectItem>
+                <SelectItem value="custom">自定义</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div class="grid grid-cols-2 gap-3">
+            <div class="grid gap-2">
+              <label class="text-sm font-medium">并发数量</label>
+              <Input v-model.number="oneClickForm.max_concurrency" type="number" min="1" max="20" />
+            </div>
+            <div class="grid gap-2">
+              <label class="text-sm font-medium">批内错峰(秒)</label>
+              <Input v-model.number="oneClickForm.stagger_seconds" type="number" min="0" max="60" />
+            </div>
+          </div>
+
+          <div class="grid grid-cols-2 gap-3">
+            <div class="grid gap-2">
+              <label class="text-sm font-medium">每轮最短休息(分钟)</label>
+              <Input v-model.number="oneClickForm.rest_min_minutes" type="number" min="0" max="180" />
+            </div>
+            <div class="grid gap-2">
+              <label class="text-sm font-medium">每轮最长休息(分钟)</label>
+              <Input v-model.number="oneClickForm.rest_max_minutes" type="number" min="0" max="180" />
+            </div>
+          </div>
         </div>
 
         <DialogFooter class="gap-2">
           <Button variant="outline" @click="showOneClickDialog = false">取消</Button>
           <Button @click="submitOneClickTask">开始执行</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+
+    <!-- 安全一键更新配置（security/one_click_update） -->
+    <Dialog v-model:open="showSecurityOneClickDialog">
+      <DialogContent class="sm:max-w-[560px]">
+        <DialogHeader>
+          <DialogTitle>一键安全更新</DialogTitle>
+          <DialogDescription>批次并发执行：同批账号错峰启动，批次间按区间随机休息</DialogDescription>
+        </DialogHeader>
+
+        <Alert class="mb-4">
+          <AlertTitle>推荐模型</AlertTitle>
+          <AlertDescription>并发 5，批内错峰 1 秒，批间随机休息 5-10 分钟</AlertDescription>
+        </Alert>
+
+        <div class="grid gap-4 py-2">
+          <div class="grid gap-2">
+            <label class="text-sm font-medium">调度模型</label>
+            <Select
+              :model-value="securityOneClickForm.preset"
+              @update:modelValue="(v) => onSecurityOneClickPresetChange(v)"
+            >
+              <SelectTrigger class="w-full">
+                <SelectValue placeholder="选择模型" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="recommended">推荐（稳定）</SelectItem>
+                <SelectItem value="fast">快速（更高并发）</SelectItem>
+                <SelectItem value="safe">稳健（更长休息）</SelectItem>
+                <SelectItem value="custom">自定义</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div class="grid grid-cols-2 gap-3">
+            <div class="grid gap-2">
+              <label class="text-sm font-medium">并发数量</label>
+              <Input v-model.number="securityOneClickForm.max_concurrency" type="number" min="1" max="20" />
+            </div>
+            <div class="grid gap-2">
+              <label class="text-sm font-medium">批内错峰(秒)</label>
+              <Input v-model.number="securityOneClickForm.stagger_seconds" type="number" min="0" max="60" />
+            </div>
+          </div>
+
+          <div class="grid grid-cols-2 gap-3">
+            <div class="grid gap-2">
+              <label class="text-sm font-medium">每轮最短休息(分钟)</label>
+              <Input v-model.number="securityOneClickForm.rest_min_minutes" type="number" min="0" max="180" />
+            </div>
+            <div class="grid gap-2">
+              <label class="text-sm font-medium">每轮最长休息(分钟)</label>
+              <Input v-model.number="securityOneClickForm.rest_max_minutes" type="number" min="0" max="180" />
+            </div>
+          </div>
+        </div>
+
+        <DialogFooter class="gap-2">
+          <Button variant="outline" @click="showSecurityOneClickDialog = false">取消</Button>
+          <Button @click="submitSecurityOneClickUpdate">开始执行</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
@@ -1267,9 +1369,12 @@ const showDetailPassword = ref(false)
 const selectedAccount = ref<GoogleAccount | null>(null)
 const importText = ref('')
 const filterType = ref('all')
+const filterLoginResult = ref('all')
 const filterGroup = ref('all')
+const filterEmail = ref('')
 const groupList = ref<Array<{ id: string; name: string; account_count: number }>>([])
 const selectedAccounts = ref<GoogleAccount[]>([])
+let filterEmailDebounceTimer: number | null = null
 
 const totalPages = computed(() => {
   const t = Number(total.value) || 0
@@ -1538,6 +1643,7 @@ const showBindCardDialog = ref(false)
 const showRecoveryEmailDialog = ref(false)
 const showVerifySubDialog = ref(false)
 const showOneClickDialog = ref(false)
+const showSecurityOneClickDialog = ref(false)
 const show2faDialog = ref(false)
 const current2faAccount = ref<GoogleAccount | null>(null)
 
@@ -1762,6 +1868,10 @@ watch(showLogDialog, (v) => {
 })
 
 onBeforeUnmount(() => {
+  if (filterEmailDebounceTimer !== null) {
+    window.clearTimeout(filterEmailDebounceTimer)
+    filterEmailDebounceTimer = null
+  }
   stopTracePolling()
   stopLogPolling()
   stopAllTaskStatusPolling()
@@ -1779,11 +1889,183 @@ const bindCardForm = reactive({
   card_strategy: 'sequential'
 })
 
-const oneClickForm = reactive({
+type OneClickPreset = 'recommended' | 'fast' | 'safe' | 'custom'
+
+const oneClickPresetValues: Record<Exclude<OneClickPreset, 'custom'>, {
+  max_concurrency: number
+  stagger_seconds: number
+  rest_min_minutes: number
+  rest_max_minutes: number
+}> = {
+  recommended: {
+    max_concurrency: 5,
+    stagger_seconds: 1,
+    rest_min_minutes: 5,
+    rest_max_minutes: 10,
+  },
+  fast: {
+    max_concurrency: 8,
+    stagger_seconds: 1,
+    rest_min_minutes: 2,
+    rest_max_minutes: 5,
+  },
+  safe: {
+    max_concurrency: 3,
+    stagger_seconds: 2,
+    rest_min_minutes: 8,
+    rest_max_minutes: 15,
+  },
+}
+
+const oneClickForm = reactive<{
+  force_rerun: boolean
+  security_change_2fa: boolean
+  security_new_recovery_email: string
+  preset: OneClickPreset
+  max_concurrency: number
+  stagger_seconds: number
+  rest_min_minutes: number
+  rest_max_minutes: number
+}>({
   force_rerun: false,
   security_change_2fa: false,
-  security_new_recovery_email: ''
+  security_new_recovery_email: '',
+  preset: 'recommended',
+  max_concurrency: 5,
+  stagger_seconds: 1,
+  rest_min_minutes: 5,
+  rest_max_minutes: 10,
 })
+
+const applyOneClickPreset = (preset: Exclude<OneClickPreset, 'custom'>) => {
+  const picked = oneClickPresetValues[preset]
+  oneClickForm.max_concurrency = picked.max_concurrency
+  oneClickForm.stagger_seconds = picked.stagger_seconds
+  oneClickForm.rest_min_minutes = picked.rest_min_minutes
+  oneClickForm.rest_max_minutes = picked.rest_max_minutes
+}
+
+const onOneClickPresetChange = (v: unknown) => {
+  const value = String(v ?? '').trim().toLowerCase()
+  const preset: OneClickPreset =
+    value === 'fast' || value === 'safe' || value === 'custom' ? (value as OneClickPreset) : 'recommended'
+  oneClickForm.preset = preset
+  if (preset !== 'custom') {
+    applyOneClickPreset(preset)
+  }
+}
+
+const normalizeOneClickConfig = () => {
+  const toNum = (value: unknown, fallback: number) => {
+    const n = Number(value)
+    return Number.isFinite(n) ? n : fallback
+  }
+  const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, Math.trunc(value)))
+
+  const max_concurrency = clamp(toNum(oneClickForm.max_concurrency, 5), 1, 20)
+  const stagger_seconds = clamp(toNum(oneClickForm.stagger_seconds, 1), 0, 60)
+  const rest_min_minutes = clamp(toNum(oneClickForm.rest_min_minutes, 5), 0, 180)
+  const rest_max_input = clamp(toNum(oneClickForm.rest_max_minutes, 10), 0, 180)
+  const rest_max_minutes = Math.max(rest_min_minutes, rest_max_input)
+
+  oneClickForm.max_concurrency = max_concurrency
+  oneClickForm.stagger_seconds = stagger_seconds
+  oneClickForm.rest_min_minutes = rest_min_minutes
+  oneClickForm.rest_max_minutes = rest_max_minutes
+
+  return {
+    max_concurrency,
+    stagger_seconds,
+    rest_min_minutes,
+    rest_max_minutes,
+  }
+}
+
+type SecurityOneClickPreset = 'recommended' | 'fast' | 'safe' | 'custom'
+
+const securityPresetValues: Record<Exclude<SecurityOneClickPreset, 'custom'>, {
+  max_concurrency: number
+  stagger_seconds: number
+  rest_min_minutes: number
+  rest_max_minutes: number
+}> = {
+  recommended: {
+    max_concurrency: 5,
+    stagger_seconds: 1,
+    rest_min_minutes: 5,
+    rest_max_minutes: 10,
+  },
+  fast: {
+    max_concurrency: 8,
+    stagger_seconds: 1,
+    rest_min_minutes: 2,
+    rest_max_minutes: 5,
+  },
+  safe: {
+    max_concurrency: 3,
+    stagger_seconds: 2,
+    rest_min_minutes: 8,
+    rest_max_minutes: 15,
+  },
+}
+
+const securityOneClickForm = reactive<{
+  preset: SecurityOneClickPreset
+  max_concurrency: number
+  stagger_seconds: number
+  rest_min_minutes: number
+  rest_max_minutes: number
+}>({
+  preset: 'recommended',
+  max_concurrency: 5,
+  stagger_seconds: 1,
+  rest_min_minutes: 5,
+  rest_max_minutes: 10,
+})
+
+const applySecurityPreset = (preset: Exclude<SecurityOneClickPreset, 'custom'>) => {
+  const picked = securityPresetValues[preset]
+  securityOneClickForm.max_concurrency = picked.max_concurrency
+  securityOneClickForm.stagger_seconds = picked.stagger_seconds
+  securityOneClickForm.rest_min_minutes = picked.rest_min_minutes
+  securityOneClickForm.rest_max_minutes = picked.rest_max_minutes
+}
+
+const onSecurityOneClickPresetChange = (v: unknown) => {
+  const value = String(v ?? '').trim().toLowerCase()
+  const preset: SecurityOneClickPreset =
+    value === 'fast' || value === 'safe' || value === 'custom' ? (value as SecurityOneClickPreset) : 'recommended'
+  securityOneClickForm.preset = preset
+  if (preset !== 'custom') {
+    applySecurityPreset(preset)
+  }
+}
+
+const normalizeSecurityOneClickConfig = () => {
+  const toNum = (value: unknown, fallback: number) => {
+    const n = Number(value)
+    return Number.isFinite(n) ? n : fallback
+  }
+  const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, Math.trunc(value)))
+
+  const max_concurrency = clamp(toNum(securityOneClickForm.max_concurrency, 5), 1, 20)
+  const stagger_seconds = clamp(toNum(securityOneClickForm.stagger_seconds, 1), 0, 60)
+  const rest_min_minutes = clamp(toNum(securityOneClickForm.rest_min_minutes, 5), 0, 180)
+  const rest_max_input = clamp(toNum(securityOneClickForm.rest_max_minutes, 10), 0, 180)
+  const rest_max_minutes = Math.max(rest_min_minutes, rest_max_input)
+
+  securityOneClickForm.max_concurrency = max_concurrency
+  securityOneClickForm.stagger_seconds = stagger_seconds
+  securityOneClickForm.rest_min_minutes = rest_min_minutes
+  securityOneClickForm.rest_max_minutes = rest_max_minutes
+
+  return {
+    max_concurrency,
+    stagger_seconds,
+    rest_min_minutes,
+    rest_max_minutes,
+  }
+}
 
 const newRecoveryEmail = ref('')
 const verifySubScreenshot = ref(false)
@@ -1821,6 +2103,16 @@ const normalizeSelectValue = (v: unknown, fallback: string) => {
 
 const onFilterTypeChange = async (v: unknown) => {
   filterType.value = normalizeSelectValue(v, 'all')
+  if (filterType.value !== 'logged_in') {
+    filterLoginResult.value = 'all'
+  }
+  currentPage.value = 1
+  selectedAccounts.value = []
+  await fetchAccounts()
+}
+
+const onFilterLoginResultChange = async (v: unknown) => {
+  filterLoginResult.value = normalizeSelectValue(v, 'all')
   currentPage.value = 1
   selectedAccounts.value = []
   await fetchAccounts()
@@ -1833,6 +2125,19 @@ const onFilterGroupChange = async (v: unknown) => {
   await fetchAccounts()
 }
 
+const onFilterEmailChange = (v: unknown) => {
+  filterEmail.value = String(v ?? '').trim()
+  currentPage.value = 1
+  selectedAccounts.value = []
+
+  if (filterEmailDebounceTimer !== null) {
+    window.clearTimeout(filterEmailDebounceTimer)
+  }
+  filterEmailDebounceTimer = window.setTimeout(() => {
+    fetchAccounts()
+  }, 300)
+}
+
 const fetchAccounts = async () => {
   loading.value = true
   try {
@@ -1843,12 +2148,18 @@ const fetchAccounts = async () => {
     if (filterType.value && filterType.value !== 'all') {
       params.type_tag = filterType.value
     }
+    if (filterType.value === 'logged_in' && filterLoginResult.value !== 'all') {
+      params.login_result = filterLoginResult.value
+    }
     if (filterGroup.value && filterGroup.value !== 'all') {
       if (filterGroup.value === 'ungrouped') {
         params.group_name = '' // 未分组（空字符串）
       } else {
         params.group_name = filterGroup.value
       }
+    }
+    if (filterEmail.value) {
+      params.email = filterEmail.value
     }
     
     const response = await googleAccountsApi.getAccounts(params)
@@ -1949,6 +2260,7 @@ const submitOneClickTask = async () => {
   const ids = getSelectedIds()
 
   const config: any = {}
+  const scheduleConfig = normalizeOneClickConfig()
   if (oneClickForm.force_rerun) {
     config.force_rerun = true
   } else {
@@ -1960,6 +2272,10 @@ const submitOneClickTask = async () => {
   if (oneClickForm.security_new_recovery_email && oneClickForm.security_new_recovery_email.trim()) {
     config.security_new_recovery_email = oneClickForm.security_new_recovery_email.trim()
   }
+  config.max_concurrency = scheduleConfig.max_concurrency
+  config.stagger_seconds = scheduleConfig.stagger_seconds
+  config.rest_min_minutes = scheduleConfig.rest_min_minutes
+  config.rest_max_minutes = scheduleConfig.rest_max_minutes
 
   try {
     const res = await googleTasksApi.createTask({
@@ -1975,6 +2291,33 @@ const submitOneClickTask = async () => {
     fetchAccounts()
   } catch (e: any) {
     ElMessage.error('创建任务失败: ' + (e.message || '未知错误'))
+  }
+}
+
+const submitSecurityOneClickUpdate = async () => {
+  if (selectedAccounts.value.length === 0) {
+    ElMessage.warning('请先选择账号')
+    return
+  }
+
+  const ids = getSelectedIds()
+  const config = normalizeSecurityOneClickConfig()
+
+  try {
+    const res = await googleSecurityApi.oneClickUpdate({
+      account_ids: ids,
+      max_concurrency: config.max_concurrency,
+      stagger_seconds: config.stagger_seconds,
+      rest_min_minutes: config.rest_min_minutes,
+      rest_max_minutes: config.rest_max_minutes,
+    })
+    const celeryTaskId = getCreatedCeleryTaskId(res)
+    if (celeryTaskId) startCeleryTaskStatusPolling(celeryTaskId, ids)
+    ElMessage.success('任务已提交')
+    showSecurityOneClickDialog.value = false
+    fetchAccounts()
+  } catch (e: any) {
+    ElMessage.error('操作失败: ' + (e.message || '未知错误'))
   }
 }
 
@@ -2045,12 +2388,7 @@ const handleSecurityCommand = async (command: string) => {
       ElMessage.success('任务已提交')
       fetchAccounts()
     } else if (command === 'one_click_update') {
-      await ElMessageBox.confirm('确定执行一键安全更新（修改密码/辅助邮箱/2FA）吗？', '一键安全更新', { type: 'warning' })
-      const res = await googleSecurityApi.oneClickUpdate({ account_ids: ids })
-      const celeryTaskId = getCreatedCeleryTaskId(res)
-      if (celeryTaskId) startCeleryTaskStatusPolling(celeryTaskId, ids)
-      ElMessage.success('任务已提交')
-      fetchAccounts()
+      showSecurityOneClickDialog.value = true
     }
   } catch (e: any) {
     if (e !== 'cancel') ElMessage.error('操作失败: ' + (e.message || '未知错误'))

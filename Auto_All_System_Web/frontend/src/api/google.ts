@@ -215,7 +215,15 @@ export const googleSecurityApi = {
   },
 
   // 一键修改全部
-  oneClickUpdate(data: { account_ids: number[]; new_email?: string; browser_type?: string }): Promise<ApiResponse<any>> {
+  oneClickUpdate(data: {
+    account_ids: number[]
+    new_email?: string
+    browser_type?: string
+    max_concurrency?: number
+    stagger_seconds?: number
+    rest_min_minutes?: number
+    rest_max_minutes?: number
+  }): Promise<ApiResponse<any>> {
     return request.post('/plugins/google-business/security/one_click_update/', data)
   }
 }
