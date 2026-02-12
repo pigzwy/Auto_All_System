@@ -168,6 +168,7 @@
                 <TableHead class="min-w-[320px]">状态</TableHead>
                 <TableHead class="w-24">n-2fa</TableHead>
                 <TableHead class="w-28">环境</TableHead>
+                <TableHead class="w-28">分组</TableHead>
                 <TableHead class="w-44">创建时间</TableHead>
                 <TableHead class="min-w-[220px]">备注</TableHead>
                 <TableHead class="w-28 text-right">操作</TableHead>
@@ -269,6 +270,11 @@
                   >
                     {{ row.geekez_profile_exists ? '打开' : '创建' }}
                   </Button>
+                </TableCell>
+
+                <TableCell>
+                  <Badge v-if="row.group_name" variant="outline" class="rounded-full text-xs">{{ row.group_name }}</Badge>
+                  <span v-else class="text-xs text-muted-foreground">-</span>
                 </TableCell>
 
                 <TableCell class="text-muted-foreground">
@@ -1349,8 +1355,12 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { 
-  googleAccountsApi, googleTasksApi, googleSecurityApi, 
-  googleSubscriptionApi, googleCeleryTasksApi 
+  googleAccountsApi,
+  googleGroupsApi,
+  googleTasksApi,
+  googleSecurityApi,
+  googleSubscriptionApi,
+  googleCeleryTasksApi,
 } from '@/api/google'
 import type { GoogleAccount } from '@/types'
 
@@ -1696,7 +1706,8 @@ const deleteAccount = async (account: GoogleAccount) => {
     await fetchAccounts()
   } catch (e: any) {
     if (e !== 'cancel' && e?.message !== 'cancel') {
-      ElMessage.error('删除失败: ' + e.message)
+      const serverMsg = e?.response?.data?.detail || e?.response?.data?.error
+      ElMessage.error('删除失败: ' + (serverMsg || e.message || '未知错误'))
     }
   }
 }
@@ -2185,42 +2196,92 @@ const fetchAccounts = async () => {
 
 const fetchGroups = async () => {
   try {
-    // 从账号列表中提取唯一的 group_name 值
-    const response = await googleAccountsApi.getAccounts({ page_size: 9999 })
-    const allAccounts = Array.isArray(response) ? response : (response.results || [])
+    // 使用后端分组接口（按 created_at 倒序），保证分组下拉按时间顺序展示。
+    // 后端返回: [{ id, name, description, account_count, created_at }]
+    const response = await googleGroupsApi.getGroups()
+    const raw = Array.isArray(response)
+      ? response
+      : (response as any)?.data || (response as any)?.results || []
 
-     const groupCounts = new Map<string, number>()
-     for (const acc of allAccounts) {
-       const name = String((acc as any)?.group_name || '').trim()
-       if (!name) continue
-       groupCounts.set(name, (groupCounts.get(name) || 0) + 1)
-     }
-    
-    // 提取唯一的非空 group_name
-    const uniqueGroups = [...new Set(
-      allAccounts
-        .map((acc: any) => acc.group_name)
-        .filter((name: string) => name && name.trim())
-    )].sort()
-    
-    // 转换为下拉选项格式
-    groupList.value = uniqueGroups.map((name: string) => ({
-      id: name,
-      name: name,
-      account_count: groupCounts.get(name) || 0,
+    const items = (Array.isArray(raw) ? raw : [])
+      .map((g: any) => ({
+        name: String(g?.name || '').trim(),
+        account_count: Number(g?.account_count || 0),
+        created_at: String(g?.created_at || ''),
+      }))
+      .filter((g) => Boolean(g.name))
+      .sort((a, b) => {
+        const ta = Date.parse(a.created_at) || 0
+        const tb = Date.parse(b.created_at) || 0
+        return tb - ta
+      })
+
+    groupList.value = items.map((g) => ({
+      // 分组筛选参数使用 group_name 字符串字段，这里 value 继续用 name
+      id: g.name,
+      name: g.name,
+      account_count: g.account_count,
     }))
-    
-    // 如果当前筛选的分组不存在了，重置为全部
+
+    const existingNames = new Set(items.map((g) => g.name))
     if (
       filterGroup.value !== 'all' &&
       filterGroup.value !== 'ungrouped' &&
-      !uniqueGroups.includes(filterGroup.value)
+      !existingNames.has(filterGroup.value)
     ) {
       filterGroup.value = 'all'
     }
   } catch (error) {
     console.error('获取分组列表失败:', error)
-    groupList.value = []
+
+    // 兜底：如果分组接口异常（500/未迁移等），降级为从账号列表提取 group_name。
+    // 仍按时间顺序：用该分组账号中最早的 created_at 作为近似分组时间。
+    try {
+      const response = await googleAccountsApi.getAccounts({ page_size: 9999 })
+      const allAccounts = Array.isArray(response) ? response : ((response as any).results || [])
+
+      const groupCounts = new Map<string, number>()
+      const groupFirstSeenAt = new Map<string, number>()
+
+      for (const acc of allAccounts) {
+        const name = String((acc as any)?.group_name || '').trim()
+        if (!name) continue
+        groupCounts.set(name, (groupCounts.get(name) || 0) + 1)
+
+        const createdAtRaw = String((acc as any)?.created_at || '')
+        const ts = Date.parse(createdAtRaw) || 0
+        const prev = groupFirstSeenAt.get(name)
+        if (prev === undefined || (ts > 0 && ts < prev)) {
+          groupFirstSeenAt.set(name, ts)
+        }
+      }
+
+      const items = Array.from(groupCounts.keys())
+        .map((name) => ({
+          name,
+          account_count: groupCounts.get(name) || 0,
+          first_seen_at: groupFirstSeenAt.get(name) || 0,
+        }))
+        .sort((a, b) => b.first_seen_at - a.first_seen_at)
+
+      groupList.value = items.map((g) => ({
+        id: g.name,
+        name: g.name,
+        account_count: g.account_count,
+      }))
+
+      const existingNames = new Set(items.map((g) => g.name))
+      if (
+        filterGroup.value !== 'all' &&
+        filterGroup.value !== 'ungrouped' &&
+        !existingNames.has(filterGroup.value)
+      ) {
+        filterGroup.value = 'all'
+      }
+    } catch (fallbackError) {
+      console.error('分组兜底也失败:', fallbackError)
+      groupList.value = []
+    }
   }
 }
 
@@ -2436,7 +2497,14 @@ const handleBulkDelete = async () => {
     fetchAccounts()
   } catch (e: any) {
     if (e !== 'cancel') {
-      ElMessage.error('批量删除失败: ' + (e.message || '未知错误'))
+      const serverMsg = e?.response?.data?.error
+      const detail = e?.response?.data?.failed
+      const detailText = Array.isArray(detail)
+        ? detail.map((x: any) => `${x?.email || ''} ${x?.detail || ''}`.trim()).filter(Boolean).join(' | ')
+        : ''
+      ElMessage.error(
+        '批量删除失败: ' + (serverMsg || e.message || '未知错误') + (detailText ? ` (${detailText})` : '')
+      )
     }
   }
 }
