@@ -8,7 +8,7 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from django.shortcuts import get_object_or_404
-from django.db.models import Count, Q
+from django.db.models import Count, Q, Min
 from django.utils import timezone
 from django.http import FileResponse
 from django.conf import settings
@@ -782,6 +782,7 @@ class GoogleAccountViewSet(viewsets.ModelViewSet):
                 "gemini_status",
                 "card_bound",
                 "notes",
+                "group_name",
             ]
         )
 
@@ -815,6 +816,7 @@ class GoogleAccountViewSet(viewsets.ModelViewSet):
                     a.gemini_status,
                     "1" if a.card_bound else "0",
                     (a.notes or "").replace("\n", " ").replace("\r", " "),
+                    a.group_name or "",
                 ]
             )
 
@@ -861,12 +863,122 @@ class GoogleAccountViewSet(viewsets.ModelViewSet):
                     secret = a.two_fa_secret or ""
 
             recovery = a.recovery_email or ""
-            lines.append(f"{a.email}----{pwd}----{recovery}----{secret}")
+            notes = (a.notes or "").replace("\n", " ").replace("\r", " ")
+            group = a.group_name or ""
+            lines.append(f"{a.email}----{pwd}----{recovery}----{secret}----{notes}----{group}")
 
         content = "\n".join(lines)
         resp = HttpResponse(content, content_type="text/plain; charset=utf-8")
         resp["Content-Disposition"] = 'attachment; filename="google_accounts.txt"'
         return resp
+
+    def _delete_geekez_environment(self, account: GoogleAccount) -> tuple[bool, str]:
+        """删除 Geekez 环境（profile）。
+
+        目标：点击“删除账号”时，同步删除 Geekez 侧的 profile，避免环境残留占用资源。
+
+        策略：
+        - 先 close（stop）再 delete。
+        - 优先使用 metadata.geekez_profile.profile_id；否则按 email 查 profile。
+        - 若查不到 profile 且未记录 profile_id，则视为已删除。
+        """
+
+        try:
+            from apps.integrations.browser_base import BrowserType, get_browser_manager
+
+            manager = get_browser_manager()
+            api = manager.get_api(BrowserType.GEEKEZ)
+        except Exception as e:
+            return False, f"GeekezBrowser 未配置或不可用: {e}"
+
+        try:
+            if not api.health_check():
+                return False, "GeekezBrowser 服务不在线"
+        except Exception as e:
+            return False, f"GeekezBrowser health_check 失败: {e}"
+
+        meta = getattr(account, "metadata", None) or {}
+        geekez_profile = meta.get("geekez_profile")
+        profile_id = ""
+        profile_name = ""
+        if isinstance(geekez_profile, dict):
+            profile_id = str(geekez_profile.get("profile_id") or "").strip()
+            profile_name = str(geekez_profile.get("profile_name") or "").strip()
+
+        profile = None
+        try:
+            profile = api.get_profile_by_name(account.email)
+        except Exception:
+            profile = None
+
+        value = (
+            profile_id
+            or (str(getattr(profile, "id", "")) if profile else "")
+            or profile_name
+            or account.email
+        )
+
+        if not profile and not profile_id:
+            return True, "Geekez profile not found"
+
+        try:
+            try:
+                api.close_profile(value)
+            except Exception:
+                pass
+
+            deleted = bool(api.delete_profile(value))
+            if deleted:
+                return True, "Geekez profile deleted"
+
+            # fallback: 再尝试用 email 删除一次（兼容 name 变更/metadata 不一致）
+            if value != account.email:
+                try:
+                    api.close_profile(account.email)
+                except Exception:
+                    pass
+
+                deleted2 = bool(api.delete_profile(account.email))
+                if deleted2:
+                    return True, "Geekez profile deleted by email"
+
+            # 若按 email 已查不到，则视为已删除
+            try:
+                still = api.get_profile_by_name(account.email)
+                if not still:
+                    return True, "Geekez profile already removed"
+            except Exception:
+                pass
+
+            return False, "Geekez profile delete failed"
+        except Exception as e:
+            return False, f"Geekez profile delete raised error: {e}"
+
+    def destroy(self, request, *args, **kwargs):
+        """删除账号，并同步删除 Geekez 环境。"""
+
+        account = self.get_object()
+        ok, detail = self._delete_geekez_environment(account)
+        if not ok:
+            return Response(
+                {
+                    "success": False,
+                    "error": "删除 Geekez 环境失败，未删除账号",
+                    "detail": detail,
+                    "email": account.email,
+                },
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+
+        account.delete()
+        return Response(
+            {
+                "success": True,
+                "deleted_count": 1,
+                "geekez_deleted": True,
+                "geekez_detail": detail,
+            }
+        )
 
     @action(detail=True, methods=["post"])
     def launch_geekez(self, request, pk=None):
@@ -1196,11 +1308,35 @@ class GoogleAccountViewSet(viewsets.ModelViewSet):
                 {"error": "请提供要删除的账号ID"}, status=status.HTTP_400_BAD_REQUEST
             )
 
+        accounts = list(
+            GoogleAccount.objects.filter(id__in=ids, owner_user=request.user).only(
+                "id", "email", "metadata"
+            )
+        )
+
+        failed: list[dict[str, str]] = []
+        for acc in accounts:
+            ok, detail = self._delete_geekez_environment(acc)
+            if not ok:
+                failed.append({"email": acc.email, "detail": detail})
+
+        if failed:
+            return Response(
+                {
+                    "success": False,
+                    "error": "批量删除 Geekez 环境失败，未删除账号",
+                    "failed": failed,
+                },
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+
         deleted_count = GoogleAccount.objects.filter(
-            id__in=ids, owner_user=request.user
+            id__in=[a.id for a in accounts], owner_user=request.user
         ).delete()[0]
 
-        return Response({"success": True, "deleted_count": deleted_count})
+        return Response(
+            {"success": True, "deleted_count": deleted_count, "geekez_deleted": True}
+        )
 
     @action(detail=False, methods=["post"])
     def export(self, request):
@@ -2346,23 +2482,32 @@ class AccountGroupViewSet(viewsets.ModelViewSet):
     @action(detail=False, methods=["get"])
     def list_with_counts(self, request):
         """获取分组列表（带账号数量）"""
-        from apps.integrations.google_accounts.models import AccountGroup
-        
-        groups = AccountGroup.objects.filter(owner_user=request.user).order_by("-created_at")
-        
+        # 兼容“简化分组为字符串”的迁移（AccountGroup 表可能已被删除）。
+        # 这里始终以 GoogleAccount.group_name 聚合分组，避免表缺失导致 500。
+        rows = (
+            GoogleAccount.objects.filter(owner_user=request.user)
+            .exclude(Q(group_name="") | Q(group_name__isnull=True))
+            .values("group_name")
+            .annotate(account_count=Count("id"), created_at=Min("created_at"))
+            .order_by("-created_at")
+        )
+
         data = []
-        for g in groups:
-            count = GoogleAccount.objects.filter(
-                owner_user=request.user,
-                group_name=g.name
-            ).count()
-            data.append({
-                "id": g.id,
-                "name": g.name,
-                "description": g.description,
-                "account_count": count,
-                "created_at": g.created_at.isoformat() if g.created_at else None,
-            })
+        for r in rows:
+            name = (r.get("group_name") or "").strip()
+            if not name:
+                continue
+            created_at = r.get("created_at")
+            data.append(
+                {
+                    # 分组表不存在时，id 用 group_name 保持前端可用。
+                    "id": name,
+                    "name": name,
+                    "description": "",
+                    "account_count": int(r.get("account_count") or 0),
+                    "created_at": created_at.isoformat() if created_at else None,
+                }
+            )
         return Response(data)
     
     @action(detail=True, methods=["post"])
