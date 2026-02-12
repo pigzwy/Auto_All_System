@@ -363,13 +363,16 @@ def process_single_account(
                             step4_needed = False
                             step5_needed = False
 
+                        # 对于 ineligible 且未订阅的账号，需要登录来做 Pro 订阅检查
+                        needs_pro_check = is_ineligible and not has_subscribe
+
                         needs_security = bool(
                             config.get("security_change_2fa")
                             or config.get("security_new_recovery_email")
                             or config.get("new_recovery_email")
                             or config.get("new_email")
                         )
-                        needs_login = step2_needed or step3_needed or step4_needed or step5_needed or needs_security
+                        needs_login = step2_needed or step3_needed or step4_needed or step5_needed or needs_security or needs_pro_check
 
                         account_updates: Dict[str, Any] = {}
 
@@ -533,6 +536,144 @@ def process_single_account(
                             task_logger.info(
                                 f"[Account {account_id}] 步骤 2/6: 已完成，跳过"
                             )
+
+                        # 2.5 快速检查当前账号是否已订阅 Pro（成品账号直接跳过全部后续步骤）
+                        if step3_needed or step4_needed or step5_needed or needs_pro_check:
+                            task_logger.info(
+                                f"[Account {account_id}] 步骤 2.5/6: 快速检查订阅状态"
+                            )
+                            try:
+                                plans_url = "https://one.google.com/about/plans"
+                                await page.goto(plans_url, wait_until="domcontentloaded", timeout=30000)
+                                await asyncio.sleep(3)
+
+                                # 判断逻辑：plans 主页面上
+                                # 未开通：标题为 "Try Google One at a discount"，文案含 "By subscribing"
+                                # 已开通：标题为 "Choose a plan that works for you"，文案含 "By upgrading"
+                                is_already_subscribed = False
+                                try:
+                                    page_text = await page.locator("body").inner_text(timeout=5000)
+                                    # 已开通的明确标识
+                                    subscribed_signals = [
+                                        "Choose a plan that works for you",
+                                        "By upgrading",
+                                    ]
+                                    # 未开通的明确标识
+                                    not_subscribed_signals = [
+                                        "Try Google One at a discount",
+                                        "By subscribing",
+                                    ]
+                                    has_subscribed_signal = any(s in page_text for s in subscribed_signals)
+                                    has_not_subscribed_signal = any(s in page_text for s in not_subscribed_signals)
+
+                                    if has_subscribed_signal and not has_not_subscribed_signal:
+                                        is_already_subscribed = True
+                                        task_logger.info(
+                                            f"[Account {account_id}] 检测到已订阅 Pro（页面含: {[s for s in subscribed_signals if s in page_text]}）"
+                                        )
+                                    elif has_not_subscribed_signal:
+                                        task_logger.info(
+                                            f"[Account {account_id}] 未订阅 Pro，继续正常流程"
+                                        )
+                                    else:
+                                        task_logger.warning(
+                                            f"[Account {account_id}] 无法确定订阅状态，继续正常流程"
+                                        )
+                                except Exception as detect_err:
+                                    task_logger.warning(
+                                        f"[Account {account_id}] 检测订阅状态异常: {detect_err}，继续正常流程"
+                                    )
+
+                                if is_already_subscribed:
+                                    task_logger.info(
+                                        f"[Account {account_id}] 账号已订阅 Pro，跳过学生资格/验证/绑卡，直接标记完成"
+                                    )
+                                    new_meta = dict(account.metadata or {})
+                                    new_meta["google_one_status"] = "subscribed"
+                                    account_updates["metadata"] = new_meta
+                                    account_updates["gemini_status"] = "active"
+
+                                    result = {
+                                        "success": True,
+                                        "message": "账号已订阅 Pro，成品账号无需额外操作",
+                                        "card_last4": "",
+                                        "account_updates": account_updates,
+                                    }
+
+                                    # 仍然执行安全设置增项（如果配置了）
+                                    task_logger.info(f"[Account {account_id}] 步骤 6/6: 完成处理")
+                                    try:
+                                        from .services.security_service import GoogleSecurityService
+
+                                        security_service = GoogleSecurityService()
+
+                                        if config.get("security_change_2fa") is True:
+                                            task_logger.info(
+                                                f"[Account {account_id}] 增项: 修改2FA"
+                                            )
+                                            (
+                                                ok2,
+                                                msg2,
+                                                new_secret,
+                                            ) = await security_service.change_2fa_secret(
+                                                page,
+                                                {
+                                                    "email": account_info.get("email"),
+                                                    "password": account_info.get("password"),
+                                                    "totp_secret": account_info.get("secret") or "",
+                                                },
+                                            )
+                                            if ok2 and new_secret:
+                                                result.setdefault("extra", {})["new_2fa_secret"] = (
+                                                    new_secret
+                                                )
+                                            else:
+                                                task_logger.warning(
+                                                    f"[Account {account_id}] 增项修改2FA失败: {msg2}"
+                                                )
+
+                                        new_recovery_email = (
+                                            config.get("security_new_recovery_email")
+                                            or config.get("new_recovery_email")
+                                            or config.get("new_email")
+                                        )
+                                        if (
+                                            isinstance(new_recovery_email, str)
+                                            and new_recovery_email.strip()
+                                        ):
+                                            task_logger.info(
+                                                f"[Account {account_id}] 增项: 修改辅助邮箱"
+                                            )
+                                            (
+                                                ok3,
+                                                msg3,
+                                            ) = await security_service.change_recovery_email(
+                                                page,
+                                                {
+                                                    "email": account_info.get("email"),
+                                                    "password": account_info.get("password"),
+                                                    "totp_secret": account_info.get("secret") or "",
+                                                },
+                                                new_recovery_email.strip(),
+                                            )
+                                            if ok3:
+                                                result.setdefault("account_updates", {})[
+                                                    "recovery_email"
+                                                ] = new_recovery_email.strip()
+                                            else:
+                                                task_logger.warning(
+                                                    f"[Account {account_id}] 增项修改辅助邮箱失败: {msg3}"
+                                                )
+                                    except Exception as e:
+                                        task_logger.warning(
+                                            f"[Account {account_id}] 安全设置增项执行异常: {e}"
+                                        )
+
+                                    return result
+                            except Exception as e:
+                                task_logger.warning(
+                                    f"[Account {account_id}] 快速订阅检查异常（不影响主流程）: {e}"
+                                )
 
                         # 3. 检查学生资格（会获取 SheerID 链接/或判定已验证）
                         status = google_one_status
