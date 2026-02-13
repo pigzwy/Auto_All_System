@@ -1631,7 +1631,15 @@ class GoogleTaskViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=["get"])
     def log(self, request, pk=None):
-        """获取任务日志"""
+        """获取任务日志
+
+        返回字段：
+        - task_id: 任务主键 ID
+        - accounts_summary: 每个账号的摘要（celery_task_id、trace_file、状态等）
+        - log: 日志文本（支持按 account_id/email 过滤）
+        """
+        import re
+
         task = self.get_object()
 
         log_text = task.log or ""
@@ -1660,7 +1668,53 @@ class GoogleTaskViewSet(viewsets.ModelViewSet):
             ]
             log_text = "\n".join(filtered)
 
-        return Response({"task_id": task.id, "log": log_text})
+        # 构建每个账号的摘要信息
+        # celery_task_id 从日志文本中按 [celery=xxx][acc=N] 提取
+        # trace_file 根据 celery_task_id + email 动态构造
+        task_accounts_qs = GoogleTaskAccount.objects.filter(task=task).select_related(
+            "account"
+        )
+        if account_id is not None:
+            task_accounts_qs = task_accounts_qs.filter(account_id=account_id)
+        elif email:
+            task_accounts_qs = task_accounts_qs.filter(account__email=email)
+
+        # 从日志全文中提取每个账号的 celery_task_id: [celery=xxx][acc=N]
+        full_log = task.log or ""
+        celery_id_map: dict[int, str] = {}  # account_id -> celery_task_id
+        for m in re.finditer(
+            r"\[celery=([a-f0-9\-]+)\]\[acc=(\d+)\]", full_log
+        ):
+            cid, aid = m.group(1), int(m.group(2))
+            celery_id_map.setdefault(aid, cid)
+
+        accounts_summary = []
+        for ta in task_accounts_qs:
+            acc_email = ta.account.email
+            celery_sub_id = celery_id_map.get(ta.account_id, "")
+            # 按 TaskLogger 命名规则构造 trace_file 路径
+            if celery_sub_id and acc_email:
+                safe_email = acc_email.replace("@", "_").replace(".", "_")
+                trace_file = f"logs/trace/trace_{celery_sub_id}_{safe_email}.log"
+            else:
+                trace_file = ""
+            accounts_summary.append(
+                {
+                    "account_id": ta.account_id,
+                    "email": acc_email,
+                    "celery_task_id": celery_sub_id,
+                    "trace_file": trace_file,
+                    "state": ta.status,
+                }
+            )
+
+        return Response(
+            {
+                "task_id": task.id,
+                "accounts_summary": accounts_summary,
+                "log": log_text,
+            }
+        )
 
     @action(detail=True, methods=["get"])
     def accounts(self, request, pk=None):

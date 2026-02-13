@@ -887,6 +887,42 @@
           </div>
         </div>
 
+        <!-- 账号摘要信息 -->
+        <div v-if="currentAccountsSummary.length > 0" class="mb-4 space-y-2">
+          <div class="text-sm font-semibold">账号摘要</div>
+          <div
+            v-for="item in currentAccountsSummary"
+            :key="item.account_id"
+            class="rounded-lg border border-border bg-muted/20 px-4 py-3"
+          >
+            <div class="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs">
+              <span class="font-medium text-foreground">{{ item.email }}</span>
+              <span
+                class="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium"
+                :class="item.state === 'success' || item.state === 'completed'
+                  ? 'bg-emerald-500/10 text-emerald-700'
+                  : item.state === 'failed'
+                    ? 'bg-rose-500/10 text-rose-700'
+                    : item.state === 'running' || item.state === 'started'
+                      ? 'bg-blue-500/10 text-blue-700'
+                      : 'bg-muted text-muted-foreground'"
+              >
+                {{ item.state || '未知' }}
+              </span>
+            </div>
+            <div v-if="item.celery_task_id" class="mt-1.5 flex flex-col gap-1 text-xs text-muted-foreground">
+              <div class="flex items-center gap-1">
+                <span class="shrink-0 font-medium">Celery ID:</span>
+                <code class="break-all rounded bg-muted px-1 py-0.5 font-mono text-[11px]">{{ item.celery_task_id }}</code>
+              </div>
+              <div v-if="item.trace_file" class="flex items-center gap-1">
+                <span class="shrink-0 font-medium">Trace:</span>
+                <code class="break-all rounded bg-muted px-1 py-0.5 font-mono text-[11px]">{{ item.trace_file }}</code>
+              </div>
+            </div>
+          </div>
+        </div>
+
         <div class="max-h-[520px] overflow-auto rounded-xl border border-border bg-muted/20 p-4">
           <pre class="whitespace-pre-wrap font-mono text-xs text-foreground">{{ currentLogContent }}</pre>
         </div>
@@ -898,91 +934,62 @@
       :open="showCeleryDialog"
       @update:open="(open) => { showCeleryDialog = open; if (!open) onCeleryDialogClosed() }"
     >
-      <DialogContent class="sm:max-w-[1000px]">
-        <DialogHeader>
+      <DialogContent class="sm:max-w-[1000px] max-h-[90vh] flex flex-col">
+        <DialogHeader class="shrink-0">
           <DialogTitle>{{ celeryDialogTitle }}</DialogTitle>
           <DialogDescription>实时 trace（支持上滑加载历史）</DialogDescription>
         </DialogHeader>
 
         <div class="rounded-xl border border-border bg-muted/20 p-4">
-          <div class="grid gap-3 sm:grid-cols-2">
-            <div>
-              <div class="text-xs text-muted-foreground">任务ID</div>
-              <div class="font-mono text-sm">{{ celeryTaskId || '-' }}</div>
+          <!-- 账号摘要卡片 -->
+          <div class="mb-4 space-y-2">
+            <div class="flex items-center justify-between">
+              <div class="text-sm font-semibold">账号摘要</div>
+              <div class="flex items-center gap-2">
+                <Switch :checked="traceAutoRefresh" @update:checked="traceAutoRefresh = $event" />
+                <span class="text-xs text-muted-foreground">自动刷新</span>
+              </div>
             </div>
-            <div>
-              <div class="text-xs text-muted-foreground">账号</div>
-              <div class="text-sm break-all">{{ celeryEmail || '-' }}</div>
+            <div class="rounded-lg border border-border bg-muted/20 px-4 py-3">
+              <div class="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs">
+                <span class="font-medium text-foreground">{{ celeryEmail || '-' }}</span>
+                <span
+                  class="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium"
+                  :class="celeryState === 'SUCCESS'
+                    ? 'bg-emerald-500/10 text-emerald-700'
+                    : celeryState === 'FAILURE'
+                      ? 'bg-rose-500/10 text-rose-700'
+                      : celeryState === 'STARTED' || celeryState === 'PROGRESS'
+                        ? 'bg-blue-500/10 text-blue-700'
+                        : 'bg-muted text-muted-foreground'"
+                >
+                  {{ celeryState || '未知' }}
+                </span>
+              </div>
+              <div v-if="celeryTaskId" class="mt-1.5 flex flex-col gap-1 text-xs text-muted-foreground">
+                <div class="flex items-center gap-1">
+                  <span class="shrink-0 font-medium">Celery ID:</span>
+                  <code class="break-all rounded bg-muted px-1 py-0.5 font-mono text-[11px]">{{ celeryTaskId }}</code>
+                </div>
+                <div v-if="traceFile" class="flex items-center gap-1">
+                  <span class="shrink-0 font-medium">Trace:</span>
+                  <code class="break-all rounded bg-muted px-1 py-0.5 font-mono text-[11px]">{{ traceFile }}</code>
+                </div>
+              </div>
             </div>
-            <div>
-              <div class="text-xs text-muted-foreground">state</div>
-              <Badge variant="outline" class="rounded-full">{{ celeryState || '-' }}</Badge>
-            </div>
-            <div>
-              <div class="text-xs text-muted-foreground">trace_file</div>
-              <div class="font-mono text-xs break-all">{{ traceFile || '-' }}</div>
-            </div>
-          </div>
-
-          <div class="mt-4 flex flex-wrap justify-end gap-2">
-            <Button variant="outline" size="sm" @click="refreshCeleryStatus">刷新状态</Button>
-            <Button size="sm" @click="reloadTrace">重载日志</Button>
-          </div>
-
-          <Accordion type="single" collapsible class="mt-4">
-            <AccordionItem value="status">
-              <AccordionTrigger>状态详情</AccordionTrigger>
-              <AccordionContent>
-                <pre class="mt-2 max-h-[200px] overflow-auto rounded-md border border-border bg-background p-3 text-xs">{{ celeryStatusText }}</pre>
-              </AccordionContent>
-            </AccordionItem>
-          </Accordion>
-        </div>
-
-        <div class="my-4 h-px w-full bg-border" />
-
-        <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <div class="flex items-center gap-3">
-            <div class="flex items-center gap-2">
-              <Switch :checked="traceAutoRefresh" @update:checked="traceAutoRefresh = $event" />
-              <span class="text-sm">自动刷新</span>
-            </div>
-            <div class="flex items-center gap-2">
-              <Switch :checked="traceFollowLatest" @update:checked="traceFollowLatest = $event" />
-              <span class="text-sm">跟随最新</span>
-            </div>
-            <span class="text-xs text-muted-foreground">向上滚动加载历史；滚动离开底部会自动停止跟随</span>
-          </div>
-          <div class="flex items-center justify-end gap-2">
-            <Button variant="outline" size="sm" @click="copyTrace">复制</Button>
-            <Button variant="outline" size="sm" @click="clearTrace">清空</Button>
           </div>
         </div>
 
         <div
           ref="traceScrollRef"
-          class="h-[520px] overflow-auto rounded-xl border border-border bg-slate-950 text-slate-100 p-3"
+          class="min-h-0 flex-1 overflow-auto rounded-xl border border-border bg-muted/20 p-4"
           @scroll="onTraceScroll"
         >
-          <div
-            v-if="traceLoadingOlder"
-            class="sticky top-0 z-10 -mx-3 -mt-3 mb-3 border-b border-slate-700/40 bg-slate-950/80 px-3 py-2 text-xs text-slate-100/90 backdrop-blur"
-          >
-            加载更早日志...
-          </div>
-          <div
-            v-else-if="traceHasMoreBackward"
-            class="sticky top-0 z-10 -mx-3 -mt-3 mb-3 border-b border-slate-700/40 bg-slate-950/60 px-3 py-2 text-xs text-slate-100/60 backdrop-blur"
-          >
-            继续上滑加载更早日志
-          </div>
-
-          <div class="font-mono text-xs leading-relaxed whitespace-pre-wrap break-words">
+          <div class="font-mono text-xs leading-relaxed whitespace-pre-wrap break-words text-foreground">
             <div
               v-for="ln in traceLines"
               :key="ln.id"
               class="py-[1px]"
-              :class="ln.isJson ? 'text-slate-300/60' : ''"
             >{{ ln.text }}</div>
           </div>
         </div>
@@ -1801,6 +1808,13 @@ const currentLogExtras = ref<string[]>([])
 const currentLogTaskId = ref<number | null>(null)
 const currentLogAccountId = ref<number | null>(null)
 const currentLogEmail = ref('')
+const currentAccountsSummary = ref<Array<{
+  account_id: number
+  email: string
+  celery_task_id: string
+  trace_file: string
+  state: string
+}>>([])
 const logAutoRefresh = ref(true)
 const logPollingTimer = ref<number | null>(null)
 let logPollingInFlight = false
@@ -1946,6 +1960,7 @@ watch(showLogDialog, (v) => {
     currentLogTaskId.value = null
     currentLogAccountId.value = null
     currentLogEmail.value = ''
+    currentAccountsSummary.value = []
   }
 })
 
@@ -2746,9 +2761,10 @@ const fetchTaskLog = async (
 ) => {
   try {
     const res = await googleTasksApi.getTaskLog(taskId, params)
-    // 后端返回：{ task_id, log }
+    // 后端返回：{ task_id, accounts_summary, log }
     const logStr = typeof res?.log === 'string' ? res.log : JSON.stringify(res, null, 2)
     currentLogContent.value = logStr
+    currentAccountsSummary.value = Array.isArray(res?.accounts_summary) ? res.accounts_summary : []
 
     // Parse steps
     currentLogExtras.value = []
@@ -2885,13 +2901,22 @@ const refreshCeleryStatus = async () => {
 
 const normalizeTraceLines = (raw: string[]): TraceLine[] => {
   const out: TraceLine[] = []
+  // 去除每行中与摘要卡片重复的 [kind][celery=xxx][email] step/action: 前缀
+  // 原始格式: [2026-02-13T11:05:19.137959+00:00] [gpt][celery=xxx][email] step/action: message
+  // 清理后:   [11:05:19] message
+  const prefixRe = /^(\[[^\]]*\])\s*\[[^\]]*\]\[celery=[^\]]*\]\[[^\]]*\]\s*\S+\/\S+:\s*/
+  // 简化时间戳: [2026-02-13T11:05:19.137959+00:00] → [2026-02-13 11:05:19]
+  const tsRe = /^\[(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2}:\d{2})\.\d+[^\]]*\]/
   for (const t of raw || []) {
     const text = String(t ?? '')
     if (!text) continue
+    // 过滤 JSON 行（与人类可读行内容重复）
+    if (text.trim().startsWith('{')) continue
+    const cleaned = text.replace(prefixRe, '$1 ').replace(tsRe, '[$1 $2]')
     out.push({
       id: ++traceLineSeq,
-      text,
-      isJson: text.trim().startsWith('{')
+      text: cleaned,
+      isJson: false
     })
   }
   return out

@@ -594,6 +594,7 @@ class TaskViewSet(ViewSet):
                     "filename": filename,
                     "exists": False,
                     "text": "",
+                    "accounts_summary": [],
                     "download_url": request.build_absolute_uri(
                         f"/api/v1/plugins/gpt-business/tasks/{task['id']}/download/{filename}/"
                     ),
@@ -615,11 +616,37 @@ class TaskViewSet(ViewSet):
             return Response({"detail": "Failed to read log"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
         text = "".join(buf)
+        # 构建账号摘要信息
+        celery_id = str(task.get("celery_task_id") or "")
+        mother_id = str(task.get("mother_id") or "")
+        mother = find_account(settings, mother_id) if mother_id else None
+        mother_email = str(mother.get("email") or "") if isinstance(mother, dict) else ""
+        task_status = str(task.get("status") or "")
+
+        accounts_summary = []
+        if celery_id:
+            # 按 TaskLogger 命名规则构造 trace_file 路径
+            if mother_email:
+                safe_email = mother_email.replace("@", "_").replace(".", "_")
+                trace_file = f"logs/trace/trace_{celery_id}_{safe_email}.log"
+            else:
+                trace_file = f"logs/trace/trace_{celery_id}.log"
+            accounts_summary.append(
+                {
+                    "account_id": mother_id,
+                    "email": mother_email,
+                    "celery_task_id": celery_id,
+                    "trace_file": trace_file,
+                    "state": task_status,
+                }
+            )
+
         return Response(
             {
                 "filename": log_path.name,
                 "exists": True,
                 "text": text,
+                "accounts_summary": accounts_summary,
                 "download_url": request.build_absolute_uri(
                     f"/api/v1/plugins/gpt-business/tasks/{task['id']}/download/{log_path.name}/"
                 ),
