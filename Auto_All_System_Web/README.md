@@ -224,6 +224,56 @@ batch_process_task (入口)
 3. 通过 `playwright.chromium.connect_over_cdp(ws_endpoint)` 连接
 4. 任务完成后 `GeekezBrowserAPI().close_profile()` 关闭
 
+### resume_mode（续跑机制）
+
+one_click 默认开启 `resume_mode`：根据账号当前状态自动跳过已完成步骤：
+
+```python
+# 判断逻辑（tasks.py 一键到底核心）
+has_open_one = google_one_status in ["link_ready","verified","subscribed","ineligible"] or sheerid_link or sheerid_verified
+has_verify   = sheerid_verified or google_one_status in ["verified","subscribed"]
+has_subscribe= card_bound or gemini_status == "active" or google_one_status == "subscribed"
+
+step2_needed = not has_open_one    # 打开 Google One
+step3_needed = not has_eligibility # 检查学生资格
+step4_needed = not has_verify      # 学生验证
+step5_needed = not has_subscribe   # 绑卡订阅
+```
+
+可通过 `config.force_rerun=True` 强制全部重新执行。
+
+### 独立安全设置任务
+
+除一键到底外，还有 4 个独立 Celery 任务（位于 `tasks.py`）：
+
+| 任务名 | Celery Name | 说明 |
+|--------|------------|------|
+| `security_change_2fa_task` | `google_business.security_change_2fa` | 批量修改 2FA 密钥 |
+| `security_change_recovery_email_task` | `google_business.security_change_recovery_email` | 批量修改辅助邮箱 |
+| `security_get_backup_codes_task` | `google_business.security_get_backup_codes` | 批量获取备份验证码 |
+| `security_one_click_task` | `google_business.security_one_click` | 一键安全设置（2FA + 辅助邮箱） |
+| `subscription_verify_status_task` | `google_business.subscription_verify_status` | 批量验证订阅状态 |
+| `subscription_click_subscribe_task` | `google_business.subscription_click_subscribe` | 批量点击订阅按钮 |
+
+这些任务使用 `ThreadPoolExecutor` + `asyncio.run()` 模型（每个线程独立 event loop），支持 `max_concurrency` / `stagger_seconds` / `rest_min/max_minutes` 批次参数。
+
+---
+
+## 前端路由
+
+```
+/google/dashboard     → GoogleDashboard.vue       # 工作台（统计/快速操作）
+/google/accounts      → AccountManage.vue         # 账号管理（导入/筛选/批量操作）
+/google/sheerid       → SheerIDManage.vue         # SheerID 验证管理
+/google/bind-card     → AutoBindCard.vue          # 自动绑卡
+/google/auto-all      → AutoAllInOne.vue          # 一键全自动
+
+/gpt-zone             → GptBusinessZone.vue       # GPT 专区（模块化子页面）
+
+/cards                → CardManage.vue            # 虚拟卡管理
+/admin/*              → admin/ 系列页面            # 管理后台
+```
+
 ---
 
 ## 插件架构
@@ -270,12 +320,29 @@ INSTALLED_APPS = [
    - 任务内不要跨 `asyncio.run()` 传递 Playwright 对象
    - 使用 `transaction.atomic()` + `select_for_update()` 更新任务计数
 
+5. **account_updates 模式**：one_click 流程中，所有账号字段更新先收集到 `account_updates: Dict` 中，在 `asyncio.run()` 完成后统一 `GoogleAccount.objects.filter(id=account_id).update(**account_updates)` 写入，避免 async 中触发 `SynchronousOnlyOperation`。
+
+6. **绑卡错误前缀约定**：`bind_and_subscribe()` 返回的消息使用前缀区分错误类型：
+   - `CARD_INVALID:...` — 新卡被支付网关拒绝，应标记卡为 invalid
+   - `REBIND_NEEDED:...` — 旧卡问题（过期/换绑失败），不应标记新卡
+
 ### 前端
 
 1. **UI 组件**：基于 shadcn-vue (reka-ui) + Tailwind CSS，不直接依赖 Element Plus
 2. **兼容层**：`components/app/` 中有 `ElSwitch` → `Toggle`、`ElTable` → `DataTable` 等映射
 3. **API 调用**：`src/api/` 按模块拆分，使用 axios 实例 + JWT 拦截器
 4. **路由**：模块化路由在 `src/router/modules/` 中注册
+5. **日志清理**：`src/lib/log-utils.ts` 提供统一的日志文本清理（过滤 JSON 重复行、去冗余前缀、简化时间戳），Google/GPT 专区共用
+
+### 常见开发陷阱
+
+| 问题 | 原因 | 解决 |
+|------|------|------|
+| `SynchronousOnlyOperation` | 在 async 函数中直接调用 Django ORM | 用 `sync_to_async` 包装，或在 `asyncio.run()` 之后同步调用 |
+| Playwright 对象跨 loop | 在一个 `asyncio.run()` 中创建的 page 传到另一个 loop | 确保 acquire → 操作 → release 在同一个 `asyncio.run()` 内 |
+| captcha 误判 | `detect_captcha()` 匹配到不可见元素 | 必须加 `is_visible()` 检查 |
+| 验证失败仍绑卡 | step 4 失败后未 return，继续执行 step 5 | 失败时必须 `return {"success": False, ...}` |
+| 并发选到同一张卡 | 没有行锁 | `select_for_update(skip_locked=True)` |
 
 ---
 
