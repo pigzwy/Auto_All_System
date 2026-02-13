@@ -1005,12 +1005,11 @@
         <div class="grid gap-4 py-2">
           <div class="flex items-center justify-between">
             <div>
-              <div class="text-sm font-medium">运行模式</div>
-              <div class="text-xs text-muted-foreground">默认续跑：已完成步骤会跳过</div>
+              <div class="text-sm font-medium">是否重跑</div>
+              <div class="text-xs text-muted-foreground">开启后忽略已完成状态，全部重新执行</div>
             </div>
-            <Switch :checked="oneClickForm.force_rerun" @update:checked="oneClickForm.force_rerun = $event" />
+            <Switch v-model="oneClickForm.force_rerun" />
           </div>
-          <div class="text-xs text-muted-foreground">开启强制重跑后，会忽略已完成状态并重新执行</div>
 
           <div class="flex items-center justify-between">
             <div>
@@ -1024,7 +1023,38 @@
           </div>
           <div class="grid gap-2">
             <label class="text-sm font-medium">增项：修改辅助邮箱</label>
-            <Input v-model="oneClickForm.security_new_recovery_email" placeholder="可选，不填则不修改" />
+            <div class="flex gap-2 mb-1">
+              <Button
+                size="sm" variant="outline"
+                :class="{ 'bg-primary text-primary-foreground': oneClickForm.recovery_email_mode === 'manual' }"
+                @click="oneClickForm.recovery_email_mode = 'manual'"
+              >手动输入</Button>
+              <Button
+                size="sm" variant="outline"
+                :class="{ 'bg-primary text-primary-foreground': oneClickForm.recovery_email_mode === 'auto' }"
+                @click="oneClickForm.recovery_email_mode = 'auto'; loadCloudMailConfigs()"
+              >自动创建域名邮箱</Button>
+            </div>
+            <Input
+              v-if="oneClickForm.recovery_email_mode === 'manual'"
+              v-model="oneClickForm.security_new_recovery_email"
+              placeholder="可选，不填则不修改"
+            />
+            <Select
+              v-if="oneClickForm.recovery_email_mode === 'auto'"
+              v-model="oneClickForm.cloudmail_config_id"
+            >
+              <SelectTrigger class="w-full">
+                <SelectValue placeholder="选择域名邮箱配置" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem
+                  v-for="c in cloudMailConfigs"
+                  :key="c.id"
+                  :value="String(c.id)"
+                >{{ c.name }} ({{ c.domains.join(', ') }})</SelectItem>
+              </SelectContent>
+            </Select>
           </div>
 
           <Alert>
@@ -1224,12 +1254,52 @@
       <DialogContent class="sm:max-w-[560px]">
         <DialogHeader>
           <DialogTitle>修改辅助邮箱</DialogTitle>
-          <DialogDescription>为空则不修改</DialogDescription>
+          <DialogDescription>手动输入邮箱或自动创建域名邮箱</DialogDescription>
         </DialogHeader>
 
-        <div class="grid gap-2 py-2">
-          <label class="text-sm font-medium">新辅助邮箱</label>
-          <Input v-model="newRecoveryEmail" placeholder="请输入新的辅助邮箱" />
+        <div class="grid gap-4 py-2">
+          <!-- 模式切换 -->
+          <div class="flex items-center gap-4">
+            <label class="text-sm font-medium">模式</label>
+            <div class="flex gap-2">
+              <Button
+                size="sm"
+                :variant="recoveryEmailMode === 'manual' ? 'default' : 'outline'"
+                @click="recoveryEmailMode = 'manual'"
+              >手动输入</Button>
+              <Button
+                size="sm"
+                :variant="recoveryEmailMode === 'auto' ? 'default' : 'outline'"
+                @click="recoveryEmailMode = 'auto'"
+              >自动创建域名邮箱</Button>
+            </div>
+          </div>
+
+          <!-- 手动模式 -->
+          <div v-if="recoveryEmailMode === 'manual'" class="grid gap-2">
+            <label class="text-sm font-medium">新辅助邮箱</label>
+            <Input v-model="newRecoveryEmail" placeholder="请输入新的辅助邮箱" />
+          </div>
+
+          <!-- 自动模式 -->
+          <div v-else class="grid gap-2">
+            <label class="text-sm font-medium">选择域名邮箱配置</label>
+            <Select v-model="selectedCloudMailConfigId">
+              <SelectTrigger>
+                <SelectValue placeholder="请选择域名邮箱配置" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem
+                  v-for="config in cloudMailConfigs"
+                  :key="config.id"
+                  :value="String(config.id)"
+                >
+                  {{ config.name }} ({{ config.domains?.join(', ') }})
+                </SelectItem>
+              </SelectContent>
+            </Select>
+            <p class="text-xs text-muted-foreground">将自动创建邮箱并换绑，验证码自动填入</p>
+          </div>
         </div>
 
         <DialogFooter class="gap-2">
@@ -1362,6 +1432,7 @@ import {
   googleSubscriptionApi,
   googleCeleryTasksApi,
 } from '@/api/google'
+import { getCloudMailConfigs } from '@/api/email'
 import type { GoogleAccount } from '@/types'
 
 const loading = ref(false)
@@ -1932,6 +2003,8 @@ const oneClickForm = reactive<{
   force_rerun: boolean
   security_change_2fa: boolean
   security_new_recovery_email: string
+  recovery_email_mode: 'manual' | 'auto'
+  cloudmail_config_id: number | null
   preset: OneClickPreset
   max_concurrency: number
   stagger_seconds: number
@@ -1941,6 +2014,8 @@ const oneClickForm = reactive<{
   force_rerun: false,
   security_change_2fa: false,
   security_new_recovery_email: '',
+  recovery_email_mode: 'manual',
+  cloudmail_config_id: null,
   preset: 'recommended',
   max_concurrency: 5,
   stagger_seconds: 1,
@@ -2079,6 +2154,9 @@ const normalizeSecurityOneClickConfig = () => {
 }
 
 const newRecoveryEmail = ref('')
+const recoveryEmailMode = ref<'manual' | 'auto'>('manual')
+const selectedCloudMailConfigId = ref<string>('')
+const cloudMailConfigs = ref<any[]>([])
 const verifySubScreenshot = ref(false)
 
 const accountForm = reactive({
@@ -2330,13 +2408,17 @@ const submitOneClickTask = async () => {
   if (oneClickForm.security_change_2fa) {
     config.security_change_2fa = true
   }
-  if (oneClickForm.security_new_recovery_email && oneClickForm.security_new_recovery_email.trim()) {
+  if (oneClickForm.recovery_email_mode === 'auto' && oneClickForm.cloudmail_config_id) {
+    config.cloudmail_config_id = oneClickForm.cloudmail_config_id
+  } else if (oneClickForm.security_new_recovery_email && oneClickForm.security_new_recovery_email.trim()) {
     config.security_new_recovery_email = oneClickForm.security_new_recovery_email.trim()
   }
   config.max_concurrency = scheduleConfig.max_concurrency
   config.stagger_seconds = scheduleConfig.stagger_seconds
   config.rest_min_minutes = scheduleConfig.rest_min_minutes
   config.rest_max_minutes = scheduleConfig.rest_max_minutes
+
+  console.log('[一键启动] force_rerun switch:', oneClickForm.force_rerun, '| config:', JSON.stringify(config))
 
   try {
     const res = await googleTasksApi.createTask({
@@ -2560,24 +2642,54 @@ const submitBindCardTask = async () => {
   }
 }
 
-const submitChangeRecoveryEmail = async () => {
-  if (!newRecoveryEmail.value) {
-    ElMessage.warning('请输入邮箱')
-    return
-  }
+const loadCloudMailConfigs = async () => {
   try {
-    const ids = getSelectedIds()
-    const res = await googleSecurityApi.changeRecoveryEmail({
-      account_ids: getSelectedIds(),
-      new_email: newRecoveryEmail.value
-    })
-    const celeryTaskId = getCreatedCeleryTaskId(res)
-    if (celeryTaskId) startCeleryTaskStatusPolling(celeryTaskId, ids)
-    ElMessage.success('任务已提交')
-    showRecoveryEmailDialog.value = false
-    fetchAccounts()
-  } catch (e: any) {
-    ElMessage.error('操作失败: ' + e.message)
+    const res = await getCloudMailConfigs()
+    cloudMailConfigs.value = (res.data?.results || res.data || []).filter((c: any) => c.is_active)
+  } catch {
+    cloudMailConfigs.value = []
+  }
+}
+
+const submitChangeRecoveryEmail = async () => {
+  const ids = getSelectedIds()
+
+  if (recoveryEmailMode.value === 'auto') {
+    if (!selectedCloudMailConfigId.value) {
+      ElMessage.warning('请选择域名邮箱配置')
+      return
+    }
+    try {
+      const res = await googleSecurityApi.autoChangeRecoveryEmail({
+        account_ids: ids,
+        cloudmail_config_id: selectedCloudMailConfigId.value
+      })
+      const celeryTaskId = getCreatedCeleryTaskId(res)
+      if (celeryTaskId) startCeleryTaskStatusPolling(celeryTaskId, ids)
+      ElMessage.success('自动换绑任务已提交')
+      showRecoveryEmailDialog.value = false
+      fetchAccounts()
+    } catch (e: any) {
+      ElMessage.error('操作失败: ' + e.message)
+    }
+  } else {
+    if (!newRecoveryEmail.value) {
+      ElMessage.warning('请输入邮箱')
+      return
+    }
+    try {
+      const res = await googleSecurityApi.changeRecoveryEmail({
+        account_ids: ids,
+        new_email: newRecoveryEmail.value
+      })
+      const celeryTaskId = getCreatedCeleryTaskId(res)
+      if (celeryTaskId) startCeleryTaskStatusPolling(celeryTaskId, ids)
+      ElMessage.success('任务已提交')
+      showRecoveryEmailDialog.value = false
+      fetchAccounts()
+    } catch (e: any) {
+      ElMessage.error('操作失败: ' + e.message)
+    }
   }
 }
 

@@ -204,9 +204,14 @@ export const googleSecurityApi = {
     return request.post('/plugins/google-business/security/change_2fa/', data)
   },
 
-  // 修改辅助邮箱
+  // 修改辅助邮箱（手动指定邮箱）
   changeRecoveryEmail(data: { account_ids: number[]; new_email: string; browser_type?: string }): Promise<ApiResponse<any>> {
     return request.post('/plugins/google-business/security/change_recovery_email/', data)
+  },
+
+  // 自动创建域名邮箱并换绑辅助邮箱
+  autoChangeRecoveryEmail(data: { account_ids: number[]; cloudmail_config_id: number; browser_type?: string }): Promise<ApiResponse<any>> {
+    return request.post('/plugins/google-business/security/auto_change_recovery_email/', data)
   },
 
   // 获取备份验证码
