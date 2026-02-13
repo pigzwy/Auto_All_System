@@ -881,7 +881,7 @@ def process_single_account(
                             step4_needed = False
                             step5_needed = False
 
-                        # 4. 学生验证（如果需要）
+                        # 4. 学生验证（如果需要，带取消旧验证+刷新重试）
                         if step4_needed:
                             if status in ["verified", "subscribed"]:
                                 task_logger.info(
@@ -894,40 +894,124 @@ def process_single_account(
                                 verify_service = SheerIDVerifyService(
                                     api_key=config.get("api_key")
                                 )
-                                verification_id = (
-                                    SheerIDVerifyService.extract_verification_id(link)
-                                )
-                                if verification_id:
+                                max_verify_retries = 3  # 最多尝试3次（取消旧验证+刷新获取新链接）
+                                current_link = link
+                                verify_success = False
+                                last_verify_error = ""
+
+                                for verify_attempt in range(max_verify_retries):
+                                    verification_id = (
+                                        SheerIDVerifyService.extract_verification_id(current_link)
+                                    )
+                                    if not verification_id:
+                                        last_verify_error = "无法从链接提取验证ID"
+                                        task_logger.warning(
+                                            f"[Account {account_id}] {last_verify_error}: {current_link}"
+                                        )
+                                        break
+
+                                    task_logger.info(
+                                        f"[Account {account_id}] 验证尝试 {verify_attempt + 1}/{max_verify_retries}, VID: {verification_id[:20]}..."
+                                    )
                                     results = verify_service.verify_batch(
                                         [verification_id],
                                         callback=lambda vid, msg: task_logger.info(msg),
                                         task_logger=task_logger,
                                     )
                                     verify_result = results.get(verification_id, {})
+
                                     if verify_result.get("status") == "success":
                                         account_updates["sheerid_verified"] = True
-                                    else:
-                                        verify_message = str(
-                                            verify_result.get("message") or "验证未成功"
+                                        verify_success = True
+                                        break
+
+                                    # 验证失败
+                                    last_verify_error = str(
+                                        verify_result.get("message") or "验证未成功"
+                                    )
+                                    task_logger.warning(
+                                        f"[Account {account_id}] 验证未成功: {last_verify_error}"
+                                    )
+
+                                    # HTTP 404 不可恢复，直接退出
+                                    if "HTTP 404" in last_verify_error:
+                                        append_note("学生验证失败: HTTP 404")
+                                        break
+
+                                    # 还有重试机会：取消旧验证 → 刷新页面 → 获取新链接
+                                    if verify_attempt < max_verify_retries - 1:
+                                        # 取消旧验证
+                                        try:
+                                            task_logger.info(
+                                                f"[Account {account_id}] 取消旧验证: {verification_id[:20]}..."
+                                            )
+                                            cancel_result = verify_service.cancel_verification(verification_id)
+                                            task_logger.info(
+                                                f"[Account {account_id}] 取消结果: {cancel_result.get('status', 'unknown')}"
+                                            )
+                                        except Exception as cancel_err:
+                                            task_logger.warning(
+                                                f"[Account {account_id}] 取消验证异常: {cancel_err}"
+                                            )
+
+                                        # 刷新页面获取新链接
+                                        task_logger.info(
+                                            f"[Account {account_id}] 刷新页面获取新验证链接..."
                                         )
-                                        task_logger.warning(
-                                            f"[Account {account_id}] 验证未成功: {verify_message}"
-                                        )
-                                        # 验证失败：更新状态并停止流程，不再继续到步骤5（绑卡订阅）
-                                        new_meta = dict(account.metadata or {})
-                                        new_meta["google_one_status"] = "link_ready"
-                                        account_updates["metadata"] = new_meta
-                                        if "HTTP 404" in verify_message:
-                                            append_note("学生验证失败: HTTP 404")
-                                        return {
-                                            "success": False,
-                                            "message": f"学生验证失败: {verify_message}",
-                                            "account_updates": account_updates,
-                                            "failed_step": "verify",
-                                            "main_flow_step_num": 4,
-                                            "main_flow_step_title": "学生验证失败",
-                                            "keep_browser": False,
-                                        }
+                                        try:
+                                            await page.reload(wait_until="domcontentloaded")
+                                            await asyncio.sleep(3)
+                                            link_service = GoogleOneLinkService()
+                                            new_status, new_link = await link_service.check_google_one_status(
+                                                page, timeout=15, task_logger=task_logger
+                                            )
+                                            task_logger.info(
+                                                f"[Account {account_id}] 刷新后状态: {new_status}"
+                                            )
+
+                                            if new_status == "verified":
+                                                # 刷新后已验证（可能之前的验证生效了）
+                                                task_logger.info(
+                                                    f"[Account {account_id}] 刷新后已是已验证状态"
+                                                )
+                                                account_updates["sheerid_verified"] = True
+                                                verify_success = True
+                                                break
+                                            elif new_status == "link_ready" and new_link:
+                                                current_link = new_link
+                                                account_updates["sheerid_link"] = new_link
+                                                task_logger.info(
+                                                    f"[Account {account_id}] 获取到新链接，重试验证..."
+                                                )
+                                                await asyncio.sleep(2)
+                                                continue
+                                            else:
+                                                task_logger.warning(
+                                                    f"[Account {account_id}] 刷新后无法获取新链接，状态: {new_status}"
+                                                )
+                                                last_verify_error = f"刷新后状态异常: {new_status}"
+                                                break
+                                        except Exception as refresh_err:
+                                            task_logger.warning(
+                                                f"[Account {account_id}] 刷新页面异常: {refresh_err}"
+                                            )
+                                            last_verify_error = f"刷新页面异常: {refresh_err}"
+                                            break
+
+                                if not verify_success:
+                                    # 所有重试都失败：更新状态并停止流程
+                                    new_meta = dict(account.metadata or {})
+                                    new_meta["google_one_status"] = "link_ready"
+                                    account_updates["metadata"] = new_meta
+                                    return {
+                                        "success": False,
+                                        "message": f"学生验证失败: {last_verify_error}",
+                                        "account_updates": account_updates,
+                                        "failed_step": "verify",
+                                        "main_flow_step_num": 4,
+                                        "main_flow_step_title": "学生验证失败",
+                                        "keep_browser": False,
+                                    }
                             else:
                                 task_logger.info(
                                     f"[Account {account_id}] 步骤 4/6: 跳过（无验证链接）"
