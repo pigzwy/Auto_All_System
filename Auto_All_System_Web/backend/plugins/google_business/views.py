@@ -656,6 +656,68 @@ class GoogleAccountViewSet(viewsets.ModelViewSet):
             }
         )
 
+    @action(detail=True, methods=["delete"], url_path="clear_tasks")
+    def clear_tasks(self, request, pk=None):
+        """清空该账号的历史任务记录（保留运行中任务）。
+
+        同时：
+        1. 删除 GoogleTaskAccount 关联记录和已完成/失败的 GoogleTask
+        2. 清除 metadata 中的 google_zone_actions
+        3. 清理关联的截图文件
+        """
+        account = get_object_or_404(GoogleAccount, id=pk, owner_user=request.user)
+
+        keep_statuses = {"pending", "running", "paused"}
+
+        # 找到该账号关联的所有任务
+        rels = GoogleTaskAccount.objects.filter(account=account).select_related("task")
+
+        removed_count = 0
+
+        for rel in rels:
+            task = rel.task
+            if task.status in keep_statuses:
+                continue
+
+            # 删除关联记录
+            rel.delete()
+
+            # 如果任务没有其他关联账号了，删除任务本身
+            remaining = GoogleTaskAccount.objects.filter(task=task).count()
+            if remaining == 0:
+                task.delete()
+
+            removed_count += 1
+
+        # 清除 metadata 中的 google_zone_actions 和截图信息
+        meta = account.metadata if isinstance(account.metadata, dict) else {}
+        screenshot = meta.get("google_one_screenshot")
+
+        changed = False
+        if meta.get("google_zone_actions"):
+            meta["google_zone_actions"] = []
+            changed = True
+        if screenshot:
+            meta["google_one_screenshot"] = None
+            changed = True
+
+        if changed:
+            account.metadata = meta
+            account.save(update_fields=["metadata"])
+
+        # 清理截图文件（只处理当前账号的截图）
+        if screenshot:
+            base_dir = Path(getattr(settings, "BASE_DIR", Path.cwd()))
+            screenshots_dir = base_dir / "screenshots"
+            fpath = screenshots_dir / os.path.basename(str(screenshot))
+            if fpath.is_file():
+                try:
+                    fpath.unlink()
+                except Exception:
+                    pass
+
+        return Response({"status": "cleared", "removed": removed_count})
+
     def create(self, request):
         """创建单个账号"""
         serializer = GoogleAccountCreateSerializer(data=request.data)
@@ -1731,6 +1793,136 @@ class GoogleTaskViewSet(viewsets.ModelViewSet):
                 "accounts": serializer.data,
             }
         )
+
+    @action(detail=True, methods=["get"])
+    def artifacts(self, request, pk=None):
+        """获取任务产物（截图等文件）列表
+
+        从 GoogleTaskAccount 获取该任务关联的所有账号，
+        遍历 metadata.google_one_screenshot 获取截图路径，
+        同时扫描 screenshots/ 目录匹配该任务账号的文件。
+        """
+        task = self.get_object()
+
+        normalized = []
+        seen = set()
+
+        def add_file(name, file_path=None):
+            name = str(name or "")
+            if not name or name in seen:
+                return
+            seen.add(name)
+            normalized.append({
+                "name": name,
+                "download_url": request.build_absolute_uri(
+                    f"/api/v1/plugins/google-business/tasks/{task.id}/download/{name}/"
+                ),
+            })
+
+        # 1. 从 GoogleTaskAccount 关联的账号 metadata 中获取截图
+        task_accounts_qs = GoogleTaskAccount.objects.filter(
+            task=task
+        ).select_related("account")
+
+        for ta in task_accounts_qs:
+            account = ta.account
+            meta = account.metadata if isinstance(account.metadata, dict) else {}
+            screenshot = meta.get("google_one_screenshot")
+            if screenshot:
+                # screenshot 可能是完整路径或仅文件名
+                screenshot_name = os.path.basename(str(screenshot))
+                add_file(screenshot_name)
+
+        # 2. 扫描 screenshots/ 目录，匹配任务关联账号邮箱的文件
+        base_dir = Path(getattr(settings, "BASE_DIR", Path.cwd()))
+        screenshots_dir = base_dir / "screenshots"
+        if screenshots_dir.exists() and screenshots_dir.is_dir():
+            # 获取所有关联账号的邮箱，用于模糊匹配文件名
+            account_emails = set()
+            for ta in task_accounts_qs:
+                email = str(ta.account.email or "").strip()
+                if email:
+                    account_emails.add(email)
+                    # 安全化邮箱（替换 @ 和 .）用于文件名匹配
+                    safe = email.replace("@", "_").replace(".", "_")
+                    account_emails.add(safe)
+
+            if account_emails:
+                for p in sorted(screenshots_dir.glob("*")):
+                    if not p.is_file():
+                        continue
+                    fname = p.name
+                    # 检查文件名是否包含任一账号邮箱
+                    if any(kw in fname for kw in account_emails):
+                        add_file(fname)
+
+        return Response(normalized)
+
+    @action(detail=True, methods=["get"], url_path=r"download/(?P<filename>[^/]+)")
+    def download(self, request, pk=None, filename=None):
+        """下载任务产物文件
+
+        从 screenshots/ 目录读取文件，带路径穿越防护。
+        图片文件以内联方式返回（浏览器直接展示），非图片文件强制下载。
+        """
+        task = self.get_object()
+        filename = str(filename or "")
+
+        if not filename:
+            return Response(
+                {"error": "filename required"}, status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # 防止路径穿越
+        safe_filename = os.path.basename(filename)
+        if safe_filename != filename:
+            return Response(
+                {"error": "invalid filename"}, status=status.HTTP_400_BAD_REQUEST
+            )
+
+        base_dir = Path(getattr(settings, "BASE_DIR", Path.cwd()))
+        screenshots_dir = base_dir / "screenshots"
+        file_path = (screenshots_dir / safe_filename).resolve()
+
+        # 检查文件存在性
+        if not file_path.is_file():
+            return Response(
+                {"error": "file not found"}, status=status.HTTP_404_NOT_FOUND
+            )
+
+        # 路径穿越防护：确保在 screenshots_dir 内
+        try:
+            file_path.relative_to(screenshots_dir.resolve())
+        except ValueError:
+            return Response(
+                {"error": "forbidden"}, status=status.HTTP_403_FORBIDDEN
+            )
+
+        # 根据扩展名判断 content_type
+        ext = file_path.suffix.lower()
+        content_type_map = {
+            ".png": "image/png",
+            ".jpg": "image/jpeg",
+            ".jpeg": "image/jpeg",
+            ".gif": "image/gif",
+            ".webp": "image/webp",
+            ".log": "text/plain",
+            ".txt": "text/plain",
+            ".json": "application/json",
+            ".csv": "text/csv",
+        }
+        content_type = content_type_map.get(ext, "application/octet-stream")
+
+        # 图片文件内联展示，非图片强制下载
+        is_image = ext in {".png", ".jpg", ".jpeg", ".gif", ".webp"}
+        response = FileResponse(
+            open(file_path, "rb"),
+            content_type=content_type,
+            as_attachment=not is_image,
+            filename=file_path.name,
+        )
+        response["Content-Length"] = os.path.getsize(str(file_path))
+        return response
 
 
 # ==================== 统计和配置 ====================

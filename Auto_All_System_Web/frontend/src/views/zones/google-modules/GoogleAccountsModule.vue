@@ -688,8 +688,20 @@
     <Sheet v-model:open="showTasksDrawer">
       <SheetContent side="right" class="w-full sm:max-w-[900px]">
         <SheetHeader>
-          <SheetTitle>任务记录</SheetTitle>
-          <SheetDescription>当前账号的任务与执行日志入口</SheetDescription>
+          <div class="flex items-start justify-between gap-3">
+            <div>
+              <SheetTitle>任务记录</SheetTitle>
+              <SheetDescription>当前账号的任务与执行日志入口</SheetDescription>
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              class="text-destructive border-destructive/40 hover:bg-destructive/10"
+              @click="clearTaskRecords"
+            >
+              清空记录
+            </Button>
+          </div>
         </SheetHeader>
 
         <div class="mt-4">
@@ -772,6 +784,15 @@
                     <TableCell class="text-right">
                       <div class="flex items-center justify-end gap-2">
                         <Button
+                          v-if="row.source === 'google' && row.google_task_id"
+                          variant="link"
+                          size="xs"
+                          class="h-auto p-0"
+                          @click="viewTaskArtifacts(row.google_task_id)"
+                        >
+                          产物
+                        </Button>
+                        <Button
                           variant="link"
                           size="xs"
                           class="h-auto p-0"
@@ -829,6 +850,14 @@
         </div>
       </SheetContent>
     </Sheet>
+
+    <!-- 产物弹窗 -->
+    <ArtifactsDialog
+      :open="artifactsDialogVisible"
+      :loading="artifactsLoading"
+      :artifacts="currentTaskArtifacts"
+      @update:open="artifactsDialogVisible = $event"
+    />
 
     <!-- 通用日志查看Dialog -->
     <Dialog v-model:open="showLogDialog">
@@ -1383,6 +1412,7 @@
 <script setup lang="ts">
 import { ref, reactive, onMounted, computed, nextTick, watch, onBeforeUnmount } from 'vue'
 import { ElMessage, ElMessageBox } from '@/lib/element'
+import { cleanLogText, normalizeTraceLines as _normalizeTraceLines, type TraceLine } from '@/lib/log-utils'
 import {
   CheckCircle2,
   CreditCard as CreditCardIcon,
@@ -1441,6 +1471,7 @@ import {
 } from '@/api/google'
 import { getCloudMailConfigs } from '@/api/email'
 import type { GoogleAccount } from '@/types'
+import ArtifactsDialog from '@/components/ArtifactsDialog.vue'
 
 const loading = ref(false)
 const submitting = ref(false)
@@ -1796,6 +1827,49 @@ const openTasksDrawer = (account: GoogleAccount) => {
 
 // Data for dialogs
 const drawerLoading = ref(false)
+
+// 产物弹窗
+type TaskArtifact = { name: string; download_url: string }
+const artifactsDialogVisible = ref(false)
+const artifactsLoading = ref(false)
+const currentTaskArtifacts = ref<TaskArtifact[]>([])
+
+const viewTaskArtifacts = async (taskId: number) => {
+  artifactsDialogVisible.value = true
+  artifactsLoading.value = true
+  currentTaskArtifacts.value = []
+  try {
+    const artifacts = await googleTasksApi.getTaskArtifacts(taskId)
+    currentTaskArtifacts.value = Array.isArray(artifacts) ? artifacts : []
+  } catch (e: any) {
+    ElMessage.error(e?.response?.data?.error || e?.message || '获取产物失败')
+    currentTaskArtifacts.value = []
+  } finally {
+    artifactsLoading.value = false
+  }
+}
+
+const clearTaskRecords = async () => {
+  if (!selectedAccount.value) return
+  const account = selectedAccount.value
+  try {
+    await ElMessageBox.confirm(
+      '确定清空该账号的历史任务记录吗？（会删除已完成/失败/取消的记录及相关文件，运行中任务会保留）',
+      '清空记录',
+      {
+        type: 'warning',
+        confirmButtonText: '清空',
+        cancelButtonText: '取消'
+      }
+    )
+    const res = await googleAccountsApi.clearAccountTasks(account.id)
+    ElMessage.success(`已清空 ${res?.removed ?? 0} 条记录`)
+    await viewTasks(account)
+  } catch (e: any) {
+    if (e === 'cancel' || e?.message === 'cancel') return
+  }
+}
+
 const accountTasks = reactive({
   // 统一任务列表（后端 accounts/{id}/tasks/ 返回 tasks 字段）
   tasks: [] as any[],
@@ -1829,7 +1903,6 @@ const logProgressCount = computed(() => {
   return last >= 0 ? last + 1 : 0
 })
 
-type TraceLine = { id: number; text: string; isJson: boolean }
 
 const celeryTaskId = ref('')
 const celeryEmail = ref('')
@@ -2763,7 +2836,7 @@ const fetchTaskLog = async (
     const res = await googleTasksApi.getTaskLog(taskId, params)
     // 后端返回：{ task_id, accounts_summary, log }
     const logStr = typeof res?.log === 'string' ? res.log : JSON.stringify(res, null, 2)
-    currentLogContent.value = logStr
+    currentLogContent.value = cleanLogText(logStr)
     currentAccountsSummary.value = Array.isArray(res?.accounts_summary) ? res.accounts_summary : []
 
     // Parse steps
@@ -2900,26 +2973,9 @@ const refreshCeleryStatus = async () => {
 }
 
 const normalizeTraceLines = (raw: string[]): TraceLine[] => {
-  const out: TraceLine[] = []
-  // 去除每行中与摘要卡片重复的 [kind][celery=xxx][email] step/action: 前缀
-  // 原始格式: [2026-02-13T11:05:19.137959+00:00] [gpt][celery=xxx][email] step/action: message
-  // 清理后:   [11:05:19] message
-  const prefixRe = /^(\[[^\]]*\])\s*\[[^\]]*\]\[celery=[^\]]*\]\[[^\]]*\]\s*\S+\/\S+:\s*/
-  // 简化时间戳: [2026-02-13T11:05:19.137959+00:00] → [2026-02-13 11:05:19]
-  const tsRe = /^\[(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2}:\d{2})\.\d+[^\]]*\]/
-  for (const t of raw || []) {
-    const text = String(t ?? '')
-    if (!text) continue
-    // 过滤 JSON 行（与人类可读行内容重复）
-    if (text.trim().startsWith('{')) continue
-    const cleaned = text.replace(prefixRe, '$1 ').replace(tsRe, '[$1 $2]')
-    out.push({
-      id: ++traceLineSeq,
-      text: cleaned,
-      isJson: false
-    })
-  }
-  return out
+  const result = _normalizeTraceLines(raw, traceLineSeq)
+  traceLineSeq = result.nextId
+  return result.lines
 }
 
 const fetchTraceBackward = async (opts?: { initial?: boolean }) => {

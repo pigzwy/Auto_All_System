@@ -634,39 +634,12 @@
     </Sheet>
 
     <!-- Artifacts Dialog -->
-    <Dialog v-model:open="artifactsDialogVisible">
-      <DialogContent class="sm:max-w-[600px]">
-        <DialogHeader>
-          <DialogTitle>任务产物</DialogTitle>
-        </DialogHeader>
-        <div class="py-2">
-          <div v-if="artifactsLoading" class="py-4 text-center">
-            <Loader2 class="mx-auto h-5 w-5 animate-spin text-muted-foreground" />
-          </div>
-          <Table v-else>
-            <TableHeader>
-              <TableRow>
-                <TableHead>文件</TableHead>
-                <TableHead class="text-right">操作</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              <TableRow v-for="art in currentTaskArtifacts" :key="art.name">
-                <TableCell class="font-mono text-xs">{{ art.name }}</TableCell>
-                <TableCell class="text-right">
-                  <a :href="art.download_url" target="_blank" class="inline-flex items-center justify-center rounded-md text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 text-primary underline-offset-4 hover:underline h-9 px-3">
-                    <FileDown class="mr-2 h-4 w-4" /> 下载
-                  </a>
-                </TableCell>
-              </TableRow>
-              <TableRow v-if="currentTaskArtifacts.length === 0">
-                <TableCell colspan="2" class="py-4 text-center text-sm text-muted-foreground">无产物</TableCell>
-              </TableRow>
-            </TableBody>
-          </Table>
-        </div>
-      </DialogContent>
-    </Dialog>
+    <ArtifactsDialog
+      :open="artifactsDialogVisible"
+      :loading="artifactsLoading"
+      :artifacts="currentTaskArtifacts"
+      @update:open="artifactsDialogVisible = $event"
+    />
 
     <!-- Account Detail Dialog -->
     <Dialog v-model:open="accountDetailDialogVisible">
@@ -930,6 +903,7 @@
 <script setup lang="ts">
 import { computed, inject, nextTick, onMounted, onUnmounted, provide, reactive, ref, watch, type Ref } from 'vue'
 import { ElMessage, ElMessageBox } from '@/lib/element'
+import { cleanLogText, normalizeTraceLines as _normalizeTraceLines, type TraceLine } from '@/lib/log-utils'
 import {
   Armchair,
   Copy,
@@ -991,6 +965,7 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { Switch } from '@/components/ui/switch'
+import ArtifactsDialog from '@/components/ArtifactsDialog.vue'
 
 import { getCloudMailConfigs, type CloudMailConfig } from '@/api/email'
 import type { GptBusinessAccount, GptBusinessAccountsResponse } from '@/api/gpt_business'
@@ -1764,8 +1739,6 @@ const celeryError = ref('')
 const celeryTraceback = ref('')
 const celeryStatusLoading = ref(false)
 
-type TraceLine = { id: number; text: string; isJson: boolean }
-
 const traceLines = ref<TraceLine[]>([])
 const traceHasMoreBackward = ref(false)
 const traceCursorBackward = ref<number | null>(null)
@@ -1862,26 +1835,9 @@ const refreshCeleryStatus = async () => {
 }
 
 const normalizeTraceLines = (raw: string[]): TraceLine[] => {
-  const out: TraceLine[] = []
-  // 去除每行中与摘要卡片重复的 [kind][celery=xxx][email] step/action: 前缀
-  // 原始格式: [2026-02-13T11:05:19.137959+00:00] [gpt][celery=xxx][email] step/action: message
-  // 清理后:   [11:05:19] message
-  const prefixRe = /^(\[[^\]]*\])\s*\[[^\]]*\]\[celery=[^\]]*\]\[[^\]]*\]\s*\S+\/\S+:\s*/
-  // 简化时间戳: [2026-02-13T11:05:19.137959+00:00] → [2026-02-13 11:05:19]
-  const tsRe = /^\[(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2}:\d{2})\.\d+[^\]]*\]/
-  for (const t of raw || []) {
-    const text = String(t ?? '')
-    if (!text) continue
-    // 过滤 JSON 行（与人类可读行内容重复）
-    if (text.trim().startsWith('{')) continue
-    const cleaned = text.replace(prefixRe, '$1 ').replace(tsRe, '[$1 $2]')
-    out.push({
-      id: ++traceLineSeq,
-      text: cleaned,
-      isJson: false
-    })
-  }
-  return out
+  const result = _normalizeTraceLines(raw, traceLineSeq)
+  traceLineSeq = result.nextId
+  return result.lines
 }
 
 const fetchTraceBackward = async (opts?: { initial?: boolean }) => {
@@ -2162,7 +2118,7 @@ const loadTaskLog = async (task: TaskRow) => {
     currentLogFilename.value = res?.filename || 'run.log'
     currentLogDownloadUrl.value = res?.download_url || ''
     const logStr = res?.text || ''
-    taskLogText.value = logStr
+    taskLogText.value = cleanLogText(logStr)
     currentAccountsSummary.value = Array.isArray(res?.accounts_summary) ? res.accounts_summary : []
     const parsed = parseLogDetails(logStr, task.type)
     currentSteps.value = parsed.steps

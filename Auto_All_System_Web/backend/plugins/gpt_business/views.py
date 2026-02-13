@@ -566,7 +566,9 @@ class TaskViewSet(ViewSet):
         except Exception:
             return Response({"detail": "Forbidden"}, status=status.HTTP_403_FORBIDDEN)
 
-        response = FileResponse(file_path.open("rb"), as_attachment=True, filename=file_path.name)
+        # 图片文件内联展示，非图片强制下载
+        is_image = file_path.suffix.lower() in {'.png', '.jpg', '.jpeg', '.gif', '.webp'}
+        response = FileResponse(file_path.open("rb"), as_attachment=not is_image, filename=file_path.name)
         response["Content-Length"] = os.path.getsize(str(file_path))
         return response
 

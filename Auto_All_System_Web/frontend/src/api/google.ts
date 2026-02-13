@@ -64,6 +64,11 @@ export const googleAccountsApi = {
     return request.get(`/plugins/google-business/accounts/${accountId}/tasks/`)
   },
 
+  // 清空账号的历史任务记录（保留运行中任务，同时删除磁盘文件）
+  clearAccountTasks(accountId: number): Promise<{ status: string; removed: number }> {
+    return request.delete(`/plugins/google-business/accounts/${accountId}/clear_tasks/`)
+  },
+
   // 启动 Geekez 浏览器环境
   launchGeekez(accountId: number): Promise<ApiResponse<any>> {
     return request.post(`/plugins/google-business/accounts/${accountId}/launch_geekez/`)
@@ -143,6 +148,11 @@ export const googleTasksApi = {
   // 取消任务（如后端支持）
   cancelTask(taskId: number | string): Promise<any> {
     return request.post(`/plugins/google-business/tasks/${taskId}/cancel/`)
+  },
+
+  // 获取任务产物列表
+  getTaskArtifacts(taskId: number | string): Promise<any> {
+    return request.get(`/plugins/google-business/tasks/${taskId}/artifacts/`)
   }
 }
 

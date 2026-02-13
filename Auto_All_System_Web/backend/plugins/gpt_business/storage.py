@@ -122,6 +122,7 @@ def clear_tasks_for_mother(mother_id: str, *, keep_in_progress: bool = True) -> 
 
     in_progress_statuses = {"queued", "pending", "running"}
     removed = 0
+    removed_task_ids: list[str] = []
 
     def mutator(settings: dict[str, Any]) -> dict[str, Any]:
         nonlocal removed
@@ -139,12 +140,32 @@ def clear_tasks_for_mother(mother_id: str, *, keep_in_progress: bool = True) -> 
                 continue
 
             removed += 1
+            task_id = str(t.get("id") or "").strip()
+            if task_id:
+                removed_task_ids.append(task_id)
 
         settings["tasks"] = kept
         settings["last_updated"] = timezone.now().isoformat()
         return settings
 
     update_settings(mutator)
+
+    # 清理磁盘上的产物文件（jobs/{task_id}/ 目录）
+    if removed_task_ids:
+        import shutil
+        from pathlib import Path
+        from django.conf import settings as django_settings
+
+        media_root = Path(str(getattr(django_settings, "MEDIA_ROOT", "")))
+        jobs_dir = media_root / "gpt_business" / "jobs"
+        for task_id in removed_task_ids:
+            job_dir = jobs_dir / task_id
+            if job_dir.exists() and job_dir.is_dir():
+                try:
+                    shutil.rmtree(str(job_dir))
+                except Exception:
+                    pass  # 静默失败，不阻止清理流程
+
     return removed
 
 
