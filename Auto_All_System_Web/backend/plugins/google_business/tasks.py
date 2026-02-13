@@ -275,8 +275,9 @@ def process_single_account(
                         )
 
                     elif task_type == "bind_card":
+                        from asgiref.sync import sync_to_async as _s2a
                         bind_service = GoogleOneBindCardService()
-                        card = _select_card_for_task(task=task, config=config)
+                        card = await _s2a(_select_card_for_task)(task=task, config=config)
                         card_info = {
                             "number": card.card_number,
                             "exp_month": str(card.expiry_month).zfill(2),
@@ -291,7 +292,7 @@ def process_single_account(
                                 page, card_info, account_info, task_logger
                             )
                         finally:
-                            _mark_card_used(
+                            await _s2a(_mark_card_used)(
                                 card=card,
                                 user=task.user,
                                 success=ok,
@@ -912,17 +913,21 @@ def process_single_account(
                                         task_logger.warning(
                                             f"[Account {account_id}] 验证未成功: {verify_message}"
                                         )
+                                        # 验证失败：更新状态并停止流程，不再继续到步骤5（绑卡订阅）
+                                        new_meta = dict(account.metadata or {})
+                                        new_meta["google_one_status"] = "link_ready"
+                                        account_updates["metadata"] = new_meta
                                         if "HTTP 404" in verify_message:
                                             append_note("学生验证失败: HTTP 404")
-                                            return {
-                                                "success": False,
-                                                "message": f"学生验证失败: {verify_message}",
-                                                "account_updates": account_updates,
-                                                "failed_step": "verify",
-                                                "main_flow_step_num": 4,
-                                                "main_flow_step_title": "学生验证失败",
-                                                "keep_browser": False,
-                                            }
+                                        return {
+                                            "success": False,
+                                            "message": f"学生验证失败: {verify_message}",
+                                            "account_updates": account_updates,
+                                            "failed_step": "verify",
+                                            "main_flow_step_num": 4,
+                                            "main_flow_step_title": "学生验证失败",
+                                            "keep_browser": False,
+                                        }
                             else:
                                 task_logger.info(
                                     f"[Account {account_id}] 步骤 4/6: 跳过（无验证链接）"
@@ -938,8 +943,9 @@ def process_single_account(
                             task_logger.info(
                                 f"[Account {account_id}] 步骤 5/6: 订阅服务"
                             )
+                            from asgiref.sync import sync_to_async as _s2a
                             bind_service = GoogleOneBindCardService()
-                            card = _select_card_for_task(task=task, config=config)
+                            card = await _s2a(_select_card_for_task)(task=task, config=config)
                             card_info = {
                                 "number": card.card_number,
                                 "exp_month": str(card.expiry_month).zfill(2),
@@ -952,7 +958,7 @@ def process_single_account(
                                     page, card_info, account_info, task_logger
                                 )
                             finally:
-                                _mark_card_used(
+                                await _s2a(_mark_card_used)(
                                     card=card,
                                     user=task.user,
                                     success=ok,

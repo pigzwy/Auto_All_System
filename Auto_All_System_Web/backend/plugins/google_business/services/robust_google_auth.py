@@ -109,7 +109,9 @@ async def detect_captcha(page: Page) -> bool:
 
     try:
         for indicator in captcha_indicators:
-            if await page.locator(indicator).count() > 0:
+            locator = page.locator(indicator)
+            if await locator.count() > 0 and await locator.first.is_visible():
+                logger.info(f"检测到验证码指标: {indicator}")
                 return True
         return False
     except Exception:
