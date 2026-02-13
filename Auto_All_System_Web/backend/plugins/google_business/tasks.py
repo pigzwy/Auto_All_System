@@ -292,11 +292,13 @@ def process_single_account(
                                 page, card_info, account_info, task_logger
                             )
                         finally:
+                            is_card_invalid = (not ok) and message.startswith("CARD_INVALID:")
                             await _s2a(_mark_card_used)(
                                 card=card,
                                 user=task.user,
                                 success=ok,
                                 purpose="google_one_bind_card",
+                                card_invalid=is_card_invalid,
                             )
 
                         suffix = (
@@ -1042,12 +1044,24 @@ def process_single_account(
                                     page, card_info, account_info, task_logger
                                 )
                             finally:
+                                # 根据消息前缀区分：CARD_INVALID=新卡无效需标记，REBIND_NEEDED=旧卡问题不标记新卡
+                                is_card_invalid = (not ok) and message.startswith("CARD_INVALID:")
+                                is_rebind_needed = (not ok) and message.startswith("REBIND_NEEDED:")
                                 await _s2a(_mark_card_used)(
                                     card=card,
                                     user=task.user,
                                     success=ok,
                                     purpose="google_one_one_click",
+                                    card_invalid=is_card_invalid,
                                 )
+                                if is_card_invalid:
+                                    task_logger.warning(
+                                        f"[Account {account_id}] 卡 ****{card.card_number[-4:] if card.card_number else '????'} 被标记为无效"
+                                    )
+                                elif is_rebind_needed:
+                                    task_logger.info(
+                                        f"[Account {account_id}] 旧卡问题，新卡 ****{card.card_number[-4:] if card.card_number else '????'} 不受影响"
+                                    )
 
                             card_last4 = card.card_number[-4:] if card.card_number else ""
                         else:
@@ -1433,8 +1447,8 @@ def _select_card_for_task(task: GoogleTask, config: Dict[str, Any]) -> Card:
         return card
 
 
-def _mark_card_used(card: Card, user, success: bool, purpose: str) -> None:
-    """更新卡使用统计；失败也计 use_count，便于风控/轮换"""
+def _mark_card_used(card: Card, user, success: bool, purpose: str, card_invalid: bool = False) -> None:
+    """更新卡使用统计；失败也计 use_count，便于风控/轮换。card_invalid=True 时直接标记卡为不可用"""
     from django.utils import timezone
     from datetime import date
 
@@ -1445,8 +1459,11 @@ def _mark_card_used(card: Card, user, success: bool, purpose: str) -> None:
 
         card.last_used_at = timezone.now()
 
+        # 卡被支付网关明确拒绝（CARD_INVALID），直接标记为不可用
+        if card_invalid:
+            card.status = "invalid"
         # 达到上限则标记为 used；否则释放回 available
-        if (
+        elif (
             card.max_use_count
             and card.max_use_count > 0
             and card.use_count >= card.max_use_count

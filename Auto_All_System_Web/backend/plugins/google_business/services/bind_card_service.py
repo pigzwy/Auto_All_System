@@ -96,34 +96,40 @@ class GoogleOneBindCardService(BaseBrowserService):
             
             # 5. 检查是否已绑卡（前置判断）
             already_bound, subscribe_button = await self._check_already_bound(page, task_logger)
-            
+
             if already_bound and subscribe_button:
-                # 直接点击订阅按钮
+                # 直接点击订阅按钮（使用旧卡）
                 if task_logger:
-                    task_logger.info("检测到已绑卡，直接订阅...")
-                
+                    task_logger.info("检测到已绑卡，尝试直接订阅...")
+
                 await subscribe_button.click()
                 await asyncio.sleep(10)
                 await page.screenshot(path="bind_subscribe_existing_card.png")
-                
+
                 # 验证订阅是否成功
                 subscribed = await self._verify_subscribed(page, task_logger)
                 if subscribed:
                     return True, "使用已有卡订阅成功"
-                else:
-                    # 可能卡过期，继续换绑流程
+
+                # 检查是否旧卡被拒绝
+                old_card_error = await self._detect_payment_error(page, task_logger)
+                if old_card_error:
                     if task_logger:
-                        task_logger.warning("可能卡过期，尝试换绑...")
-                    
-                    rebind_success = await self._handle_card_expired(page, task_logger)
-                    if not rebind_success:
-                        return False, "卡过期换绑失败"
-                    # 继续执行后续绑卡流程
+                        task_logger.warning(f"旧卡被拒绝: {old_card_error}，尝试换绑新卡...")
+                else:
+                    if task_logger:
+                        task_logger.warning("旧卡订阅未成功，尝试换绑...")
+
+                rebind_success = await self._handle_card_expired(page, task_logger)
+                if not rebind_success:
+                    # 旧卡失败导致的换绑失败，不应标记新卡无效
+                    return False, "REBIND_NEEDED:旧卡过期换绑失败"
+                # 继续执行后续绑卡流程
             
             # 6. 切换到iframe
             iframe_locator = await self._get_payment_iframe(page, task_logger)
             if not iframe_locator:
-                return False, "未找到付款表单iframe"
+                return False, "REBIND_NEEDED:未找到付款表单iframe"
             
             # 7. 点击"Add card"
             clicked_add = await self._click_add_card(iframe_locator, task_logger)
@@ -140,12 +146,12 @@ class GoogleOneBindCardService(BaseBrowserService):
             # 9. 填写卡片信息
             fill_success = await self._fill_card_info(iframe_locator, card_info, task_logger)
             if not fill_success:
-                return False, "填写卡片信息失败"
-            
+                return False, "CARD_INVALID:填写卡片信息失败"
+
             # 10. 点击"Save card"
             save_success = await self._click_save_card(iframe_locator, task_logger)
             if not save_success:
-                return False, "点击Save card失败"
+                return False, "CARD_INVALID:点击Save card失败"
             
             # 11. 等待并点击订阅按钮
             if task_logger:
@@ -157,18 +163,29 @@ class GoogleOneBindCardService(BaseBrowserService):
             if subscribe_clicked:
                 await asyncio.sleep(10)
                 await page.screenshot(path="bind_step8_after_subscribe.png")
-                
+
                 # 12. 验证订阅成功
                 subscribed = await self._verify_subscribed(page, task_logger)
                 if subscribed:
                     if task_logger:
                         task_logger.info("✅ 绑卡并订阅成功！")
                     return True, "绑卡并订阅成功"
-                else:
+
+                # 检查是否新卡被拒绝
+                payment_error = await self._detect_payment_error(page, task_logger)
+                if payment_error:
                     if task_logger:
-                        task_logger.warning("未检测到订阅确认，但可能成功")
-                    return True, "绑卡完成"
+                        task_logger.warning(f"新卡被拒绝: {payment_error}")
+                    return False, f"CARD_INVALID:新卡支付失败 - {payment_error}"
+
+                if task_logger:
+                    task_logger.warning("未检测到订阅确认，但可能成功")
+                return True, "绑卡完成"
             else:
+                # 未找到订阅按钮，可能保存卡失败
+                payment_error = await self._detect_payment_error(page, task_logger)
+                if payment_error:
+                    return False, f"CARD_INVALID:保存卡后未出现订阅按钮 - {payment_error}"
                 if task_logger:
                     task_logger.warning("未找到订阅按钮，可能已自动完成")
                 return True, "绑卡完成"
@@ -572,4 +589,49 @@ class GoogleOneBindCardService(BaseBrowserService):
         except Exception as e:
             self.logger.error(f"Error verifying subscription: {e}")
             return False
+
+    async def _detect_payment_error(
+        self,
+        page: Page,
+        task_logger: Optional[TaskLogger] = None
+    ) -> Optional[str]:
+        """
+        检测支付错误信息（卡被拒绝、过期、无效等）
+
+        Returns:
+            Optional[str]: 错误信息文本，无错误返回 None
+        """
+        try:
+            iframe_locator = page.frame_locator('iframe[src*="tokenized.play.google.com"]')
+
+            error_selectors = [
+                'text=/declined/i',
+                'text=/failed/i',
+                'text=/invalid/i',
+                'text=/expired/i',
+                'text=/error/i',
+                'text=/rejected/i',
+                'text=/拒绝/',
+                'text=/失败/',
+                'text=/过期/',
+                'text=/无效/',
+            ]
+
+            for selector in error_selectors:
+                try:
+                    element = iframe_locator.locator(selector).first
+                    if await element.count() > 0 and await element.is_visible():
+                        error_text = await element.inner_text()
+                        self.logger.warning(f"Payment error detected: {error_text}")
+                        if task_logger:
+                            task_logger.warning(f"检测到支付错误: {error_text}")
+                        return error_text.strip()[:100]
+                except:
+                    continue
+
+            return None
+
+        except Exception as e:
+            self.logger.error(f"Error detecting payment error: {e}")
+            return None
 
