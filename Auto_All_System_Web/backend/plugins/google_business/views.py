@@ -2114,6 +2114,84 @@ class SecurityViewSet(viewsets.ViewSet):
             }
         )
 
+    @action(detail=False, methods=["post"], url_path="auto_change_recovery_email")
+    def auto_change_recovery_email(self, request):
+        """
+        自动创建域名邮箱并修改辅助邮箱
+
+        POST /api/v1/plugins/google-business/security/auto_change_recovery_email/
+        {
+            "account_ids": [1, 2, 3],
+            "cloudmail_config_id": 1,
+            "browser_type": "bitbrowser"
+        }
+        """
+        account_ids = request.data.get("account_ids", [])
+        cloudmail_config_id = request.data.get("cloudmail_config_id")
+        from apps.integrations.browser_base import get_browser_manager
+
+        browser_type = (
+            request.data.get("browser_type")
+            or get_browser_manager()._default_type.value
+        )
+
+        if not account_ids:
+            return Response({"error": "请选择账号"}, status=status.HTTP_400_BAD_REQUEST)
+
+        if not cloudmail_config_id:
+            return Response(
+                {"error": "请选择 CloudMail 配置"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        from apps.integrations.email.models import CloudMailConfig
+
+        cloudmail_config = CloudMailConfig.objects.filter(
+            id=cloudmail_config_id,
+            is_active=True,
+        ).first()
+        if not cloudmail_config:
+            return Response(
+                {"error": "CloudMail 配置不存在或未启用"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        from .tasks import auto_change_recovery_email_task
+
+        task = auto_change_recovery_email_task.delay(
+            account_ids=account_ids,
+            cloudmail_config_id=cloudmail_config_id,
+            user_id=request.user.id,
+            browser_type=browser_type,
+        )
+
+        now_iso = timezone.now().isoformat()
+        for acc in GoogleAccount.objects.filter(
+            id__in=account_ids, owner_user=request.user
+        ):
+            meta = acc.metadata or {}
+            actions = meta.get("google_zone_actions") or []
+            actions.append(
+                {
+                    "kind": "auto_change_recovery_email",
+                    "celery_task_id": task.id,
+                    "created_at": now_iso,
+                    "browser_type": browser_type,
+                    "cloudmail_config_id": cloudmail_config_id,
+                }
+            )
+            meta["google_zone_actions"] = actions[-50:]
+            acc.metadata = meta
+            acc.save(update_fields=["metadata"])
+
+        return Response(
+            {
+                "success": True,
+                "task_id": task.id,
+                "message": "自动修改辅助邮箱任务已提交",
+            }
+        )
+
     @action(detail=False, methods=["post"])
     def get_backup_codes(self, request):
         """

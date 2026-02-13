@@ -13,7 +13,7 @@ import re
 import time
 from pathlib import Path
 import pyotp
-from typing import Dict, Any, Optional, Tuple, List
+from typing import Dict, Any, Optional, Tuple, List, Callable, Awaitable
 from playwright.async_api import Page, Locator
 
 from apps.integrations.browser_base import get_browser_manager, BrowserType
@@ -1407,6 +1407,9 @@ class GoogleSecurityService:
         account: Dict[str, Any],
         new_email: str,
         task_logger: Optional[TaskLogger] = None,
+        verification_code_callback: Optional[
+            Callable[[str], Awaitable[Optional[str]]]
+        ] = None,
     ) -> Tuple[bool, str]:
         """
         修改辅助邮箱
@@ -1470,6 +1473,58 @@ class GoogleSecurityService:
 
             # 6. 检查是否需要验证新邮箱
             # (可能需要到新邮箱收验证码)
+            await asyncio.sleep(2.5)
+            verification_input = None
+            verification_input_selectors = [
+                'input[type="text"]',
+                'input[type="tel"]',
+                'input[name="code"]',
+                'input[aria-label*="code" i]',
+                'input[aria-label*="验证"]',
+            ]
+            for selector in verification_input_selectors:
+                candidate = page.locator(selector).first
+                try:
+                    if await candidate.is_visible(timeout=1200):
+                        verification_input = candidate
+                        break
+                except Exception:
+                    continue
+
+            if verification_input and verification_code_callback:
+                try:
+                    verification_code = await verification_code_callback(new_email)
+                except Exception as callback_error:
+                    logger.warning(
+                        "Failed to fetch recovery verification code for %s: %s",
+                        new_email,
+                        callback_error,
+                    )
+                    verification_code = ""
+
+                if isinstance(verification_code, str) and verification_code.strip():
+                    code = verification_code.strip()
+                    try:
+                        await verification_input.fill(code)
+                    except Exception:
+                        await verification_input.click()
+                        await page.keyboard.type(code)
+
+                    submit_btn = page.locator(
+                        'button:has-text("Next"), button:has-text("Verify"), button:has-text("下一步"), button:has-text("验证")'
+                    ).first
+                    submitted = False
+                    try:
+                        if await submit_btn.is_visible(timeout=1200):
+                            await submit_btn.click()
+                            submitted = True
+                    except Exception:
+                        submitted = False
+
+                    if not submitted:
+                        await page.keyboard.press("Enter")
+
+                    await asyncio.sleep(2)
 
             logger.info(f"Recovery email change initiated for {email}")
             if task_logger:

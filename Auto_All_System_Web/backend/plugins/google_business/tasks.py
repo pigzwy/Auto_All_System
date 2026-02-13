@@ -11,6 +11,9 @@ from django.db import transaction
 from django.utils import timezone
 
 from apps.cards.models import Card
+from apps.integrations.email.models import CloudMailConfig
+from apps.integrations.email.services.client import CloudMailClient
+from apps.integrations.email.services.email_service import EmailService
 from apps.integrations.google_accounts.models import GoogleAccount, GoogleAccountStatus
 from .models import GoogleTask, GoogleTaskAccount, GoogleCardInfo
 from .services import (
@@ -329,12 +332,37 @@ def process_single_account(
                         gemini_status = str(account.gemini_status or "").lower()
                         sheerid_link_snapshot = account.sheerid_link or ""
 
-                        force_rerun = bool(
+                        def _to_bool(val: Any) -> bool:
+                            if isinstance(val, bool):
+                                return val
+                            if val is None:
+                                return False
+                            if isinstance(val, (int, float)):
+                                return val != 0
+                            if isinstance(val, str):
+                                text = val.strip().lower()
+                                if text in {"1", "true", "yes", "y", "on"}:
+                                    return True
+                                if text in {"0", "false", "no", "n", "off", ""}:
+                                    return False
+                            return bool(val)
+
+                        force_rerun_raw = (
                             config.get("force_rerun")
+                            or config.get("forceRerun")
                             or config.get("force")
                             or config.get("rerun")
                         )
-                        resume_mode = bool(config.get("resume", True)) and not force_rerun
+                        force_rerun = _to_bool(force_rerun_raw)
+
+                        resume_raw = config.get("resume", True)
+                        resume_mode = _to_bool(resume_raw) and not force_rerun
+
+                        task_logger.info(
+                            f"[Account {account_id}] one_click config: "
+                            f"resume={resume_raw!r}, force_rerun={force_rerun_raw!r} -> "
+                            f"resume_mode={resume_mode}"
+                        )
 
                         has_link_status = google_one_status in [
                             "link_ready",
@@ -359,12 +387,12 @@ def process_single_account(
                             step4_needed = not has_verify
                             step5_needed = not has_subscribe
 
-                        if is_ineligible:
+                        if is_ineligible and not force_rerun:
                             step4_needed = False
                             step5_needed = False
 
                         # 对于 ineligible 且未订阅的账号，需要登录来做 Pro 订阅检查
-                        needs_pro_check = is_ineligible and not has_subscribe
+                        needs_pro_check = is_ineligible and not has_subscribe and not force_rerun
 
                         needs_security = bool(
                             config.get("security_change_2fa")
@@ -552,33 +580,54 @@ def process_single_account(
                                 # 已开通：标题为 "Choose a plan that works for you"，文案含 "By upgrading"
                                 is_already_subscribed = False
                                 try:
-                                    page_text = await page.locator("body").inner_text(timeout=5000)
-                                    # 已开通的明确标识
-                                    subscribed_signals = [
-                                        "Choose a plan that works for you",
-                                        "By upgrading",
+                                    # 优先用 CSS 选择器精确匹配 h1 标题
+                                    h1_subscribed_selectors = [
+                                        ("h1:has-text('您已订阅')", "您已订阅"),
+                                        ('h1:has-text("You\'re subscribed")', "You're subscribed"),
                                     ]
-                                    # 未开通的明确标识
-                                    not_subscribed_signals = [
-                                        "Try Google One at a discount",
-                                        "By subscribing",
-                                    ]
-                                    has_subscribed_signal = any(s in page_text for s in subscribed_signals)
-                                    has_not_subscribed_signal = any(s in page_text for s in not_subscribed_signals)
+                                    for selector, label in h1_subscribed_selectors:
+                                        try:
+                                            h1_el = page.locator(selector)
+                                            if await h1_el.count() > 0:
+                                                is_already_subscribed = True
+                                                task_logger.info(
+                                                    f"[Account {account_id}] 检测到 h1 标题「{label}」，确认已订阅 Pro"
+                                                )
+                                                break
+                                        except Exception:
+                                            continue
 
-                                    if has_subscribed_signal and not has_not_subscribed_signal:
-                                        is_already_subscribed = True
-                                        task_logger.info(
-                                            f"[Account {account_id}] 检测到已订阅 Pro（页面含: {[s for s in subscribed_signals if s in page_text]}）"
-                                        )
-                                    elif has_not_subscribed_signal:
-                                        task_logger.info(
-                                            f"[Account {account_id}] 未订阅 Pro，继续正常流程"
-                                        )
-                                    else:
-                                        task_logger.warning(
-                                            f"[Account {account_id}] 无法确定订阅状态，继续正常流程"
-                                        )
+                                    # 兜底：全页面文本匹配
+                                    if not is_already_subscribed:
+                                        page_text = await page.locator("body").inner_text(timeout=5000)
+                                        subscribed_signals = [
+                                            "Choose a plan that works for you",
+                                            "By upgrading",
+                                            "选择适合您的方案",
+                                            "通过升级",
+                                        ]
+                                        not_subscribed_signals = [
+                                            "Try Google One at a discount",
+                                            "By subscribing",
+                                            "以优惠价格试用",
+                                            "通过订阅",
+                                        ]
+                                        has_subscribed_signal = any(s in page_text for s in subscribed_signals)
+                                        has_not_subscribed_signal = any(s in page_text for s in not_subscribed_signals)
+
+                                        if has_subscribed_signal and not has_not_subscribed_signal:
+                                            is_already_subscribed = True
+                                            task_logger.info(
+                                                f"[Account {account_id}] 检测到已订阅 Pro（页面含: {[s for s in subscribed_signals if s in page_text]}）"
+                                            )
+                                        elif has_not_subscribed_signal:
+                                            task_logger.info(
+                                                f"[Account {account_id}] 未订阅 Pro，继续正常流程"
+                                            )
+                                        else:
+                                            task_logger.warning(
+                                                f"[Account {account_id}] 无法确定订阅状态，继续正常流程"
+                                            )
                                 except Exception as detect_err:
                                     task_logger.warning(
                                         f"[Account {account_id}] 检测订阅状态异常: {detect_err}，继续正常流程"
@@ -632,12 +681,114 @@ def process_single_account(
                                                     f"[Account {account_id}] 增项修改2FA失败: {msg2}"
                                                 )
 
+                                        cloudmail_config_id = config.get("cloudmail_config_id")
                                         new_recovery_email = (
                                             config.get("security_new_recovery_email")
                                             or config.get("new_recovery_email")
                                             or config.get("new_email")
                                         )
-                                        if (
+                                        if cloudmail_config_id:
+                                            task_logger.info(
+                                                f"[Account {account_id}] 增项: 自动创建并修改辅助邮箱"
+                                            )
+                                            client = None
+                                            try:
+                                                cloudmail_config = CloudMailConfig.objects.filter(
+                                                    id=cloudmail_config_id, is_active=True
+                                                ).first()
+                                                if not cloudmail_config:
+                                                    task_logger.warning(
+                                                        f"[Account {account_id}] CloudMail 配置不存在或未启用: {cloudmail_config_id}"
+                                                    )
+                                                elif not cloudmail_config.domains:
+                                                    task_logger.warning(
+                                                        f"[Account {account_id}] CloudMail 配置无可用域名"
+                                                    )
+                                                else:
+                                                    domain = str(
+                                                        cloudmail_config.domains[0] or ""
+                                                    ).strip()
+                                                    if not domain:
+                                                        task_logger.warning(
+                                                            f"[Account {account_id}] CloudMail 域名无效"
+                                                        )
+                                                    else:
+                                                        client = CloudMailClient(
+                                                            api_base=cloudmail_config.api_base,
+                                                            api_token=cloudmail_config.api_token,
+                                                            domains=cloudmail_config.domains,
+                                                            default_role=cloudmail_config.default_role,
+                                                        )
+                                                        email_service = EmailService(
+                                                            client=client
+                                                        )
+                                                        (
+                                                            auto_recovery_email,
+                                                            _,
+                                                        ) = email_service.create_recovery_email(
+                                                            google_account=account,
+                                                            owner_user=task.user,
+                                                            domain=domain,
+                                                        )
+
+                                                        client_for_code = client
+
+                                                        async def get_code(email):
+                                                            import asyncio
+
+                                                            loop = asyncio.get_event_loop()
+                                                            code = await loop.run_in_executor(
+                                                                None,
+                                                                lambda: client_for_code.wait_for_verification_code(
+                                                                    to_email=email,
+                                                                    timeout=120,
+                                                                    poll_interval=5,
+                                                                    sender_contains="google",
+                                                                ),
+                                                            )
+                                                            return code or ""
+
+                                                        (
+                                                            ok3,
+                                                            msg3,
+                                                        ) = await security_service.change_recovery_email(
+                                                            page,
+                                                            {
+                                                                "email": account_info.get(
+                                                                    "email"
+                                                                ),
+                                                                "password": account_info.get(
+                                                                    "password"
+                                                                ),
+                                                                "totp_secret": account_info.get(
+                                                                    "secret"
+                                                                )
+                                                                or "",
+                                                            },
+                                                            auto_recovery_email.strip(),
+                                                            verification_code_callback=get_code,
+                                                        )
+                                                        if ok3:
+                                                            result.setdefault(
+                                                                "account_updates", {}
+                                                            )[
+                                                                "recovery_email"
+                                                            ] = auto_recovery_email.strip()
+                                                        else:
+                                                            task_logger.warning(
+                                                                f"[Account {account_id}] 增项修改辅助邮箱失败: {msg3}"
+                                                            )
+                                            except Exception as auto_recovery_error:
+                                                task_logger.warning(
+                                                    f"[Account {account_id}] 自动创建辅助邮箱失败: {auto_recovery_error}"
+                                                )
+                                            finally:
+                                                if client:
+                                                    try:
+                                                        client.close()
+                                                    except Exception:
+                                                        pass
+                                        elif (
                                             isinstance(new_recovery_email, str)
                                             and new_recovery_email.strip()
                                         ):
@@ -866,12 +1017,104 @@ def process_single_account(
                                         f"[Account {account_id}] 增项修改2FA失败: {msg2}"
                                     )
 
+                            cloudmail_config_id = config.get("cloudmail_config_id")
                             new_recovery_email = (
                                 config.get("security_new_recovery_email")
                                 or config.get("new_recovery_email")
                                 or config.get("new_email")
                             )
-                            if (
+                            if cloudmail_config_id:
+                                task_logger.info(
+                                    f"[Account {account_id}] 增项: 自动创建并修改辅助邮箱"
+                                )
+                                client = None
+                                try:
+                                    cloudmail_config = CloudMailConfig.objects.filter(
+                                        id=cloudmail_config_id, is_active=True
+                                    ).first()
+                                    if not cloudmail_config:
+                                        task_logger.warning(
+                                            f"[Account {account_id}] CloudMail 配置不存在或未启用: {cloudmail_config_id}"
+                                        )
+                                    elif not cloudmail_config.domains:
+                                        task_logger.warning(
+                                            f"[Account {account_id}] CloudMail 配置无可用域名"
+                                        )
+                                    else:
+                                        domain = str(
+                                            cloudmail_config.domains[0] or ""
+                                        ).strip()
+                                        if not domain:
+                                            task_logger.warning(
+                                                f"[Account {account_id}] CloudMail 域名无效"
+                                            )
+                                        else:
+                                            client = CloudMailClient(
+                                                api_base=cloudmail_config.api_base,
+                                                api_token=cloudmail_config.api_token,
+                                                domains=cloudmail_config.domains,
+                                                default_role=cloudmail_config.default_role,
+                                            )
+                                            email_service = EmailService(client=client)
+                                            (
+                                                auto_recovery_email,
+                                                _,
+                                            ) = email_service.create_recovery_email(
+                                                google_account=account,
+                                                owner_user=task.user,
+                                                domain=domain,
+                                            )
+
+                                            client_for_code = client
+
+                                            async def get_code(email):
+                                                import asyncio
+
+                                                loop = asyncio.get_event_loop()
+                                                code = await loop.run_in_executor(
+                                                    None,
+                                                    lambda: client_for_code.wait_for_verification_code(
+                                                        to_email=email,
+                                                        timeout=120,
+                                                        poll_interval=5,
+                                                        sender_contains="google",
+                                                    ),
+                                                )
+                                                return code or ""
+
+                                            (
+                                                ok3,
+                                                msg3,
+                                            ) = await security_service.change_recovery_email(
+                                                page,
+                                                {
+                                                    "email": account_info.get("email"),
+                                                    "password": account_info.get("password"),
+                                                    "totp_secret": account_info.get("secret")
+                                                    or "",
+                                                },
+                                                auto_recovery_email.strip(),
+                                                verification_code_callback=get_code,
+                                            )
+                                            if ok3:
+                                                result.setdefault("account_updates", {})[
+                                                    "recovery_email"
+                                                ] = auto_recovery_email.strip()
+                                            else:
+                                                task_logger.warning(
+                                                    f"[Account {account_id}] 增项修改辅助邮箱失败: {msg3}"
+                                                )
+                                except Exception as auto_recovery_error:
+                                    task_logger.warning(
+                                        f"[Account {account_id}] 自动创建辅助邮箱失败: {auto_recovery_error}"
+                                    )
+                                finally:
+                                    if client:
+                                        try:
+                                            client.close()
+                                        except Exception:
+                                            pass
+                            elif (
                                 isinstance(new_recovery_email, str)
                                 and new_recovery_email.strip()
                             ):
@@ -2106,6 +2349,293 @@ def security_change_recovery_email_task(
             )
         finally:
             # release 已在 run_all() 内完成
+            pass
+
+    return {
+        "success": True,
+        "results": results,
+        "total": len(account_ids),
+        "succeeded": sum(1 for r in results if r.get("success")),
+    }
+
+
+@shared_task(bind=True, name="google_business.auto_change_recovery_email")
+def auto_change_recovery_email_task(
+    self,
+    account_ids,
+    cloudmail_config_id,
+    user_id,
+    browser_type=None,
+):
+    """
+    自动创建域名邮箱并修改辅助邮箱任务
+    """
+    import asyncio
+    from django.contrib.auth import get_user_model
+
+    from .services import browser_pool
+    from .services.security_service import GoogleSecurityService
+    from apps.integrations.browser_base import BrowserType
+
+    logger.info(
+        "Starting auto recovery email change task for %s accounts",
+        len(account_ids or []),
+    )
+
+    account_ids = list(account_ids or [])
+    if not account_ids:
+        return {"success": True, "results": [], "total": 0, "succeeded": 0}
+
+    cloudmail_config = CloudMailConfig.objects.filter(
+        id=cloudmail_config_id, is_active=True
+    ).first()
+    if not cloudmail_config:
+        return {
+            "success": False,
+            "results": [],
+            "total": len(account_ids),
+            "succeeded": 0,
+            "message": "CloudMail 配置不存在或未启用",
+        }
+
+    if not cloudmail_config.domains:
+        return {
+            "success": False,
+            "results": [],
+            "total": len(account_ids),
+            "succeeded": 0,
+            "message": "CloudMail 配置无可用域名",
+        }
+
+    domain = str(cloudmail_config.domains[0] or "").strip()
+    if not domain:
+        return {
+            "success": False,
+            "results": [],
+            "total": len(account_ids),
+            "succeeded": 0,
+            "message": "CloudMail 配置域名无效",
+        }
+
+    bt = BrowserType(browser_type) if browser_type else None
+    security_service = GoogleSecurityService(browser_type=bt)
+    User = get_user_model()
+    owner_user = User.objects.filter(id=user_id).first()
+
+    results = []
+    per_account_timeout_s = 360
+    client = CloudMailClient(
+        api_base=cloudmail_config.api_base,
+        api_token=cloudmail_config.api_token,
+        domains=cloudmail_config.domains,
+        default_role=cloudmail_config.default_role,
+    )
+    email_service = EmailService(client=client)
+
+    try:
+        for i, account_id in enumerate(account_ids):
+            try:
+                account = GoogleAccount.objects.get(id=account_id)
+
+                task_logger = TaskLogger(
+                    None,
+                    celery_task_id=str(self.request.id),
+                    account_id=account_id,
+                    email=account.email,
+                    kind="auto_change_recovery_email",
+                )
+                task_logger.event(
+                    step="task",
+                    action="start",
+                    message="start auto_change_recovery_email",
+                )
+
+                try:
+                    password = EncryptionUtil.decrypt(account.password)
+                except Exception:
+                    password = account.password
+
+                try:
+                    totp_secret = (
+                        EncryptionUtil.decrypt(account.two_fa_secret)
+                        if account.two_fa_secret
+                        else ""
+                    )
+                except Exception:
+                    totp_secret = account.two_fa_secret or ""
+
+                new_email, _ = email_service.create_recovery_email(
+                    google_account=account,
+                    owner_user=owner_user,
+                    domain=domain,
+                )
+
+                account_info = {
+                    "email": account.email,
+                    "password": password,
+                    "totp_secret": totp_secret,
+                }
+
+                self.update_state(
+                    state="PROGRESS",
+                    meta={
+                        "current": i + 1,
+                        "total": len(account_ids),
+                        "email": account.email,
+                    },
+                )
+
+                async def run_all():
+                    instance = await browser_pool.acquire_by_email(
+                        email=account.email,
+                        task_id=str(self.request.id),
+                        account_info=account_info,
+                        browser_type=bt,
+                    )
+                    if not instance or not instance.page:
+                        task_logger.event(
+                            step="browser",
+                            action="acquire",
+                            level="error",
+                            message="failed to acquire browser instance",
+                        )
+                        return False, "无法获取浏览器实例"
+
+                    try:
+                        attach_playwright_trace(instance.page, task_logger)
+
+                        login_service = GoogleLoginService()
+                        try:
+                            logged_in = await login_service.check_login_status(instance.page)
+                        except Exception:
+                            logged_in = False
+
+                        if not logged_in:
+                            task_logger.event(
+                                step="login",
+                                action="start",
+                                message="start login",
+                                url=getattr(instance.page, "url", ""),
+                            )
+                            login_res = await login_service.login(
+                                instance.page,
+                                {
+                                    "email": account.email,
+                                    "password": password,
+                                    "secret": totp_secret,
+                                    "backup": account.recovery_email or "",
+                                },
+                                task_logger,
+                            )
+                            if not login_res.get("success"):
+                                err = login_res.get("error") or login_res.get("message") or ""
+                                task_logger.event(
+                                    step="login",
+                                    action="result",
+                                    level="error",
+                                    message="login failed",
+                                    url=getattr(instance.page, "url", ""),
+                                    result={"error": err},
+                                )
+                                return False, f"登录失败: {err}"
+
+                            task_logger.event(
+                                step="login",
+                                action="result",
+                                message="login ok",
+                                url=getattr(instance.page, "url", ""),
+                            )
+
+                        async def get_code(email):
+                            import asyncio
+
+                            loop = asyncio.get_event_loop()
+                            code = await loop.run_in_executor(
+                                None,
+                                lambda: client.wait_for_verification_code(
+                                    to_email=email,
+                                    timeout=120,
+                                    poll_interval=5,
+                                    sender_contains="google",
+                                ),
+                            )
+                            return code or ""
+
+                        return await security_service.change_recovery_email(
+                            instance.page,
+                            account_info,
+                            new_email,
+                            task_logger=task_logger,
+                            verification_code_callback=get_code,
+                        )
+                    finally:
+                        try:
+                            await asyncio.wait_for(
+                                asyncio.shield(
+                                    browser_pool.release_by_email(
+                                        account.email,
+                                        browser_type=bt,
+                                        close=True,
+                                    )
+                                ),
+                                timeout=30,
+                            )
+                        except Exception:
+                            logger.warning(
+                                "Failed to release browser instance (auto recovery email)",
+                                exc_info=True,
+                            )
+
+                async def run_with_timeout():
+                    return await asyncio.wait_for(run_all(), timeout=per_account_timeout_s)
+
+                try:
+                    ok, msg = asyncio.run(run_with_timeout())
+                except asyncio.TimeoutError:
+                    ok, msg = False, "任务超时"
+
+                trace_file = task_logger.trace_rel_path or (
+                    str(task_logger.trace_file) if task_logger.trace_file else ""
+                )
+                task_logger.event(
+                    step="task",
+                    action="result",
+                    message="auto_change_recovery_email finished",
+                    level="info" if ok else "error",
+                    result={"success": ok, "message": msg, "trace_file": trace_file},
+                )
+
+                if ok:
+                    account.recovery_email = new_email
+                    account.save(update_fields=["recovery_email"])
+
+                results.append(
+                    {
+                        "email": account.email,
+                        "new_email": new_email,
+                        "success": ok,
+                        "message": msg,
+                        "trace_file": trace_file,
+                    }
+                )
+
+            except Exception as e:
+                logger.error(
+                    f"Auto recovery email change failed for account {account_id}: {e}",
+                    exc_info=True,
+                )
+                results.append(
+                    {
+                        "account_id": account_id,
+                        "success": False,
+                        "message": str(e),
+                    }
+                )
+
+    finally:
+        try:
+            client.close()
+        except Exception:
             pass
 
     return {
