@@ -1,1072 +1,437 @@
-# 🚀 Auto All System - 企业级 Web 管理系统
+# Auto All System Web
 
-<div align="center">
+多专区自动化任务平台，采用插件化架构，支持 Google 账号自动化（SheerID 学生验证 + Gemini 订阅）、GPT 账号批量管理等业务。
 
-[![Python](https://img.shields.io/badge/Python-3.12+-blue.svg)](https://www.python.org/)
-[![Django](https://img.shields.io/badge/Django-5.0-green.svg)](https://www.djangoproject.com/)
-[![Vue](https://img.shields.io/badge/Vue-3.x-brightgreen.svg)](https://vuejs.org/)
-[![Docker](https://img.shields.io/badge/Docker-Ready-blue.svg)](https://www.docker.com/)
-[![License](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+## 技术栈
 
-**专业的比特浏览器自动化管理平台**  
-Google 业务自动化 | SheerID 验证 | 账号批量管理
-
-[快速开始](#-快速开始) • [功能特性](#-功能特性) • [API 文档](#-api-文档) • [部署指南](#-部署指南)
-
-</div>
+| 层 | 技术 |
+|---|------|
+| 前端 | Vue 3 + TypeScript + Vite 5 + Tailwind CSS + shadcn-vue (reka-ui) + Pinia + Vue Router 4 |
+| 后端 | Django 5.0 + Django REST Framework + Celery 5.3 + Channels 4.0 (WebSocket) |
+| 数据库 | PostgreSQL 14 + Redis 7 (缓存/消息队列) |
+| 浏览器自动化 | Playwright 1.40 + DrissionPage 4.1 |
+| 浏览器环境 | GeekezBrowser（主用） / BitBrowser（兼容） |
+| 部署 | Docker Compose (5 服务) + Nginx |
 
 ---
 
-## 📋 目录
+## 目录结构
 
-- [核心特性](#-核心特性)
-- [快速开始](#-快速开始)
-- [功能模块](#-功能模块)
-- [系统架构](#-系统架构)
-- [API 文档](#-api-文档)
-- [部署指南](#-部署指南)
-- [配置说明](#-配置说明)
-- [常见问题](#-常见问题)
-- [完整文档](#-完整文档)
-
----
-
-## ✨ 核心特性
-
-### 🎯 Google 业务自动化插件
-
-#### 账号管理
-- ✅ **批量导入**: 支持多种格式，自动解析账号信息
-- ✅ **智能分类**: 自动识别账号状态（待检测、有资格、已验证等）
-- ✅ **状态追踪**: 实时更新账号处理进度
-- ✅ **2FA 管理**: 自动生成和管理两步验证码
-
-#### SheerID 验证
-- ✅ **链接提取**: 自动打开浏览器提取验证链接
-- ✅ **API 批量验证**: 高效的批量提交和状态轮询
-- ✅ **智能重试**: 失败自动重试机制
-- ✅ **结果分类**: 自动分类验证成功/失败账号
-
-#### 自动绑卡订阅
-- ✅ **Playwright 自动化**: 智能识别页面元素
-- ✅ **iframe 处理**: 自动处理 Google Payments 复杂嵌套
-- ✅ **卡片池管理**: 多卡轮换，自动失效检测
-- ✅ **并发处理**: 支持 1-20 线程并发
-- ✅ **实时监控**: 任务进度和日志实时展示
-
-#### 一键全自动
-- ✅ **完整流程**: 登录 → 检测 → 验证 → 绑卡 → 订阅
-- ✅ **智能决策**: 根据账号状态自动选择处理流程
-- ✅ **容错机制**: 异常自动处理和恢复
-- ✅ **批量处理**: 支持大规模账号批量操作
-
-### 🏗️ 核心系统
-
-#### 用户与权限
-- 🔐 **RBAC 权限**: 基于角色的访问控制
-- 🎫 **JWT 认证**: 安全的身份验证
-- 👥 **多用户支持**: 团队协作管理
-- 📊 **操作审计**: 完整的操作日志记录
-
-#### 专区系统
-- 🏢 **多专区隔离**: 独立的工作空间
-- ⚙️ **独立配置**: 每个专区独立的参数配置
-- 📈 **资源分配**: 灵活的资源配额管理
-
-#### 任务调度
-- ⚡ **Celery 分布式**: 高性能异步任务处理
-- 🔄 **实时监控**: 任务进度实时追踪
-- 🎯 **失败重试**: 智能重试策略
-- 📋 **任务队列**: 优先级队列管理
-
-#### 虚拟卡管理
-- 💳 **卡池管理**: 批量导入和分配
-- 📊 **使用追踪**: 使用次数和状态监控
-- 🔄 **多卡轮换**: 自动轮换避免单卡频繁使用
-- ⏰ **自动失效**: 过期卡自动标记
-
-### 🔌 插件化架构
-
-- 🧩 **动态加载**: 插件热插拔，无需重启
-- 📦 **版本管理**: 插件版本控制和依赖检查
-- 🔗 **标准接口**: BasePlugin 基类统一接口
-- 🪝 **事件钩子**: 丰富的生命周期钩子
-- 🔌 **API 扩展**: 灵活的 API 路由扩展
-
----
-
-## 🚀 快速开始
-
-### 前置要求
-
-#### Docker 方式（推荐）
-- Docker Desktop 20.10+
-- Docker Compose 2.0+
-
-#### 本地开发
-- Python 3.12+
-- Node.js 18+
-- PostgreSQL 14+
-- Redis 7+
-
----
-
-### 一键启动（Windows）
-
-```bash
-# 双击运行
-一键启动.bat
+```
+Auto_All_System_Web/
+├── backend/
+│   ├── apps/                          # 核心应用（共享资源层）
+│   │   ├── accounts/                  # 用户 + 余额 + 余额日志
+│   │   ├── cards/                     # 虚拟卡池（Card / CardUsageLog / CardApiConfig）
+│   │   ├── integrations/              # 第三方集成
+│   │   │   ├── google_accounts/       # Google 账号池（GoogleAccount / SheerIDVerification / GeminiSubscription）
+│   │   │   ├── geekez/                # GeekezBrowser API 封装
+│   │   │   ├── bitbrowser/            # BitBrowser API 封装
+│   │   │   ├── proxies/               # 代理管理
+│   │   │   └── email/                 # CloudMail 域名邮箱集成
+│   │   ├── plugins/                   # 插件管理器（发现/加载/生命周期）
+│   │   ├── tasks/                     # 通用任务系统（Task / TaskLog / TaskStatistics）
+│   │   ├── zones/                     # 专区管理（Zone / ZoneConfig / UserZoneAccess）
+│   │   ├── payments/                  # 支付模块
+│   │   └── admin_panel/               # 管理后台
+│   ├── plugins/                       # 业务插件（各专区核心逻辑）
+│   │   ├── google_business/           # Google 专区插件 ★ 主业务
+│   │   │   ├── services/              # 自动化服务
+│   │   │   │   ├── login_service.py          # Google 登录（2FA/验证码处理）
+│   │   │   │   ├── link_service.py           # SheerID 链接提取
+│   │   │   │   ├── verify_service.py         # SheerID API 验证
+│   │   │   │   ├── bind_card_service.py      # 绑卡订阅
+│   │   │   │   ├── security_service.py       # 2FA/辅助邮箱修改
+│   │   │   │   ├── subscription_service.py   # 订阅状态验证
+│   │   │   │   └── robust_google_auth.py     # 鲁棒登录（验证码/人机检测）
+│   │   │   ├── tasks.py               # Celery 异步任务（process_single_account / batch）
+│   │   │   ├── views.py               # API 视图
+│   │   │   ├── models.py              # GoogleTask / GoogleTaskAccount / GoogleCardInfo
+│   │   │   ├── urls.py                # API 路由
+│   │   │   ├── utils.py               # TaskLogger / EncryptionUtil
+│   │   │   └── docs/                  # 插件维护文档
+│   │   │       └── AUTOMATION_MAINTENANCE.md  # ★ Google 专区自动化维护主文档
+│   │   └── gpt_business/             # GPT 专区插件
+│   │       ├── services/              # 自动化服务
+│   │       ├── tasks.py               # Celery 任务
+│   │       └── docs/                  # 插件维护文档
+│   ├── config/
+│   │   └── settings/                  # Django 分环境配置
+│   │       ├── base.py                # 基础配置（INSTALLED_APPS / DB / Cache / Celery）
+│   │       ├── development.py         # 开发环境
+│   │       └── production.py          # 生产环境
+│   ├── core/                          # 核心工具（权限/分页/异常处理）
+│   └── requirements/                  # Python 依赖
+│       ├── base.txt                   # 基础依赖
+│       └── development.txt            # 开发依赖
+├── frontend/
+│   └── src/
+│       ├── api/                       # API 接口层（按模块拆分 20+ 文件）
+│       ├── components/
+│       │   ├── ui/                    # shadcn-vue 基础组件
+│       │   ├── app/                   # Element Plus 兼容层封装
+│       │   └── zones/                 # 专区业务组件
+│       ├── composables/               # 组合式函数
+│       ├── layouts/                   # 布局组件
+│       ├── router/modules/            # 模块化路由
+│       ├── stores/                    # Pinia 状态管理
+│       ├── types/                     # TypeScript 类型定义
+│       └── views/                     # 页面视图
+│           ├── admin/                 # 管理后台
+│           ├── auth/                  # 认证页面
+│           ├── cards/                 # 虚拟卡管理
+│           ├── google/                # Google 账号管理
+│           └── zones/                 # 专区页面
+├── docker-compose.yml                 # Docker 编排（db/redis/backend/celery/frontend）
+├── docs/                              # 系统级文档
+└── README.md                          # 本文件
 ```
 
-脚本会自动：
-1. ✅ 检查 Docker 环境
-2. ✅ 启动所有服务
-3. ✅ 等待服务就绪
-4. ✅ 自动打开浏览器
+---
+
+## 核心数据模型
+
+### 关系图
+
+```
+User (用户)
+  ├─1:1─ UserBalance (余额)
+  ├─1:N─ BalanceLog (充值/消费/退款)
+  ├─1:N─ GoogleAccount (Google 账号池，通过 owner_user)
+  ├─1:N─ Card (私有虚拟卡，通过 owner_user)
+  ├─1:N─ Task (通用任务)
+  └─1:N─ UserZoneAccess (专区权限)
+
+GoogleAccount (Google 账号)
+  ├─ 字段: email(唯一), password(加密), recovery_email, two_fa_secret(加密)
+  ├─ 状态: status(ACTIVE/LOCKED/DISABLED/PENDING_VERIFY)
+  ├─ 订阅: gemini_status, sheerid_verified, card_bound, sheerid_link
+  ├─ 元数据: metadata(JSON, 含 google_one_status / geekez_profile 等)
+  ├─N:1─ Card (bound_card)
+  ├─1:N─ SheerIDVerification (验证记录)
+  └─1:N─ GeminiSubscription (订阅记录)
+
+Card (虚拟卡)
+  ├─ 字段: card_number, expiry_month/year, cvv, card_type
+  ├─ 卡池: pool_type(PUBLIC/PRIVATE), owner_user
+  ├─ 状态: status(AVAILABLE/IN_USE/USED/INVALID/EXPIRED)
+  ├─ 统计: use_count, success_count, max_use_count
+  └─1:N─ CardUsageLog (使用记录)
+
+GoogleTask (Google 专区任务)
+  ├─ 类型: LOGIN / GET_LINK / VERIFY / BIND_CARD / ONE_CLICK
+  ├─ 状态: PENDING / RUNNING / COMPLETED / FAILED / CANCELLED
+  ├─ 进度: total_count, success_count, failed_count
+  ├─ Celery: celery_task_id
+  └─1:N─ GoogleTaskAccount (任务-账号关联)
+
+Zone (专区)
+  ├─ 字段: name, code(唯一), plugin_class(插件类路径)
+  ├─1:N─ ZoneConfig (专区配置 KV)
+  └─1:N─ UserZoneAccess (用户权限)
+```
+
+### 密码/密钥加密
+
+- `GoogleAccount.password` 和 `GoogleAccount.two_fa_secret` 使用 `EncryptionUtil`（AES-256 对称加密）
+- 解密：`EncryptionUtil.decrypt(account.password)` — 可能失败（明文存储或 key 不匹配时回退原始值）
+- 2FA 码生成：`pyotp.TOTP(secret).now()`
 
 ---
 
-### 手动启动（Linux/Mac）
+## Google 专区核心业务流程
+
+### 一键到底（ONE_CLICK）6 步流程
+
+这是最核心的业务逻辑，位于 `plugins/google_business/tasks.py` → `process_single_account()` → `task_type == "one_click"`：
+
+```
+步骤 1/6: 登录账号
+  ├─ check_login_status() → 已登录则跳过
+  ├─ login() → 成功则标记 ACTIVE
+  ├─ 失败分类：
+  │   ├─ 机器人验证(captcha) → 标记 LOCKED，中止
+  │   ├─ 密码错误 → 标记 LOCKED，中止
+  │   └─ 2FA超时 → 尝试 check_login_status 恢复
+  └─ 登录成功后清理历史失败标记 (clear_login_failure_notes)
+
+步骤 2/6: 打开 Google One 页面
+  └─ 导航到 /about/plans/ai-premium/student
+
+步骤 2.5/6: 快速检查订阅状态
+  ├─ 访问 /about/plans 检查页面文案
+  ├─ "Choose a plan" + "By upgrading" → 已订阅 Pro → 直接完成
+  └─ "Try Google One" + "By subscribing" → 未订阅 → 继续
+
+步骤 3/6: 检查学生资格
+  ├─ GoogleOneLinkService.get_verification_link()
+  ├─ 返回状态: link_ready / verified / subscribed / ineligible
+  ├─ ineligible → 跳过后续步骤
+  └─ 获取 SheerID 验证链接
+
+步骤 4/6: 学生验证（带取消+刷新重试，最多 3 次）
+  ├─ SheerIDVerifyService.verify_batch([verification_id])
+  ├─ 成功 → 标记 sheerid_verified = True
+  ├─ 失败 → 取消旧验证 cancel_verification()
+  │         → 刷新页面 page.reload()
+  │         → 重新获取链接 check_google_one_status()
+  │         → 用新链接重试
+  └─ 全部失败 → 返回失败，不继续到步骤 5
+
+步骤 5/6: 绑卡订阅
+  ├─ _select_card_for_task() → 从卡池选卡（SELECT FOR UPDATE + skip_locked）
+  ├─ GoogleOneBindCardService.bind_and_subscribe()
+  ├─ 错误类型区分：
+  │   ├─ CARD_INVALID: 新卡被拒 → 标记卡为 invalid
+  │   └─ REBIND_NEEDED: 旧卡问题 → 不标记新卡
+  └─ _mark_card_used() → 更新卡使用统计
+
+步骤 6/6: 完成处理
+  ├─ 安全设置增项（可选）：修改 2FA / 修改辅助邮箱
+  └─ 返回结果
+```
+
+### 卡池选卡策略
+
+```python
+# 位于 tasks.py → _select_card_for_task()
+# 使用 SELECT FOR UPDATE (skip_locked) 防止并发重复选卡
+# 策略: sequential（默认，按最后使用时间排序）/ least_used / random
+# 过滤: pool_type(public/private) + status(available) + 未过期 + 未达上限
+```
+
+### 任务调度模型
+
+```
+batch_process_task (入口)
+  └─ dispatch_task_batch (分批派发，chord 门控)
+       ├─ process_single_account × N (一批并发)
+       ├─ 等待全部完成
+       ├─ 休息 rest_min~rest_max 分钟
+       └─ dispatch_task_batch (下一批，递归)
+```
+
+关键参数：
+- `max_concurrency`: 每批并发数 (1-20)
+- `stagger_seconds`: 同批内错开启动秒数
+- `rest_min_minutes` / `rest_max_minutes`: 批间休息时间
+
+### 浏览器环境
+
+每个账号任务在子任务 `process_single_account` 内按需创建浏览器环境：
+1. 通过 `GeekezBrowserManager.ensure_profile_for_account()` 确保浏览器配置文件存在
+2. 通过 `launch_by_email()` 启动浏览器获取 `ws_endpoint`
+3. 通过 `playwright.chromium.connect_over_cdp(ws_endpoint)` 连接
+4. 任务完成后 `GeekezBrowserAPI().close_profile()` 关闭
+
+---
+
+## 插件架构
+
+### 目录约定
+
+```
+plugins/<plugin_name>/
+├── __init__.py           # 插件入口（继承 BasePlugin）
+├── models.py             # 数据模型
+├── views.py              # API 视图
+├── urls.py               # URL 路由
+├── tasks.py              # Celery 异步任务
+├── services/             # 业务逻辑服务
+├── serializers.py        # DRF 序列化器
+└── docs/                 # 插件维护文档
+```
+
+### 注册方式
+
+在 `config/settings/base.py` 的 `INSTALLED_APPS` 中添加：
+```python
+INSTALLED_APPS = [
+    ...
+    'plugins.google_business',
+    'plugins.gpt_business',
+]
+```
+
+---
+
+## 开发规范
+
+### 后端
+
+1. **async/sync 边界**：Playwright 操作在 `async def _process()` 中执行，Django ORM 写入在 `asyncio.run()` 之后同步执行。需要在 async 中调用 ORM 时使用 `sync_to_async`。
+
+2. **日志规范**：使用 `TaskLogger`（写入数据库 + 文件双通道），文件日志位于 `logs/trace/trace_<celery_id>_<email>.log`
+
+3. **加密**：`EncryptionUtil.encrypt()` / `EncryptionUtil.decrypt()`，密钥来自 Django `SECRET_KEY`
+
+4. **Celery 任务**：
+   - `@shared_task(bind=True, max_retries=3)` — 失败自动重试
+   - 任务内不要跨 `asyncio.run()` 传递 Playwright 对象
+   - 使用 `transaction.atomic()` + `select_for_update()` 更新任务计数
+
+### 前端
+
+1. **UI 组件**：基于 shadcn-vue (reka-ui) + Tailwind CSS，不直接依赖 Element Plus
+2. **兼容层**：`components/app/` 中有 `ElSwitch` → `Toggle`、`ElTable` → `DataTable` 等映射
+3. **API 调用**：`src/api/` 按模块拆分，使用 axios 实例 + JWT 拦截器
+4. **路由**：模块化路由在 `src/router/modules/` 中注册
+
+---
+
+## 快速开始
+
+### Docker 一键启动（推荐）
 
 ```bash
-# 1. 进入项目目录
-cd Auto_All_System
-
-# 2. 启动 Docker 服务
+# 1. 启动所有服务
 docker-compose up -d
 
-# 3. 等待服务启动（约 30-60 秒）
-docker-compose logs -f
-
-# 4. 创建管理员账号（首次启动）
+# 2. 等待数据库就绪后初始化
+docker-compose exec backend python manage.py migrate
 docker-compose exec backend python manage.py createsuperuser
 
-# 5. 访问系统
-# 浏览器打开: http://localhost/
+# 3. 访问
+# 前端: http://localhost/
+# API: http://localhost:8000/api/
+# Swagger: http://localhost:8000/api/docs/
+# Admin: http://localhost:8000/admin/
 ```
 
----
-
-### 访问系统
-
-| 服务 | 地址 | 说明 |
-|------|------|------|
-| **前端主界面** | http://localhost/ | 统一入口 |
-| **Google 插件工作台** | http://localhost/google/dashboard | Google 自动化 |
-| **后端 API** | http://localhost:8000/api/ | REST API |
-| **API 文档** | http://localhost:8000/api/docs/ | Swagger UI |
-| **Django Admin** | http://localhost:8000/admin/ | 管理后台 |
-
-### 默认凭证
-
-```
-用户名: admin
-密码: admin123
-```
-
-⚠️ **生产环境请立即修改默认密码！**
-
----
-
-## 🎯 功能模块
-
-### 1. Google 业务自动化
-
-#### 📊 工作台 (Dashboard)
-- **统计概览**: 各状态账号数量、今日处理量
-- **快速操作**: 一键启动常用任务
-- **实时监控**: 正在进行的任务状态
-
-#### 👤 账号管理
-
-**导入账号**
-
-支持多种格式，推荐使用 `----` 分隔：
-
-```text
-# 完整格式（推荐）
-email@gmail.com----password----backup@gmail.com----2FA_SECRET
-
-# 仅账号密码
-email@gmail.com----password
-
-# 支持其他分隔符
-email@gmail.com|password|backup@gmail.com|2FA_SECRET
-email@gmail.com,password,backup@gmail.com,2FA_SECRET
-```
-
-**账号状态**
-
-| 状态 | 说明 | 后续操作 |
-|------|------|----------|
-| `pending_check` | 待检测 | 提取链接 |
-| `link_ready` | 链接已提取 | SheerID 验证 |
-| `verified` | 已验证 | 绑卡订阅 |
-| `subscribed` | 已订阅 | 完成 |
-| `ineligible` | 无资格 | 无 |
-| `failed` | 失败 | 重试或放弃 |
-
-**批量操作**
-- 批量导入/导出
-- 批量修改状态
-- 批量删除
-- 按状态筛选
-
----
-
-#### 🔗 SheerID 验证
-
-**方式一：提取链接 + API 验证**
-
-```mermaid
-graph LR
-    A[选择账号] --> B[提取链接]
-    B --> C[API 批量验证]
-    C --> D[轮询状态]
-    D --> E[更新结果]
-```
-
-1. **提取链接**
-   - 自动打开浏览器
-   - 登录 Google 账号
-   - 跳转到优惠页面
-   - 提取 SheerID 验证链接
-
-2. **API 验证**
-   - 批量提交验证请求
-   - 自动轮询验证状态
-   - 结果自动分类保存
-
-**方式二：一键全自动**
-
-包含完整流程：登录 → 检测 → 验证 → 绑卡
-
----
-
-#### 💳 绑卡订阅
-
-**前置条件**
-- 账号状态为 `verified`（已验证）
-- 已导入虚拟卡信息
-
-**配置参数**
-
-| 参数 | 说明 | 推荐值 |
-|------|------|--------|
-| **线程数** | 并发处理数 | 3-5 |
-| **延迟时间** | 操作间隔（秒） | 2-3 |
-| **每卡使用次数** | 单卡绑定次数 | 1-3 |
-| **失败重试** | 重试次数 | 1-2 |
-
-**处理流程**
-
-```
-1. 获取已验证账号
-2. 从卡池分配卡片
-3. 打开浏览器窗口
-4. 自动填写卡片信息
-5. 提交并完成订阅
-6. 更新账号状态
-```
-
-**实时监控**
-- 实时日志输出
-- 进度百分比
-- 成功/失败统计
-- 异常捕获和处理
-
----
-
-#### ⚡ 一键全自动
-
-**完整自动化流程**
-
-```mermaid
-graph TD
-    A[开始] --> B{检测账号状态}
-    B -->|pending_check| C[登录并检测资格]
-    B -->|link_ready| D[SheerID API 验证]
-    B -->|verified| E[自动绑卡订阅]
-    B -->|subscribed| F[跳过]
-    B -->|ineligible| G[跳过]
-    C --> H{有资格?}
-    H -->|是| I[提取链接]
-    H -->|否| J[标记无资格]
-    I --> D
-    D --> K{验证成功?}
-    K -->|是| E
-    K -->|否| L[标记失败]
-    E --> M[完成]
-```
-
-**优势**
-- ✅ 全流程自动化，无需人工干预
-- ✅ 智能决策，根据状态选择流程
-- ✅ 容错机制，异常自动处理
-- ✅ 实时监控，进度一目了然
-
----
-
-### 2. 虚拟卡管理
-
-#### 导入卡片
-
-**格式要求**（空格分隔）：
-
-```text
-卡号 月份 年份 CVV
-5481087170529907 01 32 536
-5481087143137903 01 32 749
-```
-
-**字段说明**
-- **卡号**: 13-19 位数字
-- **月份**: 01-12（两位数）
-- **年份**: 后两位，如 2032 年填 32
-- **CVV**: 3-4 位安全码
-
-#### 卡片状态
-
-| 状态 | 说明 |
-|------|------|
-| `available` | 可用 |
-| `in_use` | 使用中 |
-| `used_up` | 次数用尽 |
-| `expired` | 已过期 |
-| `failed` | 失败 |
-
-#### 使用策略
-- **单卡限制**: 可配置单卡最大使用次数
-- **自动轮换**: 优先使用次数少的卡
-- **失效检测**: 自动标记失败卡片
-- **过期管理**: 自动禁用过期卡
-
----
-
-### 3. 任务管理
-
-#### 任务类型
-
-| 类型 | 说明 |
-|------|------|
-| `extract_links` | 提取 SheerID 链接 |
-| `verify_sheerid` | SheerID API 验证 |
-| `bind_cards` | 绑卡订阅 |
-| `auto_all` | 一键全自动 |
-
-#### 任务监控
-
-**实时信息**
-- 任务 ID 和类型
-- 开始/结束时间
-- 处理进度（百分比）
-- 成功/失败数量
-- 当前状态
-
-**操作**
-- 查看详细日志
-- 暂停/恢复任务
-- 取消任务
-- 重试失败项
-
----
-
-## 🏗️ 系统架构
-
-### 架构图
-
-```
-┌─────────────────────────────────────────────────────────┐
-│                    Nginx (前端入口)                       │
-│                   http://localhost/                      │
-└───────────────────────┬─────────────────────────────────┘
-                        │
-        ┌───────────────┴───────────────┐
-        │                               │
-        ▼                               ▼
-┌────────────────┐              ┌────────────────┐
-│  Vue 3 前端     │              │  Django 后端    │
-│  ============  │              │  ============  │
-│  - 工作台       │              │  - REST API    │
-│  - 账号管理     │◄────HTTP────►│  - 插件系统    │
-│  - 任务管理     │              │  - 认证授权    │
-│  - 实时监控     │              │  - 任务调度    │
-└────────────────┘              └────────┬───────┘
-                                         │
-                        ┌────────────────┼────────────────┐
-                        │                │                │
-                        ▼                ▼                ▼
-                ┌──────────────┐ ┌──────────────┐ ┌──────────────┐
-                │ PostgreSQL   │ │ Redis        │ │ Celery       │
-                │ ============ │ │ ============ │ │ ============ │
-                │ - 业务数据   │ │ - 缓存       │ │ - 异步任务   │
-                │ - 用户信息   │ │ - 会话       │ │ - 定时任务   │
-                │ - 任务记录   │ │ - 消息队列   │ │ - 分布式     │
-                └──────────────┘ └──────────────┘ └──────────────┘
-                        │
-                        ▼
-                ┌──────────────┐
-                │ 比特浏览器    │
-                │ ============ │
-                │ - 窗口管理   │
-                │ - 自动化执行 │
-                └──────────────┘
-```
-
-### 技术栈详解
-
-#### 后端技术栈
-
-**核心框架**
-- 🐍 **Django 5.0**: 高级 Web 框架
-- 🔌 **Django REST Framework**: RESTful API 框架
-- 🗄️ **PostgreSQL 14**: 关系型数据库
-- ⚡ **Redis 7**: 缓存和消息队列
-
-**异步任务**
-- 🔄 **Celery**: 分布式任务队列
-- 🐰 **RabbitMQ**: 消息代理（可选，默认使用 Redis）
-- 📊 **Flower**: Celery 监控（可选）
-
-**浏览器自动化**
-- 🎭 **Playwright**: 现代浏览器自动化
-- 🌐 **Selenium**: 兼容性支持（可选）
-
-**认证与安全**
-- 🔐 **Simple JWT**: JWT 身份认证
-- 🔒 **Django CORS Headers**: 跨域支持
-- 🛡️ **Django Security**: 安全加固
-
-#### 前端技术栈
-
-**核心框架**
-- 💚 **Vue 3**: 渐进式 JavaScript 框架
-- 📘 **TypeScript**: 类型安全
-- ⚡ **Vite**: 下一代构建工具
-
-**UI 组件**
-- 🎨 **shadcn-vue / reka-ui**: 现代 UI 组件方案（替代 Element Plus）
-- 🎭 **TailwindCSS**: 实用优先的 CSS 框架
-- 🧩 **Element Plus 兼容层**: 保留 legacy `el-*` 标签（无 `element-plus` 依赖）
-- 📱 **响应式设计**: 支持多设备
-
-**状态与路由**
-- 🍍 **Pinia**: 新一代状态管理
-- 🔀 **Vue Router 4**: 官方路由管理
-
-**HTTP 通信**
-- 📡 **Axios**: Promise based HTTP client
-- 🔄 **拦截器**: 统一请求/响应处理
-
-#### DevOps
-
-- 🐳 **Docker**: 容器化
-- 🔧 **Docker Compose**: 服务编排
-- 🌐 **Nginx**: 反向代理和静态文件服务
-- 📝 **日志**: Python logging + 文件轮转
-
----
-
-## 📚 API 文档
-
-### 认证
-
-所有 API 请求需要在 Header 中携带 JWT Token：
+### 本地开发
 
 ```bash
-Authorization: Bearer <your_jwt_token>
+# 后端
+cd backend
+python -m venv venv && source venv/bin/activate  # Windows: venv\Scripts\activate
+pip install -r requirements/development.txt
+cp .env.example .env  # 编辑配置
+python manage.py migrate
+python manage.py runserver
+
+# Celery
+celery -A config worker -l info
+celery -A config beat -l info
+
+# 前端
+cd frontend
+pnpm install
+pnpm dev
 ```
 
-**获取 Token**
+### Docker Compose 服务架构
 
-```bash
-POST /api/v1/auth/login/
-Body: {
-  "username": "admin",
-  "password": "admin123"
-}
+| 服务 | 镜像 | 端口 | 说明 |
+|-----|------|------|-----|
+| db | PostgreSQL 14 | 5432 | 主数据库 |
+| redis | Redis 7 | 6379 | 缓存 + Celery Broker |
+| backend | Django 5.0 | 8000 | Web API + WebSocket |
+| celery | 同 backend | - | 异步任务执行器 |
+| celery-beat | 同 backend | - | 定时任务调度器 |
+| frontend | Vue 3 + Nginx | 80 | 前端静态文件 |
 
-Response: {
-  "access": "eyJ0eXAiOiJKV1QiLCJhbGc...",
-  "refresh": "eyJ0eXAiOiJKV1QiLCJhbGc..."
-}
-```
-
----
-
-### Google 插件 API
-
-#### 账号管理
-
-**获取账号列表**
-
-```bash
-GET /api/v1/plugins/google-business/accounts/
-Query:
-  - status: 状态筛选（pending_check, verified 等）
-  - search: 搜索关键词（邮箱）
-  - page: 页码
-  - page_size: 每页数量
-
-Response: {
-  "count": 100,
-  "next": "http://...",
-  "previous": null,
-  "results": [
-    {
-      "id": 1,
-      "email": "user@gmail.com",
-      "status": "verified",
-      "created_at": "2026-01-19T10:00:00Z"
-    }
-  ]
-}
-```
-
-**批量导入账号**
-
-```bash
-POST /api/v1/plugins/google-business/accounts/batch_import/
-Body: {
-  "accounts": [
-    {
-      "email": "user@gmail.com",
-      "password": "password",
-      "recovery_email": "backup@gmail.com",
-      "secret_key": "ABCD1234"
-    }
-  ],
-  "separator": "----"  # 可选，默认 ----
-}
-
-Response: {
-  "success": 90,
-  "failed": 10,
-  "errors": [...]
-}
-```
-
-**获取账号统计**
-
-```bash
-GET /api/v1/plugins/google-business/accounts/statistics/
-
-Response: {
-  "total": 1000,
-  "pending_check": 100,
-  "link_ready": 200,
-  "verified": 300,
-  "subscribed": 350,
-  "ineligible": 40,
-  "failed": 10
-}
-```
-
----
-
-#### 任务管理
-
-**创建任务**
-
-```bash
-POST /api/v1/plugins/google-business/tasks/
-Body: {
-  "task_type": "auto_all",  # extract_links, verify_sheerid, bind_cards, auto_all
-  "account_ids": [1, 2, 3],  # 账号 ID 列表
-  "config": {
-    "thread_count": 3,        # 线程数
-    "delay": 2,               # 延迟（秒）
-    "api_key": "sheerid_key", # SheerID API Key（验证任务需要）
-    "cards_per_account": 1,   # 每账号使用卡片数（绑卡任务需要）
-    "retry_on_fail": true     # 失败重试
-  }
-}
-
-Response: {
-  "task_id": "abc123",
-  "status": "pending",
-  "created_at": "2026-01-19T10:00:00Z"
-}
-```
-
-**获取任务详情**
-
-```bash
-GET /api/v1/plugins/google-business/tasks/{task_id}/
-
-Response: {
-  "id": "abc123",
-  "task_type": "auto_all",
-  "status": "running",
-  "progress": 65,
-  "total": 100,
-  "success": 60,
-  "failed": 5,
-  "created_at": "2026-01-19T10:00:00Z",
-  "started_at": "2026-01-19T10:01:00Z",
-  "finished_at": null
-}
-```
-
-**获取任务日志**
-
-```bash
-GET /api/v1/plugins/google-business/tasks/{task_id}/logs/
-Query:
-  - page: 页码
-  - level: 日志级别（INFO, ERROR 等）
-
-Response: {
-  "logs": [
-    {
-      "timestamp": "2026-01-19T10:05:00Z",
-      "level": "INFO",
-      "message": "Processing account user@gmail.com"
-    }
-  ]
-}
-```
-
-**取消任务**
-
-```bash
-POST /api/v1/plugins/google-business/tasks/{task_id}/cancel/
-
-Response: {
-  "status": "cancelled"
-}
-```
-
----
-
-#### 卡片管理
-
-**获取可用卡片**
-
-```bash
-GET /api/v1/plugins/google-business/cards/available/
-Query:
-  - max_usage: 最大使用次数过滤
-
-Response: {
-  "count": 50,
-  "cards": [
-    {
-      "id": 1,
-      "last_4_digits": "9907",
-      "usage_count": 2,
-      "max_usage": 3,
-      "status": "available"
-    }
-  ]
-}
-```
-
-**批量导入卡片**
-
-```bash
-POST /api/v1/plugins/google-business/cards/batch_import/
-Content-Type: multipart/form-data
-File: cards.txt
-
-Response: {
-  "success": 45,
-  "failed": 5,
-  "errors": [...]
-}
-```
-
----
-
-### 完整 API 文档
-
-访问 **Swagger UI** 查看交互式 API 文档：
-
-```
-http://localhost:8000/api/docs/
-```
-
----
-
-## 🚢 部署指南
-
-### Docker 生产环境（推荐）
-
-#### 1. 准备环境变量
-
-```bash
-# 复制环境变量模板
-cp backend/.env.example backend/.env
-
-# 编辑 .env 文件
-nano backend/.env
-```
-
-**关键配置**
+### 关键环境变量
 
 ```bash
 # Django
-DEBUG=False
-SECRET_KEY=your-secret-key-here
-ALLOWED_HOSTS=yourdomain.com,www.yourdomain.com
+SECRET_KEY=your-secret-key
+DEBUG=True
+ALLOWED_HOSTS=localhost,127.0.0.1
 
 # 数据库
-POSTGRES_DB=auto_all_system
-POSTGRES_USER=postgres
-POSTGRES_PASSWORD=your-strong-password
-
-# Redis
-REDIS_URL=redis://redis:6379/0
-
-# Celery
-CELERY_BROKER_URL=redis://redis:6379/0
-CELERY_RESULT_BACKEND=redis://redis:6379/1
-
-# SheerID (可选)
-SHEERID_API_KEY=your-sheerid-api-key
-
-# 比特浏览器
-BITBROWSER_API_URL=http://127.0.0.1:54345
-```
-
-#### 2. 构建和启动
-
-```bash
-# 构建镜像
-docker-compose -f docker-compose.prod.yml build
-
-# 启动服务
-docker-compose -f docker-compose.prod.yml up -d
-
-# 查看日志
-docker-compose logs -f
-```
-
-#### 3. 初始化
-
-```bash
-# 运行数据库迁移
-docker-compose exec backend python manage.py migrate
-
-# 创建管理员账号
-docker-compose exec backend python manage.py createsuperuser
-
-# 收集静态文件
-docker-compose exec backend python manage.py collectstatic --noinput
-```
-
-#### 4. 配置 Nginx（可选）
-
-如果需要使用自己的 Nginx：
-
-```nginx
-server {
-    listen 80;
-    server_name yourdomain.com;
-
-    location / {
-        proxy_pass http://localhost:8080;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-    }
-
-    location /api/ {
-        proxy_pass http://localhost:8000;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-    }
-}
-```
-
----
-
-### 本地开发环境
-
-#### 1. 后端设置
-
-```bash
-cd backend
-
-# 创建虚拟环境
-python -m venv venv
-
-# 激活虚拟环境
-# Windows
-venv\Scripts\activate
-# Linux/Mac
-source venv/bin/activate
-
-# 安装依赖
-pip install -r requirements/development.txt
-
-# 配置环境变量
-cp .env.example .env
-nano .env
-
-# 创建数据库
-createdb auto_all_system
-
-# 运行迁移
-python manage.py migrate
-
-# 创建管理员
-python manage.py createsuperuser
-
-# 启动开发服务器
-python manage.py runserver
-```
-
-#### 2. 前端设置
-
-```bash
-cd frontend
-
-# 安装依赖
-npm install
-
-# 启动开发服务器
-npm run dev
-
-# 构建生产版本
-npm run build
-```
-
-#### 3. Redis 和 Celery
-
-```bash
-# 启动 Redis（需要先安装）
-redis-server
-
-# 启动 Celery Worker
-cd backend
-celery -A config worker -l info
-
-# 启动 Celery Beat（定时任务）
-celery -A config beat -l info
-```
-
----
-
-## ⚙️ 配置说明
-
-### 环境变量
-
-```bash
-# Django 核心配置
-DEBUG=True                          # 开发模式
-SECRET_KEY=your-secret-key          # 密钥（必须修改）
-ALLOWED_HOSTS=localhost,127.0.0.1   # 允许的主机
-
-# 数据库配置
-POSTGRES_HOST=localhost
+POSTGRES_HOST=localhost  # Docker 中: db
 POSTGRES_PORT=5432
-POSTGRES_DB=auto_all_system
-POSTGRES_USER=postgres
+POSTGRES_DB=auto_all_db
+POSTGRES_USER=auto_all_user
 POSTGRES_PASSWORD=your-password
 
-# Redis 配置
+# Redis
 REDIS_URL=redis://localhost:6379/0
 
-# Celery 配置
+# Celery
 CELERY_BROKER_URL=redis://localhost:6379/0
 CELERY_RESULT_BACKEND=redis://localhost:6379/1
 
-# 比特浏览器
-BITBROWSER_API_URL=http://127.0.0.1:54345
+# 浏览器环境（GeekezBrowser）
+GEEKEZ_API_HOST=localhost          # Docker 中: host.docker.internal
+GEEKEZ_API_PORT=19527
+GEEKEZ_DATA_DIR=/geekez-browser/BrowserProfiles
 
-# SheerID API
+# 浏览器环境（BitBrowser，兼容）
+BITBROWSER_API_URL=http://localhost:54345   # Docker 中: http://host.docker.internal:54345
+
+# SheerID
 SHEERID_API_KEY=your-api-key
-SHEERID_API_URL=https://services.sheerid.com/
-
-# 日志配置
-LOG_LEVEL=INFO
-LOG_DIR=logs
-```
-
-### Django 设置
-
-**settings/base.py** - 基础配置  
-**settings/development.py** - 开发环境  
-**settings/production.py** - 生产环境
-
----
-
-## ❓ 常见问题
-
-### 安装与启动
-
-**Q: Docker 启动失败？**
-
-```bash
-# 检查 Docker 状态
-docker --version
-docker-compose --version
-
-# 查看日志
-docker-compose logs
-
-# 重新构建
-docker-compose down
-docker-compose build --no-cache
-docker-compose up -d
-```
-
-**Q: 端口冲突？**
-
-修改 `docker-compose.yml`:
-
-```yaml
-ports:
-  - "8080:80"     # 前端改为 8080
-  - "8001:8000"   # 后端改为 8001
-```
-
-**Q: 数据库连接失败？**
-
-- 检查 PostgreSQL 是否启动
-- 验证 `.env` 中的数据库配置
-- 确认数据库已创建
-
----
-
-### 使用问题
-
-**Q: 如何导入账号？**
-
-1. 访问 http://localhost/google/accounts
-2. 点击"批量导入"
-3. 按格式准备文件并上传
-
-**Q: SheerID API Key 在哪里获取？**
-
-联系 SheerID 官方申请 API 访问权限。  
-或使用浏览器自动化方式（不需要 API Key）。
-
-**Q: 绑卡失败怎么办？**
-
-- 检查卡片信息是否正确
-- 降低并发线程数
-- 增加操作延迟时间
-- 查看任务日志定位问题
-
-**Q: 如何调整并发数？**
-
-在任务配置中设置 `thread_count`:
-- 低配置: 1-3 线程
-- 中等配置: 3-5 线程
-- 高配置: 5-10 线程
-
----
-
-### 性能优化
-
-**Q: 如何提升处理速度？**
-
-1. 增加 Celery Worker 数量
-2. 使用 SSD 硬盘
-3. 增加系统内存
-4. 使用 Redis 持久化
-5. 优化数据库索引
-
-**Q: 数据库太大怎么办？**
-
-```bash
-# 清理旧日志
-python manage.py clean_old_logs
-
-# 归档历史任务
-python manage.py archive_tasks --days 30
-
-# 数据库优化
-python manage.py dbshell
-VACUUM ANALYZE;
 ```
 
 ---
 
-## 📖 完整文档
+## API 概览
 
-### 系统文档
-- [📖 README](./README.md) - 本文件
-- [🚀 快速开始](./docs/00-快速开始.md)
-- [🗄️ 数据库设计](./docs/01-数据库设计.md)
-- [🏗️ 系统架构与配置](./docs/02-系统架构与配置.md)
-- [🎨 前端页面功能](./docs/03-前端页面功能.md)
-- [🔌 API 接口文档](./docs/04-API接口文档.md)
-- [🧩 插件化架构设计](./docs/05-插件化架构设计.md)
-- [🎯 Google 插件设计说明](./docs/06-Google插件设计说明.md)
-- [🌐 比特浏览器 API 开发指南](./docs/07-比特浏览器API开发指南.md)
+认证方式：JWT Token（`Authorization: Bearer <token>`）
 
-### 其他资源
-- [API 交互式文档](http://localhost:8000/api/docs/)
-- [Django Admin](http://localhost:8000/admin/)
+```
+POST /api/v1/auth/login/              # 登录获取 Token
+POST /api/v1/auth/refresh/            # 刷新 Token
 
----
+# Google 专区
+GET  /api/v1/plugins/google-business/accounts/           # 账号列表
+POST /api/v1/plugins/google-business/accounts/batch_import/  # 批量导入
+GET  /api/v1/plugins/google-business/accounts/statistics/    # 统计数据
+POST /api/v1/plugins/google-business/tasks/              # 创建任务
+GET  /api/v1/plugins/google-business/tasks/{id}/         # 任务详情
+POST /api/v1/plugins/google-business/tasks/{id}/cancel/  # 取消任务
+GET  /api/v1/plugins/google-business/tasks/{id}/logs/    # 任务日志
 
-## 🔧 开发指南
+# 虚拟卡
+GET  /api/v1/cards/                   # 卡列表
+POST /api/v1/cards/batch_import/      # 批量导入卡片
 
-### 代码规范
-
-- **Python**: PEP 8
-- **JavaScript**: ESLint + Prettier
-- **提交信息**: Conventional Commits
-
-### 测试
-
-```bash
-# 后端测试
-cd backend
-python manage.py test
-
-# 前端测试
-cd frontend
-npm run test
-
-# 覆盖率
-python manage.py test --coverage
+# 完整 API 文档
+# Swagger UI: http://localhost:8000/api/docs/
 ```
 
-### 贡献
+---
 
-1. Fork 项目
-2. 创建功能分支
-3. 提交更改
-4. 创建 Pull Request
+## 文档索引
+
+### 系统级文档（`docs/`）
+
+| 文档 | 说明 | 适合人群 |
+|------|------|---------|
+| [00-快速开始](docs/00-快速开始.md) | Docker 部署、初始化、健康检查 | 所有人 |
+| [01-数据库设计](docs/01-数据库设计.md) | 完整表结构、关系图、索引设计 | 后端开发 |
+| [02-系统架构与配置](docs/02-系统架构与配置.md) | 技术栈详解、Docker/HTTPS 配置 | 开发/运维 |
+| [03-前端页面功能](docs/03-前端页面功能.md) | 25 个页面功能说明 | 前端开发 |
+| [04-API接口文档](docs/04-API接口文档.md) | 50+ API 接口、开发规范、附录 | 前后端开发 |
+| [05-插件化架构设计](docs/05-插件化架构设计.md) | 插件系统设计、生命周期、开发指南 | 插件开发 |
+| [07-比特浏览器API开发指南](docs/07-比特浏览器API开发指南.md) | BitBrowser API 封装、Docker 集成 | 自动化开发 |
+| [08-新增专区开发指南](docs/08-新增专区开发指南.md) | 新增/扩展专区的前后端步骤 | 业务扩展 |
+| [09-GPT专区规划](docs/09-GPT专区账号体系与自动化规划.md) | GPT 母号/子号体系、自动化流程 | GPT 开发 |
+| [11-GeekezBrowser适配](docs/11-GeekezBrowser_API_变更适配说明.md) | 上游 API 拆分适配 | 后端/运维 |
+| [12-统一浏览器池化](docs/12-统一浏览器池化与自动化运行时.md) | browser_base / browser_pool 架构 | 自动化开发 |
+| [14-前端UI问题定位](docs/14-前端UI问题快速定位手册.md) | 常见 UI 问题排查 Runbook | 前端开发 |
+
+### 插件级文档
+
+| 文档 | 说明 |
+|------|------|
+| [Google 专区自动化维护](backend/plugins/google_business/docs/AUTOMATION_MAINTENANCE.md) | **核心参考** — 任务流、数据模型、日志/产物、故障排查 |
+| [GPT 专区自动化流程](backend/plugins/gpt_business/docs/AUTOMATION_FLOW.md) | GPT 邀请自动化维护 |
+| [BitBrowser 模块](backend/apps/integrations/bitbrowser/README.md) | API 封装说明 |
+| [Email 模块](backend/apps/integrations/email/README.md) | CloudMail 域名邮箱集成 |
+
+### 归档文档
+
+| 文档 | 说明 |
+|------|------|
+| [比特浏览器窗口管理Web化方案](docs/比特浏览器窗口管理Web化方案.md) | 历史迁移方案，已实施完成 |
+| [13-前端现代化重构计划](docs/13-前端现代化重构与UI优化计划.md) | Phase 1 已完成，后续阶段待定 |
 
 ---
 
-## 📄 许可证
+## 联系方式
 
-MIT License - 详见 [LICENSE](LICENSE)
-
----
-
-## 🤝 支持
-
-### 问题反馈
-
-1. 查看 [常见问题](#-常见问题)
-2. 查看 [完整文档](#-完整文档)
-3. 提交 Issue（附上详细信息）
-
-### 联系方式
-
-- **QQ**: 2738552008
-- **Telegram**: https://t.me/+9zd3YE16NCU3N2Fl
-- **QQ 群**: 330544197
-
----
-
-<div align="center">
-
-**🚀 开始使用 Auto All System**
-
-[返回主项目](../README.md) | [查看桌面应用](../Auto_All_System_Pyqt/README.md)
-
----
-
-**Version**: 2.0.0 | **Last Updated**: 2026-01-19
-
-Made with ❤️ by Auto All System Team
-
-</div>
+- QQ: 2738552008
+- Telegram: https://t.me/+9zd3YE16NCU3N2Fl
+- QQ 群: 330544197
