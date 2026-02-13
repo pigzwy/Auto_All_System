@@ -28,6 +28,97 @@ from .utils import TaskLogger, EncryptionUtil, attach_playwright_trace
 logger = logging.getLogger(__name__)
 
 
+async def _auto_change_recovery_email(
+    page,
+    account,
+    account_info: dict,
+    cloudmail_config_id,
+    owner_user,
+    security_service,
+    task_logger,
+    account_id,
+):
+    """自动创建域名邮箱并通过浏览器修改辅助邮箱（公共逻辑）。
+
+    返回 (ok: bool, message: str, new_email: str | None)
+    - ok=True 时 new_email 为新创建的邮箱地址
+    - ok=False 时 new_email 可能有值（已创建但换绑失败），调用方需决定是否回滚
+    """
+    import asyncio
+
+    cloudmail_config = CloudMailConfig.objects.filter(
+        id=cloudmail_config_id, is_active=True
+    ).first()
+    if not cloudmail_config:
+        return False, f"CloudMail 配置不存在或未启用: {cloudmail_config_id}", None
+    if not cloudmail_config.domains:
+        return False, "CloudMail 配置无可用域名", None
+
+    domain = str(cloudmail_config.domains[0] or "").strip()
+    if not domain:
+        return False, "CloudMail 域名无效", None
+
+    client = CloudMailClient(
+        api_base=cloudmail_config.api_base,
+        api_token=cloudmail_config.api_token,
+        domains=cloudmail_config.domains,
+        default_role=cloudmail_config.default_role,
+    )
+    try:
+        email_service = EmailService(client=client)
+        # 注意：create_recovery_email 会立即写入数据库
+        auto_recovery_email, _ = email_service.create_recovery_email(
+            google_account=account,
+            owner_user=owner_user,
+            domain=domain,
+        )
+
+        async def _get_verification_code(email_addr):
+            loop = asyncio.get_running_loop()
+            code = await loop.run_in_executor(
+                None,
+                lambda: client.wait_for_verification_code(
+                    to_email=email_addr,
+                    timeout=120,
+                    poll_interval=5,
+                    sender_contains="google",
+                ),
+            )
+            return code or ""
+
+        ok, msg = await security_service.change_recovery_email(
+            page,
+            {
+                "email": account_info.get("email"),
+                "password": account_info.get("password"),
+                "totp_secret": account_info.get("totp_secret")
+                or account_info.get("secret")
+                or "",
+            },
+            auto_recovery_email.strip(),
+            verification_code_callback=_get_verification_code,
+        )
+
+        if not ok:
+            # 浏览器操作失败，回滚数据库中提前写入的 recovery_email
+            try:
+                account.refresh_from_db()
+                if account.recovery_email == auto_recovery_email:
+                    account.recovery_email = account_info.get("original_recovery_email", "")
+                    account.save(update_fields=["recovery_email", "updated_at"])
+            except Exception:
+                pass
+
+        return ok, msg, auto_recovery_email.strip()
+    except Exception as e:
+        return False, str(e), None
+    finally:
+        try:
+            client.close()
+        except Exception:
+            pass
+
+
 @shared_task(bind=True, max_retries=3)
 def process_single_account(
     self,
@@ -694,103 +785,29 @@ def process_single_account(
                                             task_logger.info(
                                                 f"[Account {account_id}] 增项: 自动创建并修改辅助邮箱"
                                             )
-                                            client = None
                                             try:
-                                                cloudmail_config = CloudMailConfig.objects.filter(
-                                                    id=cloudmail_config_id, is_active=True
-                                                ).first()
-                                                if not cloudmail_config:
+                                                _acct_info = {
+                                                    "email": account_info.get("email"),
+                                                    "password": account_info.get("password"),
+                                                    "totp_secret": account_info.get("secret") or "",
+                                                    "original_recovery_email": account.recovery_email or "",
+                                                }
+                                                ok3, msg3, new_email3 = await _auto_change_recovery_email(
+                                                    page, account, _acct_info, cloudmail_config_id,
+                                                    task.user, security_service, task_logger, account_id,
+                                                )
+                                                if ok3 and new_email3:
+                                                    result.setdefault("account_updates", {})[
+                                                        "recovery_email"
+                                                    ] = new_email3
+                                                elif not ok3:
                                                     task_logger.warning(
-                                                        f"[Account {account_id}] CloudMail 配置不存在或未启用: {cloudmail_config_id}"
+                                                        f"[Account {account_id}] 增项修改辅助邮箱失败: {msg3}"
                                                     )
-                                                elif not cloudmail_config.domains:
-                                                    task_logger.warning(
-                                                        f"[Account {account_id}] CloudMail 配置无可用域名"
-                                                    )
-                                                else:
-                                                    domain = str(
-                                                        cloudmail_config.domains[0] or ""
-                                                    ).strip()
-                                                    if not domain:
-                                                        task_logger.warning(
-                                                            f"[Account {account_id}] CloudMail 域名无效"
-                                                        )
-                                                    else:
-                                                        client = CloudMailClient(
-                                                            api_base=cloudmail_config.api_base,
-                                                            api_token=cloudmail_config.api_token,
-                                                            domains=cloudmail_config.domains,
-                                                            default_role=cloudmail_config.default_role,
-                                                        )
-                                                        email_service = EmailService(
-                                                            client=client
-                                                        )
-                                                        (
-                                                            auto_recovery_email,
-                                                            _,
-                                                        ) = email_service.create_recovery_email(
-                                                            google_account=account,
-                                                            owner_user=task.user,
-                                                            domain=domain,
-                                                        )
-
-                                                        client_for_code = client
-
-                                                        async def get_code(email):
-                                                            import asyncio
-
-                                                            loop = asyncio.get_event_loop()
-                                                            code = await loop.run_in_executor(
-                                                                None,
-                                                                lambda: client_for_code.wait_for_verification_code(
-                                                                    to_email=email,
-                                                                    timeout=120,
-                                                                    poll_interval=5,
-                                                                    sender_contains="google",
-                                                                ),
-                                                            )
-                                                            return code or ""
-
-                                                        (
-                                                            ok3,
-                                                            msg3,
-                                                        ) = await security_service.change_recovery_email(
-                                                            page,
-                                                            {
-                                                                "email": account_info.get(
-                                                                    "email"
-                                                                ),
-                                                                "password": account_info.get(
-                                                                    "password"
-                                                                ),
-                                                                "totp_secret": account_info.get(
-                                                                    "secret"
-                                                                )
-                                                                or "",
-                                                            },
-                                                            auto_recovery_email.strip(),
-                                                            verification_code_callback=get_code,
-                                                        )
-                                                        if ok3:
-                                                            result.setdefault(
-                                                                "account_updates", {}
-                                                            )[
-                                                                "recovery_email"
-                                                            ] = auto_recovery_email.strip()
-                                                        else:
-                                                            task_logger.warning(
-                                                                f"[Account {account_id}] 增项修改辅助邮箱失败: {msg3}"
-                                                            )
                                             except Exception as auto_recovery_error:
                                                 task_logger.warning(
                                                     f"[Account {account_id}] 自动创建辅助邮箱失败: {auto_recovery_error}"
                                                 )
-                                            finally:
-                                                if client:
-                                                    try:
-                                                        client.close()
-                                                    except Exception:
-                                                        pass
                                         elif (
                                             isinstance(new_recovery_email, str)
                                             and new_recovery_email.strip()
@@ -1131,93 +1148,29 @@ def process_single_account(
                                 task_logger.info(
                                     f"[Account {account_id}] 增项: 自动创建并修改辅助邮箱"
                                 )
-                                client = None
                                 try:
-                                    cloudmail_config = CloudMailConfig.objects.filter(
-                                        id=cloudmail_config_id, is_active=True
-                                    ).first()
-                                    if not cloudmail_config:
+                                    _acct_info = {
+                                        "email": account_info.get("email"),
+                                        "password": account_info.get("password"),
+                                        "totp_secret": account_info.get("secret") or "",
+                                        "original_recovery_email": account.recovery_email or "",
+                                    }
+                                    ok3, msg3, new_email3 = await _auto_change_recovery_email(
+                                        page, account, _acct_info, cloudmail_config_id,
+                                        task.user, security_service, task_logger, account_id,
+                                    )
+                                    if ok3 and new_email3:
+                                        result.setdefault("account_updates", {})[
+                                            "recovery_email"
+                                        ] = new_email3
+                                    elif not ok3:
                                         task_logger.warning(
-                                            f"[Account {account_id}] CloudMail 配置不存在或未启用: {cloudmail_config_id}"
+                                            f"[Account {account_id}] 增项修改辅助邮箱失败: {msg3}"
                                         )
-                                    elif not cloudmail_config.domains:
-                                        task_logger.warning(
-                                            f"[Account {account_id}] CloudMail 配置无可用域名"
-                                        )
-                                    else:
-                                        domain = str(
-                                            cloudmail_config.domains[0] or ""
-                                        ).strip()
-                                        if not domain:
-                                            task_logger.warning(
-                                                f"[Account {account_id}] CloudMail 域名无效"
-                                            )
-                                        else:
-                                            client = CloudMailClient(
-                                                api_base=cloudmail_config.api_base,
-                                                api_token=cloudmail_config.api_token,
-                                                domains=cloudmail_config.domains,
-                                                default_role=cloudmail_config.default_role,
-                                            )
-                                            email_service = EmailService(client=client)
-                                            (
-                                                auto_recovery_email,
-                                                _,
-                                            ) = email_service.create_recovery_email(
-                                                google_account=account,
-                                                owner_user=task.user,
-                                                domain=domain,
-                                            )
-
-                                            client_for_code = client
-
-                                            async def get_code(email):
-                                                import asyncio
-
-                                                loop = asyncio.get_event_loop()
-                                                code = await loop.run_in_executor(
-                                                    None,
-                                                    lambda: client_for_code.wait_for_verification_code(
-                                                        to_email=email,
-                                                        timeout=120,
-                                                        poll_interval=5,
-                                                        sender_contains="google",
-                                                    ),
-                                                )
-                                                return code or ""
-
-                                            (
-                                                ok3,
-                                                msg3,
-                                            ) = await security_service.change_recovery_email(
-                                                page,
-                                                {
-                                                    "email": account_info.get("email"),
-                                                    "password": account_info.get("password"),
-                                                    "totp_secret": account_info.get("secret")
-                                                    or "",
-                                                },
-                                                auto_recovery_email.strip(),
-                                                verification_code_callback=get_code,
-                                            )
-                                            if ok3:
-                                                result.setdefault("account_updates", {})[
-                                                    "recovery_email"
-                                                ] = auto_recovery_email.strip()
-                                            else:
-                                                task_logger.warning(
-                                                    f"[Account {account_id}] 增项修改辅助邮箱失败: {msg3}"
-                                                )
                                 except Exception as auto_recovery_error:
                                     task_logger.warning(
                                         f"[Account {account_id}] 自动创建辅助邮箱失败: {auto_recovery_error}"
                                     )
-                                finally:
-                                    if client:
-                                        try:
-                                            client.close()
-                                        except Exception:
-                                            pass
                             elif (
                                 isinstance(new_recovery_email, str)
                                 and new_recovery_email.strip()
@@ -2656,7 +2609,7 @@ def auto_change_recovery_email_task(
                         async def get_code(email):
                             import asyncio
 
-                            loop = asyncio.get_event_loop()
+                            loop = asyncio.get_running_loop()
                             code = await loop.run_in_executor(
                                 None,
                                 lambda: client.wait_for_verification_code(

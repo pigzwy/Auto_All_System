@@ -1525,6 +1525,16 @@ class GoogleSecurityService:
                         await page.keyboard.press("Enter")
 
                     await asyncio.sleep(2)
+                else:
+                    logger.warning(
+                        "Verification code required but not obtained for %s, proceeding without",
+                        new_email,
+                    )
+            elif verification_input and not verification_code_callback:
+                logger.warning(
+                    "Verification input found but no callback provided for %s",
+                    new_email,
+                )
 
             logger.info(f"Recovery email change initiated for {email}")
             if task_logger:

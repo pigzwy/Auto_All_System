@@ -1061,13 +1061,13 @@
             <label class="text-sm font-medium">增项：修改辅助邮箱</label>
             <div class="flex gap-2 mb-1">
               <Button
-                size="sm" variant="outline"
-                :class="{ 'bg-primary text-primary-foreground': oneClickForm.recovery_email_mode === 'manual' }"
+                size="sm"
+                :variant="oneClickForm.recovery_email_mode === 'manual' ? 'default' : 'outline'"
                 @click="oneClickForm.recovery_email_mode = 'manual'"
               >手动输入</Button>
               <Button
-                size="sm" variant="outline"
-                :class="{ 'bg-primary text-primary-foreground': oneClickForm.recovery_email_mode === 'auto' }"
+                size="sm"
+                :variant="oneClickForm.recovery_email_mode === 'auto' ? 'default' : 'outline'"
                 @click="oneClickForm.recovery_email_mode = 'auto'; loadCloudMailConfigs()"
               >自动创建域名邮箱</Button>
             </div>
@@ -2506,8 +2506,6 @@ const submitOneClickTask = async () => {
   config.rest_min_minutes = scheduleConfig.rest_min_minutes
   config.rest_max_minutes = scheduleConfig.rest_max_minutes
 
-  console.log('[一键启动] force_rerun switch:', oneClickForm.force_rerun, '| config:', JSON.stringify(config))
-
   try {
     const res = await googleTasksApi.createTask({
       task_type: 'one_click',
@@ -2750,7 +2748,7 @@ const submitChangeRecoveryEmail = async () => {
     try {
       const res = await googleSecurityApi.autoChangeRecoveryEmail({
         account_ids: ids,
-        cloudmail_config_id: selectedCloudMailConfigId.value
+        cloudmail_config_id: Number(selectedCloudMailConfigId.value)
       })
       const celeryTaskId = getCreatedCeleryTaskId(res)
       if (celeryTaskId) startCeleryTaskStatusPolling(celeryTaskId, ids)
