@@ -340,13 +340,15 @@ const handleResetPassword = (user: User) => {
     confirmButtonText: '确定',
     cancelButtonText: '取消',
     inputType: 'password',
-    inputValidator: (value) => {
+    inputValidator: (value: string) => {
       if (!value || value.length < 6) {
         return '密码长度至少6位'
       }
       return true
     }
-  }).then(async ({ value }) => {
+  }).then(async (ret) => {
+    if (!ret?.value) return
+    const value = ret.value
     try {
       await usersApi.resetPassword(user.id, value)
       ElMessage.success('密码重置成功')

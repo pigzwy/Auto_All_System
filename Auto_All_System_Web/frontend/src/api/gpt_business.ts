@@ -122,7 +122,19 @@ export const gptBusinessApi = {
       tail?: number
       filename?: string
     }
-  ): Promise<{ filename: string; exists: boolean; text: string; download_url: string }> {
+  ): Promise<{
+    filename: string
+    exists: boolean
+    text: string
+    download_url: string
+    accounts_summary?: Array<{
+      account_id: string
+      email: string
+      celery_task_id: string
+      trace_file: string
+      state: string
+    }>
+  }> {
     return request.get(`/plugins/gpt-business/tasks/${taskId}/log/`, {
       params: {
         tail: opts?.tail,

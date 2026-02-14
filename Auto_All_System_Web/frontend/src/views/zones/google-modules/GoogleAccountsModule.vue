@@ -984,6 +984,7 @@
                 <span class="font-medium text-foreground">{{ celeryEmail || '-' }}</span>
                 <span
                   class="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium"
+                  :title="celeryStatusText || ''"
                   :class="celeryState === 'SUCCESS'
                     ? 'bg-emerald-500/10 text-emerald-700'
                     : celeryState === 'FAILURE'
@@ -1873,6 +1874,7 @@ const clearTaskRecords = async () => {
     await viewTasks(account)
   } catch (e: any) {
     if (e === 'cancel' || e?.message === 'cancel') return
+    ElMessage.error(e?.response?.data?.error || e?.response?.data?.detail || e?.message || '清空记录失败')
   }
 }
 
@@ -2739,7 +2741,8 @@ const submitBindCardTask = async () => {
 const loadCloudMailConfigs = async () => {
   try {
     const res = await getCloudMailConfigs()
-    cloudMailConfigs.value = (res.data?.results || res.data || []).filter((c: any) => c.is_active)
+    const raw = Array.isArray(res) ? res : (res.results || [])
+    cloudMailConfigs.value = raw.filter((c: any) => c.is_active)
   } catch {
     cloudMailConfigs.value = []
   }
@@ -2754,11 +2757,18 @@ const submitChangeRecoveryEmail = async () => {
       return
     }
     try {
+      const toInt = (value: unknown, fallback: number) => {
+        const n = Number(value)
+        return Number.isFinite(n) ? Math.trunc(n) : fallback
+      }
+      const maxConcurrency = Math.min(20, Math.max(1, toInt(recoveryEmailConcurrency.value, 5)))
+      const staggerSeconds = Math.min(60, Math.max(0, toInt(recoveryEmailStagger.value, 1)))
+
       const res = await googleSecurityApi.autoChangeRecoveryEmail({
         account_ids: ids,
         cloudmail_config_id: Number(selectedCloudMailConfigId.value),
-        max_concurrency: Number(recoveryEmailConcurrency.value) || 5,
-        stagger_seconds: Number(recoveryEmailStagger.value) || 1,
+        max_concurrency: maxConcurrency,
+        stagger_seconds: staggerSeconds,
       })
       const celeryTaskId = getCreatedCeleryTaskId(res)
       if (celeryTaskId) startCeleryTaskStatusPolling(celeryTaskId, ids)
@@ -3070,20 +3080,6 @@ const fetchTraceForward = async () => {
     }
   } catch {
     // forward polling：失败不弹窗，避免刷屏
-  }
-}
-
-const clearTrace = () => {
-  traceLines.value = []
-}
-
-const copyTrace = async () => {
-  try {
-    const text = traceLines.value.map(x => x.text).join('\n')
-    await navigator.clipboard.writeText(text)
-    ElMessage.success('已复制')
-  } catch {
-    ElMessage.warning('复制失败（浏览器限制）')
   }
 }
 

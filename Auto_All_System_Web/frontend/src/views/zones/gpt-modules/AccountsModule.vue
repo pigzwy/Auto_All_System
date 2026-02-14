@@ -368,7 +368,13 @@
           </div>
           <div class="grid gap-2">
             <label class="text-sm font-medium">域名</label>
-            <Select :model-value="motherForm.domain || '__random__'" @update:model-value="(v) => motherForm.domain = v === '__random__' ? '' : v">
+            <Select
+              :model-value="motherForm.domain || '__random__'"
+              @update:model-value="(v) => {
+                const s = String(v ?? '__random__')
+                motherForm.domain = s === '__random__' ? '' : s
+              }"
+            >
               <SelectTrigger>
                 <SelectValue placeholder="留空=随机" />
               </SelectTrigger>
@@ -857,6 +863,7 @@
                 <span class="font-medium text-foreground">{{ celeryEmail || '-' }}</span>
                 <span
                   class="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium"
+                  :title="celeryStatusText || ''"
                   :class="celeryState === 'SUCCESS'
                     ? 'bg-emerald-500/10 text-emerald-700'
                     : celeryState === 'FAILURE'
@@ -917,7 +924,6 @@ import {
   UserPlus,
   Users,
   LayoutList,
-  FileDown,
   X,
   Trash2
 } from 'lucide-vue-next'
@@ -927,12 +933,6 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
-import {
-  Accordion,
-  AccordionContent,
-  AccordionItem,
-  AccordionTrigger,
-} from '@/components/ui/accordion'
 import {
   Dialog,
   DialogClose,
@@ -1544,13 +1544,15 @@ const openCreateChild = (mother: MotherRow) => {
 
 const editSeat = async (mother: MotherRow) => {
   try {
-    const { value } = await ElMessageBox.prompt('请输入母号座位数（seat_total）', '修改座位', {
+    const ret = await ElMessageBox.prompt('请输入母号座位数（seat_total）', '修改座位', {
       confirmButtonText: '保存',
       cancelButtonText: '取消',
       inputValue: String(mother.seat_total || 0),
       inputPattern: /^\d+$/,
       inputErrorMessage: '请输入非负整数'
     })
+    if (!ret?.value) return
+    const value = ret.value
     await gptBusinessApi.updateAccount(mother.id, { seat_total: Number(value) })
     ElMessage.success('已更新')
     await refresh()
@@ -1925,20 +1927,6 @@ const fetchTraceForward = async () => {
   }
 }
 
-const clearTrace = () => {
-  traceLines.value = []
-}
-
-const copyTrace = async () => {
-  try {
-    const text = traceLines.value.map(x => x.text).join('\n')
-    await navigator.clipboard.writeText(text)
-    ElMessage.success('已复制')
-  } catch {
-    ElMessage.warning('复制失败（浏览器限制）')
-  }
-}
-
 const onTraceScroll = async () => {
   const el = traceScrollRef.value
   if (!el) return
@@ -2083,6 +2071,7 @@ const clearTaskRecords = async () => {
     await viewTasks(mother)
   } catch (e: any) {
     if (e === 'cancel' || e?.message === 'cancel') return
+    ElMessage.error(e?.response?.data?.detail || e?.response?.data?.error || e?.message || '清空记录失败')
   }
 }
 

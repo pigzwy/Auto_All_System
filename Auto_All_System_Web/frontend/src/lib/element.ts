@@ -125,7 +125,7 @@ function confirmBox() {
   const kind = messageBoxState.kind
 
   if (kind === 'prompt') {
-    const { inputPattern, inputErrorMessage, inputValue } = messageBoxState
+    const { inputPattern, inputValue } = messageBoxState
     if (inputPattern && !inputPattern.test(inputValue)) {
       // 校验不通过时不关闭
       return
