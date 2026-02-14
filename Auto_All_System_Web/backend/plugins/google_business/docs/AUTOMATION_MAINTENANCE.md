@@ -106,6 +106,25 @@ serializer：
 批量任务 `GoogleTask.log`：
 - `GET /api/v1/plugins/google-business/tasks/{id}/log/`
 
+返回格式：
+```json
+{
+  "task_id": 13,
+  "accounts_summary": [
+    {
+      "account_id": 11,
+      "email": "ReginaldSharma52@gmail.com",
+      "celery_task_id": "d8849775-d1d0-49e7-b92c-572380576012",
+      "trace_file": "logs/trace/trace_d8849775_ReginaldSharma52_gmail_com.log",
+      "state": "failed"
+    }
+  ],
+  "log": "..."
+}
+```
+
+- `accounts_summary`：从日志文本中提取每个账号的 celery_task_id、trace 文件路径和执行状态（2026-02 新增）
+
 ### 3.2 Trace 文件（文件系统）
 
 `process_single_account` 会创建 `TaskLogger`，同时写：
@@ -119,7 +138,23 @@ serializer：
 实现：
 - `Auto_All_System_Web/backend/plugins/google_business/views.py:CeleryTaskViewSet.trace`
 
-### 3.3 订阅截图（文件系统）
+### 3.3 日志写入与清理（统一工具）
+
+**后端**：`TaskLogger`（`utils.py`）是唯一的日志写入类，所有自动化任务共用。
+- `log()` → 写 `[{timestamp}] {context_prefix}{message}` 格式
+- `emit()` → 写 JSON 行 + 人类可读行
+
+**前端**：日志展示统一使用 `frontend/src/lib/log-utils.ts`，提供：
+- `cleanLogText(raw)` — 清理整段日志文本（Task Log Dialog）
+- `normalizeTraceLines(raw, startId)` — 清理 trace 行数组（Celery Trace Dialog）
+- `cleanLogLine(line)` — 单行清理核心函数
+
+清理规则（Google 专区 / GPT 专区共用）：
+1. 过滤 JSON 行（与人类可读行内容重复）
+2. 去除 `[celery=xxx][acc=N][email]` 等冗余前缀（摘要卡片已展示）
+3. 简化 ISO 时间戳 `[2026-02-13T11:05:19.137959+00:00]` → `[2026-02-13 11:05:19]`
+
+### 3.4 订阅截图（文件系统）
 
 订阅验证任务会把截图写到：
 - `BASE_DIR/screenshots/*.png`
@@ -360,6 +395,7 @@ serializer：
 - `Auto_All_System_Web/frontend/src/views/zones/GoogleBusinessZone.vue`
 - `Auto_All_System_Web/frontend/src/views/zones/google-modules/GoogleAccountsModule.vue`
 - `Auto_All_System_Web/frontend/src/api/google.ts`
+- `Auto_All_System_Web/frontend/src/lib/log-utils.ts`（日志清理共享工具，Google / GPT 专区共用）
 
 ---
 

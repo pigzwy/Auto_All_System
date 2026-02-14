@@ -496,6 +496,10 @@ S2A_GROUP_IDS = [1, 2]  # 或 S2A_GROUP_NAMES = ["group1", "group2"]
 
 trace 文件路径: `backend/logs/trace/trace_<celery_task_id>_<email>.log`
 
+日志 API（`GET /tasks/{id}/log/`）返回 `accounts_summary` 字段，包含每个账号的 `celery_task_id`、`trace_file`、`state`。
+
+**前端日志清理**：使用统一工具 `frontend/src/lib/log-utils.ts`（Google / GPT 专区共用），自动过滤 JSON 重复行、去除冗余前缀、简化时间戳格式。
+
 ### 5.3 Trace 清理策略
 
 默认策略（可通过 `PluginState.settings.trace_cleanup` 覆盖）：

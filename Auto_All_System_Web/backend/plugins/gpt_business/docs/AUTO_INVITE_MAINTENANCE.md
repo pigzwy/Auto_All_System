@@ -153,6 +153,39 @@ task record 关键字段：
 
 注意：Geekez profile 在 `with BrowserService(...)` 结束后会自动关闭，这是正常行为。
 
+### 3.3 日志 API 返回格式（2026-02 更新）
+
+`GET /api/v1/plugins/gpt-business/tasks/{id}/log/` 返回：
+
+```json
+{
+  "task_id": "4",
+  "accounts_summary": [
+    {
+      "account_id": "2",
+      "email": "xxx@gmail.com",
+      "celery_task_id": "d8849775-...",
+      "trace_file": "logs/trace/trace_d8849775_xxx_gmail_com.log",
+      "state": "failed"
+    }
+  ],
+  "text": "...",
+  "filename": "run.log",
+  "download_url": "/media/..."
+}
+```
+
+### 3.4 前端日志清理（统一工具）
+
+前端使用 `frontend/src/lib/log-utils.ts` 统一清理日志展示，Google / GPT 专区共用：
+- `cleanLogText(raw)` — 清理整段日志文本（Task Log Dialog 使用）
+- `normalizeTraceLines(raw, startId)` — 清理 trace 行数组（Celery Trace Dialog 使用）
+
+清理规则：
+1. 过滤 JSON 行（与人类可读行重复）
+2. 去除 `[celery=xxx][acc=N][email]` 冗余前缀
+3. 简化 ISO 时间戳为 `[YYYY-MM-DD HH:MM:SS]`
+
 ---
 
 ## 4. 自动邀请详细流程（母号 -> 邀请 -> 子号入队）
@@ -303,6 +336,7 @@ task record 关键字段：
 - 浏览器内调用 backend-api（绕过容器网络）：`Auto_All_System_Web/backend/plugins/gpt_business/services/chatgpt_backend_api.py`
 - 子号注册：`Auto_All_System_Web/backend/plugins/gpt_business/services/openai_register.py:register_openai_account`
 - 邮箱验证码/收信：`Auto_All_System_Web/backend/apps/integrations/email/services/client.py:CloudMailClient`
+- 日志清理工具（前端共享）：`Auto_All_System_Web/frontend/src/lib/log-utils.ts`
 
 ---
 
