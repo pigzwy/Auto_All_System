@@ -220,7 +220,7 @@ export const googleSecurityApi = {
   },
 
   // 自动创建域名邮箱并换绑辅助邮箱
-  autoChangeRecoveryEmail(data: { account_ids: number[]; cloudmail_config_id: number; browser_type?: string }): Promise<ApiResponse<any>> {
+  autoChangeRecoveryEmail(data: { account_ids: number[]; cloudmail_config_id: number; max_concurrency?: number; stagger_seconds?: number; browser_type?: string }): Promise<ApiResponse<any>> {
     return request.post('/plugins/google-business/security/auto_change_recovery_email/', data)
   },
 

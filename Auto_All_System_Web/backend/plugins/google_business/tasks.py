@@ -2426,25 +2426,35 @@ def auto_change_recovery_email_task(
     cloudmail_config_id,
     user_id,
     browser_type=None,
+    max_concurrency: int = 5,
+    stagger_seconds: int = 1,
 ):
     """
-    自动创建域名邮箱并修改辅助邮箱任务
+    自动创建域名邮箱并修改辅助邮箱任务（支持并发）
     """
     import asyncio
+    import time
+    import random
+    from concurrent.futures import ThreadPoolExecutor, as_completed
     from django.contrib.auth import get_user_model
+    from django.db import close_old_connections
 
     from .services import browser_pool
     from .services.security_service import GoogleSecurityService
     from apps.integrations.browser_base import BrowserType
 
     logger.info(
-        "Starting auto recovery email change task for %s accounts",
+        "Starting auto recovery email change task for %s accounts (concurrency=%s)",
         len(account_ids or []),
+        max_concurrency,
     )
 
     account_ids = list(account_ids or [])
     if not account_ids:
         return {"success": True, "results": [], "total": 0, "succeeded": 0}
+
+    max_concurrency = max(1, min(int(max_concurrency or 5), 20))
+    stagger_seconds = max(0, int(stagger_seconds or 1))
 
     cloudmail_config = CloudMailConfig.objects.filter(
         id=cloudmail_config_id, is_active=True
@@ -2482,226 +2492,269 @@ def auto_change_recovery_email_task(
     User = get_user_model()
     owner_user = User.objects.filter(id=user_id).first()
 
-    results = []
     per_account_timeout_s = 360
-    client = CloudMailClient(
-        api_base=cloudmail_config.api_base,
-        api_token=cloudmail_config.api_token,
-        domains=cloudmail_config.domains,
-        default_role=cloudmail_config.default_role,
-    )
-    email_service = EmailService(client=client)
+    total = len(account_ids)
+    results_by_index: list[dict | None] = [None] * total
 
-    try:
-        for i, account_id in enumerate(account_ids):
+    def _process_single_account(global_index: int, account_id: int, delay_s: int = 0):
+        """在线程中处理单个账号（每个线程独立的 asyncio 事件循环）"""
+        if delay_s > 0:
+            time.sleep(delay_s)
+
+        close_old_connections()
+
+        # 每个线程独立创建 CloudMailClient（线程安全）
+        client = CloudMailClient(
+            api_base=cloudmail_config.api_base,
+            api_token=cloudmail_config.api_token,
+            domains=cloudmail_config.domains,
+            default_role=cloudmail_config.default_role,
+        )
+        email_service = EmailService(client=client)
+
+        try:
+            account = GoogleAccount.objects.get(id=account_id)
+
+            task_logger = TaskLogger(
+                None,
+                celery_task_id=str(self.request.id),
+                account_id=account_id,
+                email=account.email,
+                kind="auto_change_recovery_email",
+            )
+            task_logger.event(
+                step="task",
+                action="start",
+                message="start auto_change_recovery_email",
+            )
+
             try:
-                account = GoogleAccount.objects.get(id=account_id)
+                password = EncryptionUtil.decrypt(account.password)
+            except Exception:
+                password = account.password
 
-                task_logger = TaskLogger(
-                    None,
-                    celery_task_id=str(self.request.id),
-                    account_id=account_id,
+            try:
+                totp_secret = (
+                    EncryptionUtil.decrypt(account.two_fa_secret)
+                    if account.two_fa_secret
+                    else ""
+                )
+            except Exception:
+                totp_secret = account.two_fa_secret or ""
+
+            new_email, _ = email_service.create_recovery_email(
+                google_account=account,
+                owner_user=owner_user,
+                domain=domain,
+            )
+
+            account_info = {
+                "email": account.email,
+                "password": password,
+                "totp_secret": totp_secret,
+            }
+
+            async def run_all():
+                instance = await browser_pool.acquire_by_email(
                     email=account.email,
-                    kind="auto_change_recovery_email",
+                    task_id=str(self.request.id),
+                    account_info=account_info,
+                    browser_type=bt,
                 )
-                task_logger.event(
-                    step="task",
-                    action="start",
-                    message="start auto_change_recovery_email",
-                )
+                if not instance or not instance.page:
+                    task_logger.event(
+                        step="browser",
+                        action="acquire",
+                        level="error",
+                        message="failed to acquire browser instance",
+                    )
+                    return False, "无法获取浏览器实例"
 
                 try:
-                    password = EncryptionUtil.decrypt(account.password)
-                except Exception:
-                    password = account.password
+                    attach_playwright_trace(instance.page, task_logger)
 
-                try:
-                    totp_secret = (
-                        EncryptionUtil.decrypt(account.two_fa_secret)
-                        if account.two_fa_secret
-                        else ""
-                    )
-                except Exception:
-                    totp_secret = account.two_fa_secret or ""
-
-                new_email, _ = email_service.create_recovery_email(
-                    google_account=account,
-                    owner_user=owner_user,
-                    domain=domain,
-                )
-
-                account_info = {
-                    "email": account.email,
-                    "password": password,
-                    "totp_secret": totp_secret,
-                }
-
-                self.update_state(
-                    state="PROGRESS",
-                    meta={
-                        "current": i + 1,
-                        "total": len(account_ids),
-                        "email": account.email,
-                    },
-                )
-
-                async def run_all():
-                    instance = await browser_pool.acquire_by_email(
-                        email=account.email,
-                        task_id=str(self.request.id),
-                        account_info=account_info,
-                        browser_type=bt,
-                    )
-                    if not instance or not instance.page:
-                        task_logger.event(
-                            step="browser",
-                            action="acquire",
-                            level="error",
-                            message="failed to acquire browser instance",
-                        )
-                        return False, "无法获取浏览器实例"
-
+                    login_service = GoogleLoginService()
                     try:
-                        attach_playwright_trace(instance.page, task_logger)
+                        logged_in = await login_service.check_login_status(instance.page)
+                    except Exception:
+                        logged_in = False
 
-                        login_service = GoogleLoginService()
-                        try:
-                            logged_in = await login_service.check_login_status(instance.page)
-                        except Exception:
-                            logged_in = False
-
-                        if not logged_in:
-                            task_logger.event(
-                                step="login",
-                                action="start",
-                                message="start login",
-                                url=getattr(instance.page, "url", ""),
-                            )
-                            login_res = await login_service.login(
-                                instance.page,
-                                {
-                                    "email": account.email,
-                                    "password": password,
-                                    "secret": totp_secret,
-                                    "backup": account.recovery_email or "",
-                                },
-                                task_logger,
-                            )
-                            if not login_res.get("success"):
-                                err = login_res.get("error") or login_res.get("message") or ""
-                                task_logger.event(
-                                    step="login",
-                                    action="result",
-                                    level="error",
-                                    message="login failed",
-                                    url=getattr(instance.page, "url", ""),
-                                    result={"error": err},
-                                )
-                                return False, f"登录失败: {err}"
-
+                    if not logged_in:
+                        task_logger.event(
+                            step="login",
+                            action="start",
+                            message="start login",
+                            url=getattr(instance.page, "url", ""),
+                        )
+                        login_res = await login_service.login(
+                            instance.page,
+                            {
+                                "email": account.email,
+                                "password": password,
+                                "secret": totp_secret,
+                                "backup": account.recovery_email or "",
+                            },
+                            task_logger,
+                        )
+                        if not login_res.get("success"):
+                            err = login_res.get("error") or login_res.get("message") or ""
                             task_logger.event(
                                 step="login",
                                 action="result",
-                                message="login ok",
+                                level="error",
+                                message="login failed",
                                 url=getattr(instance.page, "url", ""),
+                                result={"error": err},
                             )
+                            return False, f"登录失败: {err}"
 
-                        async def get_code(email):
-                            import asyncio
-
-                            loop = asyncio.get_running_loop()
-                            code = await loop.run_in_executor(
-                                None,
-                                lambda: client.wait_for_verification_code(
-                                    to_email=email,
-                                    timeout=120,
-                                    poll_interval=5,
-                                    sender_contains="google",
-                                ),
-                            )
-                            return code or ""
-
-                        return await security_service.change_recovery_email(
-                            instance.page,
-                            account_info,
-                            new_email,
-                            task_logger=task_logger,
-                            verification_code_callback=get_code,
+                        task_logger.event(
+                            step="login",
+                            action="result",
+                            message="login ok",
+                            url=getattr(instance.page, "url", ""),
                         )
-                    finally:
-                        try:
-                            await asyncio.wait_for(
-                                asyncio.shield(
-                                    browser_pool.release_by_email(
-                                        account.email,
-                                        browser_type=bt,
-                                        close=True,
-                                    )
-                                ),
-                                timeout=30,
-                            )
-                        except Exception:
-                            logger.warning(
-                                "Failed to release browser instance (auto recovery email)",
-                                exc_info=True,
-                            )
 
-                async def run_with_timeout():
-                    return await asyncio.wait_for(run_all(), timeout=per_account_timeout_s)
+                    async def get_code(email_addr):
+                        loop = asyncio.get_running_loop()
+                        code = await loop.run_in_executor(
+                            None,
+                            lambda: client.wait_for_verification_code(
+                                to_email=email_addr,
+                                timeout=120,
+                                poll_interval=5,
+                                sender_contains="google",
+                            ),
+                        )
+                        return code or ""
+
+                    return await security_service.change_recovery_email(
+                        instance.page,
+                        account_info,
+                        new_email,
+                        task_logger=task_logger,
+                        verification_code_callback=get_code,
+                    )
+                finally:
+                    try:
+                        await asyncio.wait_for(
+                            asyncio.shield(
+                                browser_pool.release_by_email(
+                                    account.email,
+                                    browser_type=bt,
+                                    close=True,
+                                )
+                            ),
+                            timeout=30,
+                        )
+                    except Exception:
+                        logger.warning(
+                            "Failed to release browser instance (auto recovery email)",
+                            exc_info=True,
+                        )
+
+            async def run_with_timeout():
+                return await asyncio.wait_for(run_all(), timeout=per_account_timeout_s)
+
+            try:
+                ok, msg = asyncio.run(run_with_timeout())
+            except asyncio.TimeoutError:
+                ok, msg = False, "任务超时"
+
+            trace_file = task_logger.trace_rel_path or (
+                str(task_logger.trace_file) if task_logger.trace_file else ""
+            )
+            task_logger.event(
+                step="task",
+                action="result",
+                message="auto_change_recovery_email finished",
+                level="info" if ok else "error",
+                result={"success": ok, "message": msg, "trace_file": trace_file},
+            )
+
+            if ok:
+                account.recovery_email = new_email
+                account.save(update_fields=["recovery_email"])
+
+            return {
+                "email": account.email,
+                "new_email": new_email,
+                "success": ok,
+                "message": msg,
+                "trace_file": trace_file,
+            }
+
+        except Exception as e:
+            logger.error(
+                f"Auto recovery email change failed for account {account_id}: {e}",
+                exc_info=True,
+            )
+            return {
+                "account_id": account_id,
+                "success": False,
+                "message": str(e),
+            }
+        finally:
+            try:
+                client.close()
+            except Exception:
+                pass
+            close_old_connections()
+
+    # 分批并发执行
+    completed = 0
+    for batch_start in range(0, total, max_concurrency):
+        batch_ids = account_ids[batch_start : batch_start + max_concurrency]
+
+        with ThreadPoolExecutor(max_workers=max_concurrency) as executor:
+            future_to_index = {}
+            for local_index, account_id in enumerate(batch_ids):
+                global_index = batch_start + local_index
+                start_delay = local_index * stagger_seconds
+                future = executor.submit(
+                    _process_single_account, global_index, account_id, start_delay
+                )
+                future_to_index[future] = global_index
+
+            for future in as_completed(future_to_index):
+                global_index = future_to_index[future]
+                account_id = account_ids[global_index]
 
                 try:
-                    ok, msg = asyncio.run(run_with_timeout())
-                except asyncio.TimeoutError:
-                    ok, msg = False, "任务超时"
-
-                trace_file = task_logger.trace_rel_path or (
-                    str(task_logger.trace_file) if task_logger.trace_file else ""
-                )
-                task_logger.event(
-                    step="task",
-                    action="result",
-                    message="auto_change_recovery_email finished",
-                    level="info" if ok else "error",
-                    result={"success": ok, "message": msg, "trace_file": trace_file},
-                )
-
-                if ok:
-                    account.recovery_email = new_email
-                    account.save(update_fields=["recovery_email"])
-
-                results.append(
-                    {
-                        "email": account.email,
-                        "new_email": new_email,
-                        "success": ok,
-                        "message": msg,
-                        "trace_file": trace_file,
-                    }
-                )
-
-            except Exception as e:
-                logger.error(
-                    f"Auto recovery email change failed for account {account_id}: {e}",
-                    exc_info=True,
-                )
-                results.append(
-                    {
+                    result = future.result()
+                except Exception as e:
+                    logger.error(
+                        f"Auto recovery email future failed for account {account_id}: {e}",
+                        exc_info=True,
+                    )
+                    result = {
                         "account_id": account_id,
                         "success": False,
                         "message": str(e),
                     }
+
+                results_by_index[global_index] = result
+                completed += 1
+                self.update_state(
+                    state="PROGRESS",
+                    meta={
+                        "current": completed,
+                        "total": total,
+                        "email": result.get("email", ""),
+                    },
                 )
 
-    finally:
-        try:
-            client.close()
-        except Exception:
-            pass
+    results = []
+    for idx, account_id in enumerate(account_ids):
+        item = results_by_index[idx]
+        if item is None:
+            item = {"account_id": account_id, "success": False, "message": "未执行"}
+        results.append(item)
 
     return {
         "success": True,
         "results": results,
-        "total": len(account_ids),
+        "total": total,
         "succeeded": sum(1 for r in results if r.get("success")),
     }
 

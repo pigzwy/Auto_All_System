@@ -2404,11 +2404,16 @@ class SecurityViewSet(viewsets.ViewSet):
 
         from .tasks import auto_change_recovery_email_task
 
+        max_concurrency = int(request.data.get("max_concurrency", 5))
+        stagger_seconds = int(request.data.get("stagger_seconds", 1))
+
         task = auto_change_recovery_email_task.delay(
             account_ids=account_ids,
             cloudmail_config_id=cloudmail_config_id,
             user_id=request.user.id,
             browser_type=browser_type,
+            max_concurrency=max_concurrency,
+            stagger_seconds=stagger_seconds,
         )
 
         now_iso = timezone.now().isoformat()

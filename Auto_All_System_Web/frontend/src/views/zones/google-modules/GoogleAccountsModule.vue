@@ -1335,6 +1335,12 @@
               </SelectContent>
             </Select>
             <p class="text-xs text-muted-foreground">将自动创建邮箱并换绑，验证码自动填入</p>
+            <div class="flex items-center gap-4 mt-2">
+              <label class="text-xs text-muted-foreground whitespace-nowrap">并发数</label>
+              <Input v-model="recoveryEmailConcurrency" type="number" class="w-20 h-8" min="1" max="20" />
+              <label class="text-xs text-muted-foreground whitespace-nowrap">错开(秒)</label>
+              <Input v-model="recoveryEmailStagger" type="number" class="w-20 h-8" min="0" max="30" />
+            </div>
           </div>
         </div>
 
@@ -2244,6 +2250,8 @@ const normalizeSecurityOneClickConfig = () => {
 const newRecoveryEmail = ref('')
 const recoveryEmailMode = ref<'manual' | 'auto'>('manual')
 const selectedCloudMailConfigId = ref<string>('')
+const recoveryEmailConcurrency = ref(5)
+const recoveryEmailStagger = ref(1)
 const cloudMailConfigs = ref<any[]>([])
 const verifySubScreenshot = ref(false)
 
@@ -2748,7 +2756,9 @@ const submitChangeRecoveryEmail = async () => {
     try {
       const res = await googleSecurityApi.autoChangeRecoveryEmail({
         account_ids: ids,
-        cloudmail_config_id: Number(selectedCloudMailConfigId.value)
+        cloudmail_config_id: Number(selectedCloudMailConfigId.value),
+        max_concurrency: Number(recoveryEmailConcurrency.value) || 5,
+        stagger_seconds: Number(recoveryEmailStagger.value) || 1,
       })
       const celeryTaskId = getCreatedCeleryTaskId(res)
       if (celeryTaskId) startCeleryTaskStatusPolling(celeryTaskId, ids)
