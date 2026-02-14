@@ -2747,11 +2747,14 @@ def team_push_task(
     """
     import httpx
     from .services.browser_service import BrowserService
-    from .services.chatgpt_session import fetch_auth_session
+    from .services.chatgpt_session import ensure_access_token, fetch_auth_session
     from .storage import find_account, patch_account, patch_task
 
     settings = get_settings()
     result: dict = {"success": False, "record_id": record_id, "mother_id": mother_id}
+
+    celery_task_id = str(self.request.id or "")
+    trace_email = ""
 
     # 日志文件
     media_root = Path(str(getattr(django_settings, "MEDIA_ROOT", "")))
@@ -2768,9 +2771,20 @@ def team_push_task(
                 fp.write(line + "\n")
         except Exception:
             pass
+        # 同时写入 trace 日志（使 Celery Trace Dialog 可以读取）
+        _append_trace_line(celery_task_id, trace_email, msg, step="team_push", action="log")
 
     try:
-        patch_task(record_id, {"status": "running", "started_at": timezone.now().isoformat()})
+        # 保存 celery_task_id 到任务记录（使前端能正确打开 Celery Trace Dialog）
+        patch_task(
+            record_id,
+            {
+                "status": "running",
+                "started_at": timezone.now().isoformat(),
+                "celery_task_id": self.request.id,
+            },
+        )
+
         _set_task_progress(record_id, 0, 3, "准备中...")
         _log("任务开始")
 
@@ -2779,12 +2793,16 @@ def team_push_task(
             raise ValueError(f"母号不存在: {mother_id}")
 
         email = mother.get("email", "")
+        password = str(mother.get("account_password") or "").strip()
+        trace_email = email  # 设置 trace 邮箱（用于 trace 日志文件命名）
 
         _log(f"母号: {email}")
         _log(f"座位数: {seat_total}, 备注: {note}")
 
         if not email:
             raise ValueError("母号邮箱为空")
+        if not password:
+            raise ValueError("母号密码为空（account_password）")
 
         _set_task_progress(record_id, 1, 3, "获取 session...")
         _log("启动浏览器获取 session")
@@ -2805,16 +2823,56 @@ def team_push_task(
 
             _log(f"当前 URL: {browser.current_url()}")
 
-            # 获取 session
+            # 先尝试直接获取 session（如果已登录则无需走登录流程）
             session_data = fetch_auth_session(page)
 
-            if not session_data:
-                _log("获取 session 失败")
-                raise RuntimeError("无法获取 session")
+            if session_data and session_data.get("accessToken"):
+                session_email = (session_data.get("user") or {}).get("email", "")
+                _log(f"已有 session, user: {session_email}")
+                # 如果 session 邮箱匹配，直接使用
+                if session_email.lower() == email.lower():
+                    _log("session 邮箱匹配，直接使用")
+                else:
+                    _log(f"session 邮箱不匹配（{session_email} vs {email}），重新登录")
+                    session_data = None
 
-            if not session_data.get("accessToken"):
-                _log("accessToken 为空，账号可能未登录")
-                raise RuntimeError("无法获取 accessToken，账号可能未登录")
+            if not session_data or not session_data.get("accessToken"):
+                _log("未登录或 session 无效，走登录流程...")
+
+                # 构建验证码获取回调（如果母号配置了 CloudMail）
+                _get_code_cb = None
+                try:
+                    email_cfg = _cloudmail_email_config_from_account(mother)
+                    from apps.integrations.email.services.client import CloudMailClient
+                    _mail_client = CloudMailClient(
+                        api_base=str(email_cfg.get("api_base") or ""),
+                        api_token=str(email_cfg.get("api_auth") or ""),
+                        domains=list(email_cfg.get("domains") or []),
+                        default_role=str(email_cfg.get("role") or "user"),
+                    )
+                    def _get_code_cb(email_addr: str) -> str | None:
+                        _log(f"等待验证码 ({email_addr})...")
+                        return _mail_client.wait_for_verification_code(email_addr, timeout=120)
+                    _log("已配置 CloudMail 验证码回调")
+                except Exception as mail_err:
+                    _log(f"CloudMail 未配置或不可用: {mail_err}（如遇验证码页面将无法自动处理）")
+
+                try:
+                    _token, session_data = ensure_access_token(
+                        page,
+                        email=email,
+                        password=password,
+                        get_verification_code=_get_code_cb,
+                        timeout=180,
+                        log_callback=_log,
+                    )
+                    _log(f"登录成功, accessToken len={len(_token)}")
+                except Exception as login_err:
+                    _log(f"登录流程失败: {login_err}")
+                    raise RuntimeError(f"登录失败: {login_err}")
+
+            if not session_data or not session_data.get("accessToken"):
+                raise RuntimeError("无法获取 accessToken，登录流程未能完成")
 
             _log(f"成功获取 session, user: {session_data.get('user', {}).get('email', 'unknown')}")
 
@@ -2880,14 +2938,17 @@ def team_push_task(
         _log(f"任务失败: {exc}")
 
         _set_task_progress(record_id, 3, 3, "失败")
-        patch_task(
-            record_id,
-            {
-                "status": "failed",
-                "finished_at": timezone.now().isoformat(),
-                "error": str(exc),
-            },
-        )
+        try:
+            patch_task(
+                record_id,
+                {
+                    "status": "failed",
+                    "finished_at": timezone.now().isoformat(),
+                    "error": str(exc),
+                },
+            )
+        except Exception:
+            pass
 
         # 更新账号状态为失败
         try:

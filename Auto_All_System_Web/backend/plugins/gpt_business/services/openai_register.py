@@ -17,19 +17,135 @@ TYPING_DELAY = 0.08  # 打字延迟
 ACTION_DELAY = (0.3, 0.8)  # 操作间隔
 
 
-def connect_to_browser(debug_port: int) -> ChromiumPage:
+# 已启动的 TCP 转发端口集合（防止重复绑定导致 Address already in use）
+_active_forwarders: dict[int, "socket.socket"] = {}
+_forwarder_lock: "threading.Lock | None" = None
+
+
+def _get_forwarder_lock():
+    global _forwarder_lock
+    if _forwarder_lock is None:
+        import threading
+        _forwarder_lock = threading.Lock()
+    return _forwarder_lock
+
+
+def _start_tcp_forwarder(local_port: int, remote_host: str, remote_port: int):
+    """在后台启动 TCP 转发：127.0.0.1:local_port → remote_host:remote_port
+
+    如果该端口已有活跃的转发器，则跳过（幂等）。
+    """
+    import socket
+    import threading
+
+    lock = _get_forwarder_lock()
+    with lock:
+        if local_port in _active_forwarders:
+            logger.info(f"TCP forwarder 已存在: 127.0.0.1:{local_port}，跳过重复创建")
+            return _active_forwarders[local_port]
+
+    def _pipe(src: socket.socket, dst: socket.socket):
+        try:
+            while True:
+                data = src.recv(65536)
+                if not data:
+                    break
+                dst.sendall(data)
+        except Exception:
+            pass
+        finally:
+            try:
+                dst.shutdown(socket.SHUT_WR)
+            except Exception:
+                pass
+
+    def _handle(client: socket.socket):
+        try:
+            upstream = socket.create_connection((remote_host, remote_port), timeout=10)
+        except Exception:
+            client.close()
+            return
+        t1 = threading.Thread(target=_pipe, args=(client, upstream), daemon=True)
+        t2 = threading.Thread(target=_pipe, args=(upstream, client), daemon=True)
+        t1.start()
+        t2.start()
+        t1.join()
+        t2.join()
+        try:
+            client.close()
+        except Exception:
+            pass
+        try:
+            upstream.close()
+        except Exception:
+            pass
+
+    try:
+        server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        server.bind(("127.0.0.1", local_port))
+        server.listen(16)
+    except OSError as e:
+        # 端口已被占用（可能是之前的转发器残留），记录但不阻断
+        logger.warning(f"TCP forwarder 绑定端口 {local_port} 失败: {e}，尝试复用已有连接")
+        return None
+
+    def _accept_loop():
+        while True:
+            try:
+                client, _ = server.accept()
+                threading.Thread(target=_handle, args=(client,), daemon=True).start()
+            except Exception:
+                break
+        # 循环退出时清理
+        with lock:
+            _active_forwarders.pop(local_port, None)
+
+    with lock:
+        _active_forwarders[local_port] = server
+
+    threading.Thread(target=_accept_loop, daemon=True).start()
+    logger.info(f"TCP forwarder started: 127.0.0.1:{local_port} → {remote_host}:{remote_port}")
+    return server
+
+
+def connect_to_browser(debug_port: int, host: str | None = None) -> ChromiumPage:
     """连接到已运行的 Geekez 浏览器
-    
+
     Args:
         debug_port: Geekez 启动浏览器后返回的调试端口
-        
+        host: 浏览器所在主机地址，None 时自动检测（Docker 内用 host.docker.internal）
+
     Returns:
         ChromiumPage: DrissionPage 浏览器实例
     """
+    import os
+
+    if host is None:
+        is_docker = os.environ.get("DJANGO_ENVIRONMENT") == "docker"
+        use_hostnet = (
+            os.environ.get("USE_HOST_NETWORK") == "1"
+            or os.environ.get("DB_HOST") in ("127.0.0.1", "localhost")
+        )
+        if is_docker and not use_hostnet:
+            host = "host.docker.internal"
+        else:
+            host = "127.0.0.1"
+
+    # Docker bridge 网络下 DrissionPage 无法正确处理远程 WS URL 重写，
+    # 通过本地 TCP 转发让 DrissionPage 连接 127.0.0.1，避免地址不一致问题。
+    if host != "127.0.0.1":
+        logger.info(f"Docker 环境：启动 TCP 转发 127.0.0.1:{debug_port} → {host}:{debug_port}")
+        _start_tcp_forwarder(debug_port, host, debug_port)
+        # DrissionPage 连接本地转发端口
+        connect_addr = f"127.0.0.1:{debug_port}"
+    else:
+        connect_addr = f"{host}:{debug_port}"
+
     co = ChromiumOptions()
-    co.set_local_port(debug_port)
+    co.set_address(connect_addr)
     page = ChromiumPage(co)
-    logger.info(f"已连接到浏览器端口 {debug_port}")
+    logger.info(f"已连接到浏览器 {connect_addr}" + (f" (via {host}:{debug_port})" if host != "127.0.0.1" else ""))
     return page
 
 

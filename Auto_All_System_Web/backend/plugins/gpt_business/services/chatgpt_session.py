@@ -55,6 +55,7 @@ def ensure_access_token(
     *,
     email: str,
     password: str,
+    get_verification_code: Callable[[str], str | None] | None = None,
     timeout: int = 120,
     log_callback: Callable[[str], None] | None = None,
     screenshot_callback: Callable[[str], None] | None = None,
@@ -174,6 +175,65 @@ def ensure_access_token(
             return token2, sess2
     except Exception:
         pass
+
+    # 2.6) 检查 "Welcome back / Choose an account" 页面
+    # 某些情况下 chatgpt.com 首页会展示账号选择卡片，点击即可登录（无需重走 auth 流程）
+    try:
+        from .openai_register import human_delay
+
+        _log("check for 'Welcome back / Choose an account' page")
+
+        # 用 JS 精确查找账号卡片：
+        # - 必须是可点击元素 (button, a, li, [role=button])
+        # - 包含目标邮箱文本
+        # - 排除含有 "verification" / "验证码" / "code" 等验证相关文本
+        # - 元素文本长度合理（账号卡片文本不会太长）
+        js_find_and_click = """
+        (function() {
+            var email = '__EMAIL__'.toLowerCase();
+            var excludeWords = ['verification', 'verify', 'code', '验证', '验证码', 'sent to', '发送'];
+            var selectors = 'button, a, li, [role="button"], [role="listitem"], [data-testid*="account"]';
+            var elements = document.querySelectorAll(selectors);
+            for (var i = 0; i < elements.length; i++) {
+                var el = elements[i];
+                var text = (el.textContent || '').trim();
+                var textLower = text.toLowerCase();
+                // 必须包含邮箱
+                if (textLower.indexOf(email) === -1) continue;
+                // 文本不能太长（账号卡片通常不超过 120 字符，排除大段文本）
+                if (text.length > 150) continue;
+                // 排除验证码相关元素
+                var excluded = false;
+                for (var j = 0; j < excludeWords.length; j++) {
+                    if (textLower.indexOf(excludeWords[j]) !== -1) { excluded = true; break; }
+                }
+                if (excluded) continue;
+                // 确保元素可见
+                var rect = el.getBoundingClientRect();
+                if (rect.width === 0 || rect.height === 0) continue;
+                el.click();
+                return 'clicked: ' + text.substring(0, 80);
+            }
+            return 'not_found';
+        })();
+        """.replace("__EMAIL__", target_email.lower().replace("'", "\\'"))
+
+        click_result = page.run_js(js_find_and_click, timeout=5)
+        _log(f"account card JS result: {click_result}")
+
+        if click_result and click_result != "not_found":
+            time.sleep(3)
+            _probe("after_account_card_click")
+            _shot("invite_login_00d_after_account_click.png")
+
+            # 等待登录完成并获取 session
+            token_ac, sess_ac = _poll_session(time.time() + 20)
+            if token_ac:
+                _log("got accessToken from account card click")
+                return token_ac, sess_ac
+            _log("account card click did not yield session, continuing to login flow")
+    except Exception as e:
+        _log(f"account card detection failed: {e}")
 
     # 3) 登录流程
     try:
@@ -315,9 +375,100 @@ def ensure_access_token(
                 raise NeedsRegistrationError("account needs registration (create-account/password)")
 
             if "auth.openai.com/email-verification" in current_url:
-                _log("auth.openai.com email verification page detected; require registration flow")
-                _shot("invite_login_need_email_verification.png")
-                raise NeedsRegistrationError("account needs email verification")
+                # 检查页面标题：如果已经是 "Email verified" 说明验证码已提交成功，等待跳转即可
+                try:
+                    page_title = page.title or ""
+                except Exception:
+                    page_title = ""
+
+                if "verified" in page_title.lower() or "已验证" in page_title:
+                    _log(f"email already verified (title={page_title}), waiting for redirect...")
+                    # 等待页面自动跳转离开 email-verification
+                    for _wait_i in range(15):
+                        time.sleep(2)
+                        try:
+                            new_url = page.url or ""
+                            if "email-verification" not in new_url:
+                                _log(f"redirected to: {new_url}")
+                                break
+                        except Exception:
+                            break
+                    time.sleep(1)
+                    continue
+
+                _log("auth.openai.com email verification page (passwordless login)")
+                _shot("invite_login_email_verification.png")
+
+                if not get_verification_code:
+                    _log("no get_verification_code callback, cannot handle email verification")
+                    raise NeedsRegistrationError("account needs email verification (no callback)")
+
+                _log(f"waiting for verification code for {target_email}...")
+                code = get_verification_code(target_email)
+                if not code:
+                    _log("failed to get verification code")
+                    raise RuntimeError("verification code not received")
+
+                _log(f"got verification code, len={len(code)}")
+
+                # 填写验证码（复用 register_openai_account 中的逻辑）
+                code_inputs = page.eles(
+                    'css:input[name="code"], input[autocomplete="one-time-code"], '
+                    'input[inputmode="numeric"], input[type="tel"], '
+                    'input[placeholder*="代码"], input[placeholder*="code"]'
+                )
+                code_inputs = [x for x in (code_inputs or []) if x]
+
+                if not code_inputs:
+                    _log("verification code input not found on page")
+                    raise RuntimeError("verification code input not found")
+
+                digits = [c for c in code if c.isdigit()]
+                if len(code_inputs) >= 6 and len(digits) >= 6:
+                    # 多输入框：逐个填入
+                    for ci in range(6):
+                        try:
+                            code_inputs[ci].click()
+                            time.sleep(0.08)
+                            code_inputs[ci].input(digits[ci], clear=True)
+                            time.sleep(0.08)
+                        except Exception:
+                            pass
+                else:
+                    # 单输入框
+                    try:
+                        code_inputs[0].clear()
+                    except Exception:
+                        pass
+                    try:
+                        type_slowly(page, code_inputs[0], code, base_delay=0.08)
+                    except Exception:
+                        pass
+
+                time.sleep(0.6)
+                submit_btn = wait_for_element(page, 'css:button[type="submit"]', timeout=10)
+                if submit_btn:
+                    _log("submit verification code")
+                    submit_btn.click()
+                    # 验证码提交后等待页面变化（标题变化或 URL 变化）
+                    for _wait_i in range(15):
+                        time.sleep(2)
+                        try:
+                            new_title = page.title or ""
+                            new_url = page.url or ""
+                            if "verified" in new_title.lower() or "已验证" in new_title:
+                                _log(f"verification successful (title={new_title})")
+                                break
+                            if "email-verification" not in new_url:
+                                _log(f"redirected after verification to: {new_url}")
+                                break
+                        except Exception:
+                            break
+                    _probe("after_verification_submit")
+                    _shot("invite_login_after_verification.png")
+
+                time.sleep(2)
+                continue
 
             if "auth.openai.com/log-in/password" in current_url:
                 _log("auth.openai.com password page")

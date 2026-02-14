@@ -1794,6 +1794,44 @@ class GoogleTaskViewSet(viewsets.ModelViewSet):
             }
         )
 
+    def _collect_task_artifact_filenames(self, task) -> list[str]:
+        """收集任务允许访问的产物文件名（仅当前任务关联账号）。"""
+        names: set[str] = set()
+
+        # 1) 从任务关联账号 metadata 中提取截图文件名
+        task_accounts_qs = GoogleTaskAccount.objects.filter(task=task).select_related(
+            "account"
+        )
+        for ta in task_accounts_qs:
+            account = ta.account
+            meta = account.metadata if isinstance(account.metadata, dict) else {}
+            screenshot = meta.get("google_one_screenshot")
+            if screenshot:
+                screenshot_name = os.path.basename(str(screenshot))
+                if screenshot_name:
+                    names.add(screenshot_name)
+
+        # 2) 扫描 screenshots 目录，按任务关联账号邮箱匹配文件名
+        base_dir = Path(getattr(settings, "BASE_DIR", Path.cwd()))
+        screenshots_dir = base_dir / "screenshots"
+        if screenshots_dir.exists() and screenshots_dir.is_dir():
+            account_keywords: set[str] = set()
+            for ta in task_accounts_qs:
+                email = str(ta.account.email or "").strip()
+                if email:
+                    account_keywords.add(email)
+                    account_keywords.add(email.replace("@", "_").replace(".", "_"))
+
+            if account_keywords:
+                for p in sorted(screenshots_dir.glob("*")):
+                    if not p.is_file():
+                        continue
+                    fname = p.name
+                    if any(kw in fname for kw in account_keywords):
+                        names.add(fname)
+
+        return sorted(names)
+
     @action(detail=True, methods=["get"])
     def artifacts(self, request, pk=None):
         """获取任务产物（截图等文件）列表
@@ -1803,60 +1841,18 @@ class GoogleTaskViewSet(viewsets.ModelViewSet):
         同时扫描 screenshots/ 目录匹配该任务账号的文件。
         """
         task = self.get_object()
+        names = self._collect_task_artifact_filenames(task)
 
-        normalized = []
-        seen = set()
-
-        def add_file(name, file_path=None):
-            name = str(name or "")
-            if not name or name in seen:
-                return
-            seen.add(name)
-            normalized.append({
+        data = [
+            {
                 "name": name,
                 "download_url": request.build_absolute_uri(
                     f"/api/v1/plugins/google-business/tasks/{task.id}/download/{name}/"
                 ),
-            })
-
-        # 1. 从 GoogleTaskAccount 关联的账号 metadata 中获取截图
-        task_accounts_qs = GoogleTaskAccount.objects.filter(
-            task=task
-        ).select_related("account")
-
-        for ta in task_accounts_qs:
-            account = ta.account
-            meta = account.metadata if isinstance(account.metadata, dict) else {}
-            screenshot = meta.get("google_one_screenshot")
-            if screenshot:
-                # screenshot 可能是完整路径或仅文件名
-                screenshot_name = os.path.basename(str(screenshot))
-                add_file(screenshot_name)
-
-        # 2. 扫描 screenshots/ 目录，匹配任务关联账号邮箱的文件
-        base_dir = Path(getattr(settings, "BASE_DIR", Path.cwd()))
-        screenshots_dir = base_dir / "screenshots"
-        if screenshots_dir.exists() and screenshots_dir.is_dir():
-            # 获取所有关联账号的邮箱，用于模糊匹配文件名
-            account_emails = set()
-            for ta in task_accounts_qs:
-                email = str(ta.account.email or "").strip()
-                if email:
-                    account_emails.add(email)
-                    # 安全化邮箱（替换 @ 和 .）用于文件名匹配
-                    safe = email.replace("@", "_").replace(".", "_")
-                    account_emails.add(safe)
-
-            if account_emails:
-                for p in sorted(screenshots_dir.glob("*")):
-                    if not p.is_file():
-                        continue
-                    fname = p.name
-                    # 检查文件名是否包含任一账号邮箱
-                    if any(kw in fname for kw in account_emails):
-                        add_file(fname)
-
-        return Response(normalized)
+            }
+            for name in names
+        ]
+        return Response(data)
 
     @action(detail=True, methods=["get"], url_path=r"download/(?P<filename>[^/]+)")
     def download(self, request, pk=None, filename=None):
@@ -1878,6 +1874,13 @@ class GoogleTaskViewSet(viewsets.ModelViewSet):
         if safe_filename != filename:
             return Response(
                 {"error": "invalid filename"}, status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # 任务级授权：文件必须属于当前任务产物集合
+        allowed_names = set(self._collect_task_artifact_filenames(task))
+        if safe_filename not in allowed_names:
+            return Response(
+                {"error": "forbidden"}, status=status.HTTP_403_FORBIDDEN
             )
 
         base_dir = Path(getattr(settings, "BASE_DIR", Path.cwd()))
@@ -2404,8 +2407,17 @@ class SecurityViewSet(viewsets.ViewSet):
 
         from .tasks import auto_change_recovery_email_task
 
-        max_concurrency = int(request.data.get("max_concurrency", 5))
-        stagger_seconds = int(request.data.get("stagger_seconds", 1))
+        try:
+            max_concurrency = int(request.data.get("max_concurrency", 5))
+            stagger_seconds = int(request.data.get("stagger_seconds", 1))
+        except (TypeError, ValueError):
+            return Response(
+                {"error": "并发参数必须是整数"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        max_concurrency = max(1, min(max_concurrency, 20))
+        stagger_seconds = max(0, min(stagger_seconds, 60))
 
         task = auto_change_recovery_email_task.delay(
             account_ids=account_ids,

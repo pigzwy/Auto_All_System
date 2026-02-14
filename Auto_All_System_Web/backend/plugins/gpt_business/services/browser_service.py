@@ -2,6 +2,7 @@
 浏览器自动化服务 - 通过 Geekez 浏览器进行操作
 """
 import logging
+import os
 import random
 import time
 from typing import Any
@@ -36,7 +37,7 @@ class BrowserService:
         # GeekezBrowserAPI 内部会自动读取 DB 配置（GeekezIntegrationConfig.get_solo）
         # 并兼容历史环境变量；这里不再依赖旧的 GeekezConfig 模型。
         self._geekez_api = GeekezBrowserAPI()
-        
+
         if not self._geekez_api.health_check():
             raise RuntimeError(
                 "Geekez 浏览器服务不可用，请先在 /api/v1/geekez/config/ 配置并通过 /api/v1/geekez/config/test/ 测试连通"
@@ -56,18 +57,41 @@ class BrowserService:
                 proxy=self.proxy,
             )
             profile_id = profile_info.id
-        
+
         launch_info = self._geekez_api.launch_profile(profile_id)
         if not launch_info or not launch_info.debug_port:
             raise RuntimeError(f"启动 Geekez profile 失败: {profile_id}")
-        
+
         self._launched_profile_id = profile_id
-        
+        debug_port = launch_info.debug_port
+
+        # 确定连接地址（Docker 环境需要用 host.docker.internal）
+        # 与 openai_register.connect_to_browser 保持一致
+        is_docker = os.environ.get("DJANGO_ENVIRONMENT") == "docker"
+        use_hostnet = (
+            os.environ.get("USE_HOST_NETWORK") == "1"
+            or os.environ.get("DB_HOST") in ("127.0.0.1", "localhost")
+        )
+        if is_docker and not use_hostnet:
+            host = "host.docker.internal"
+        else:
+            host = "127.0.0.1"
+
+        # Docker bridge 网络下需要 TCP 转发
+        if host != "127.0.0.1":
+            from plugins.gpt_business.services.openai_register import _start_tcp_forwarder
+            logger.info(f"Docker 环境：启动 TCP 转发 127.0.0.1:{debug_port} → {host}:{debug_port}")
+            _start_tcp_forwarder(debug_port, host, debug_port)
+            connect_addr = f"127.0.0.1:{debug_port}"
+        else:
+            connect_addr = f"{host}:{debug_port}"
+
+        # 使用 set_address 连接到已启动的 Geekez 浏览器（而非 set_local_port 启动新进程）
         opts = ChromiumOptions()
-        opts.set_local_port(launch_info.debug_port)
-        
+        opts.set_address(connect_addr)
+
         self.page = ChromiumPage(opts)
-        logger.info(f"Geekez 浏览器已启动: profile={profile_id}, port={launch_info.debug_port}")
+        logger.info(f"Geekez 浏览器已启动: profile={profile_id}, addr={connect_addr}")
         return self
 
     def quit(self) -> None:
