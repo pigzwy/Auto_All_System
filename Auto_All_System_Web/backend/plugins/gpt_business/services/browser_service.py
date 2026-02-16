@@ -92,6 +92,10 @@ class BrowserService:
 
         self.page = ChromiumPage(opts)
         logger.info(f"Geekez 浏览器已启动: profile={profile_id}, addr={connect_addr}")
+
+        # Geekez Browser 已通过 Chrome Extension (fingerprint.js) 注入了完整的 stealth 脚本，
+        # 不再重复注入 stealth.py，避免双重 hook 被风控检测为异常。
+
         return self
 
     def quit(self) -> None:

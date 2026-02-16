@@ -380,6 +380,17 @@ class GeekezBrowserAPI:
                 "name": name,
                 "proxyStr": proxy or "",
                 "tags": [],
+                # 优化指纹参数，提升 Stripe 等支付风控通过率
+                "fingerprint": {
+                    "window": {"width": 1280, "height": 800},
+                    "webgl": {"noise": True},
+                    "canvas": {"noise": True},
+                    "audio": {"noise": True},
+                    # 不设置 webrtc — Geekez 默认用 relay 模式（不泄露 IP 且不被检测为异常）
+                },
+                "startupArgs": [
+                    "--disable-blink-features=AutomationControlled",
+                ],
             },
         )
         if api_created and isinstance(api_created.get("profile"), dict):
@@ -416,7 +427,16 @@ class GeekezBrowserAPI:
                 "name": name,
                 "proxyStr": proxy or "",
                 "tags": [],
-                "fingerprint": {"window": {"width": 1280, "height": 800}},
+                "fingerprint": {
+                    "window": {"width": 1280, "height": 800},
+                    "webgl": {"noise": True},
+                    "canvas": {"noise": True},
+                    "audio": {"noise": True},
+                    "webrtc": {"mode": "disabled"},
+                },
+                "startupArgs": [
+                    "--disable-blink-features=AutomationControlled",
+                ],
                 "preProxyOverride": "default",
                 "isSetup": False,
                 "debugPort": 0,
@@ -507,6 +527,10 @@ class GeekezBrowserAPI:
         launch_payload: dict[str, Any] = {
             "debugPort": 0,
             "enableRemoteDebugging": True,
+            # 去除自动化检测标记（Chromium flag）
+            "args": [
+                "--disable-blink-features=AutomationControlled",
+            ],
         }
 
         # Docker 非 host-network 场景：DevTools 如果只绑定 127.0.0.1 会导致容器内不可达。

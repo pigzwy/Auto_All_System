@@ -207,49 +207,66 @@ def _find_visible_input(context, selectors: list[str], timeout: int = 3):
     return None
 
 
-def _locate_payment_frame(page, timeout: int = 12):
-    frame_selectors = [
-        'css:iframe[src*="elements-inner-payment"]',
-        'css:iframe[name*="privateStripeFrame"]',
-        'css:iframe[src*="js.stripe.com"]',
-        'css:iframe[src*="stripe"]',
-        'css:iframe[title*="payment"]',
-    ]
+def _locate_stripe_frame(page, frame_type: str = "payment", timeout: int = 12):
+    """使用 DrissionPage get_frame() 获取 Stripe iframe 上下文。
+
+    Args:
+        page: 浏览器页面实例
+        frame_type: "payment" 或 "address"
+        timeout: 超时时间
+
+    Returns:
+        ChromiumFrame 对象或 None
+    """
+    if frame_type == "payment":
+        # 优先匹配 elements-inner-payment iframe
+        frame_matchers = [
+            '@src*=elements-inner-payment',
+            '@title=Secure payment input frame',
+            '@name*=privateStripeFrame',
+        ]
+    else:
+        # address iframe
+        frame_matchers = [
+            '@src*=elements-inner-address',
+            '@title=Secure address input frame',
+        ]
 
     start_time = time.time()
     while time.time() - start_time < timeout:
-        for selector in frame_selectors:
+        for matcher in frame_matchers:
             try:
-                iframe = page.ele(selector, timeout=1)
-                if not iframe or not iframe.states.is_displayed:
-                    continue
-
-                frame_page = iframe.ele
-                if not frame_page:
-                    continue
-
-                try:
-                    inner_iframe = frame_page.ele('css:iframe[name*="privateStripeFrame"]', timeout=1)
-                    if inner_iframe and inner_iframe.states.is_displayed and inner_iframe.ele:
-                        return inner_iframe.ele
-                except Exception:
-                    pass
-
-                return frame_page
+                frame = page.get_frame(matcher)
+                if frame:
+                    return frame
             except Exception:
                 pass
+        time.sleep(0.5)
 
-        time.sleep(0.3)
+    # 兜底：按索引遍历所有 iframe
+    try:
+        frames = page.get_frames()
+        for f in (frames or []):
+            try:
+                src = f.url or ""
+                if frame_type == "payment" and "elements-inner-payment" in src:
+                    return f
+                if frame_type == "address" and "elements-inner-address" in src:
+                    return f
+            except Exception:
+                pass
+    except Exception:
+        pass
 
     return None
 
 
 def _fill_card_fields_in_iframe(page, data: dict) -> bool:
-    frame_page = _locate_payment_frame(page, timeout=10)
+    frame_page = _locate_stripe_frame(page, frame_type="payment", timeout=10)
     if not frame_page:
         return False
 
-    log.info("  检测到 Stripe iframe，进入 iframe 填写卡信息...")
+    log.info("  检测到 Stripe payment iframe，进入 iframe 填写卡信息...")
 
     card_input = _find_visible_input(
         frame_page,
@@ -309,6 +326,146 @@ def _fill_card_fields_in_iframe(page, data: dict) -> bool:
     return bool(card_input and expiry_input and cvc_input)
 
 
+def _fill_address_fields(page, data: dict) -> bool:
+    """填写 Stripe address iframe 内的地址字段。
+
+    新版 Stripe checkout 将持卡人姓名、地址、城市、邮编、州等放在
+    独立的 address iframe (elements-inner-address) 中。
+    如果无法进入 address iframe，则回退到主页面查找。
+    """
+    addr_frame = _locate_stripe_frame(page, frame_type="address", timeout=8)
+    ctx = addr_frame if addr_frame else page
+    ctx_label = "address iframe" if addr_frame else "主页面"
+    if addr_frame:
+        log.info(f"  检测到 Stripe address iframe，进入填写地址信息...")
+    else:
+        log.info(f"  未找到 address iframe，在主页面查找地址字段...")
+
+    # 持卡人姓名
+    log.info("  填写持卡人姓名...")
+    name_input = _find_visible_input(
+        ctx,
+        [
+            'css:input[name="name"]',
+            'css:input[autocomplete="name"]',
+            'css:input[name="billingName"]',
+            'css:#billingName',
+        ],
+        timeout=5,
+    )
+    if name_input:
+        _type_slowly(name_input, data.get("cardholder_name", ""))
+        log.success(f"  持卡人姓名已填写 ({ctx_label})")
+    else:
+        log.warning(f"  未找到持卡人姓名输入框 ({ctx_label})")
+
+    _human_delay()
+
+    # 国家选择 — 默认 US，尝试选择
+    log.info("  选择国家...")
+    country_select = _find_visible_input(
+        ctx,
+        [
+            'css:select[name="countryCode"]',
+            'css:select[autocomplete="country"]',
+            'css:select[name="country"]',
+            'css:#billingCountry',
+        ],
+        timeout=3,
+    )
+    if country_select:
+        try:
+            country_select.select(data.get("country", "US"))
+            log.success(f"  国家已选择 ({ctx_label})")
+            time.sleep(0.5)
+        except Exception:
+            log.warning(f"  选择国家失败 ({ctx_label})")
+    else:
+        log.info(f"  跳过国家选择(使用默认值)")
+
+    _human_delay()
+
+    # 地址
+    log.info("  填写地址...")
+    addr_input = _find_visible_input(
+        ctx,
+        [
+            'css:input[name="addressLine1"]',
+            'css:input[autocomplete="address-line1"]',
+            'css:input[name="line1"]',
+            'css:#billingAddressLine1',
+        ],
+        timeout=5,
+    )
+    if addr_input:
+        _type_slowly(addr_input, data.get("address_line1", ""))
+        log.success(f"  地址已填写 ({ctx_label})")
+        # 等待地址自动补全消失
+        time.sleep(1)
+    else:
+        log.warning(f"  未找到地址输入框 ({ctx_label})")
+
+    _human_delay()
+
+    # 城市
+    log.info("  填写城市...")
+    city_input = _find_visible_input(
+        ctx,
+        [
+            'css:input[name="locality"]',
+            'css:input[autocomplete="address-level2"]',
+            'css:input[name="city"]',
+            'css:#billingLocality',
+        ],
+        timeout=5,
+    )
+    if city_input:
+        _type_slowly(city_input, data.get("city", ""))
+        log.success(f"  城市已填写 ({ctx_label})")
+
+    _human_delay()
+
+    # 州
+    log.info("  选择州...")
+    state_select = _find_visible_input(
+        ctx,
+        [
+            'css:select[name="administrativeArea"]',
+            'css:select[autocomplete="address-level1"]',
+            'css:select[name="state"]',
+            'css:#billingAdministrativeArea',
+        ],
+        timeout=5,
+    )
+    if state_select:
+        try:
+            state_select.select(data.get("state", "NY"))
+            log.success(f"  州已选择 ({ctx_label})")
+        except Exception:
+            log.warning(f"  选择州失败 ({ctx_label})")
+
+    _human_delay()
+
+    # 邮编
+    log.info("  填写邮编...")
+    postal_input = _find_visible_input(
+        ctx,
+        [
+            'css:input[name="postalCode"]',
+            'css:input[autocomplete="postal-code"]',
+            'css:input[name="zip"]',
+            'css:#billingPostalCode',
+        ],
+        timeout=5,
+    )
+    if postal_input:
+        _type_slowly(postal_input, data.get("postal_code", ""))
+        log.success(f"  邮编已填写 ({ctx_label})")
+
+    _human_delay()
+    return True
+
+
 def _type_slowly(element, text: str, base_delay: float = 0.08):
     """缓慢输入文本 (模拟真人)
 
@@ -321,6 +478,13 @@ def _type_slowly(element, text: str, base_delay: float = 0.08):
 
     if not text:
         return
+
+    # 先确保清空已有内容
+    try:
+        element.clear()
+        time.sleep(0.15)
+    except Exception:
+        pass
 
     # 短文本直接输入
     if len(text) <= 8:
@@ -701,6 +865,12 @@ def step_fill_checkout_form(
     log.info("  填写邮箱...")
     email_input = _find_element(page, "css:#email", timeout=5)
     if email_input:
+        # 先清空再输入，防止追加导致重复
+        try:
+            email_input.clear()
+            time.sleep(0.2)
+        except Exception:
+            pass
         _type_slowly(email_input, data["email"])
         log.success("  邮箱已填写")
     else:
@@ -708,7 +878,7 @@ def step_fill_checkout_form(
 
     _human_delay()
 
-    # 2-4. 填写卡号/有效期/CVC（优先 iframe，新旧页面双模式）
+    # 2-4. 填写卡号/有效期/CVC（Stripe payment iframe）
     if not _fill_card_fields_in_iframe(page, data):
         log.info("  回退到 legacy 输入框模式填写卡信息...")
 
@@ -742,61 +912,8 @@ def step_fill_checkout_form(
 
     _human_delay()
 
-    # 5. 填写持卡人姓名 (#billingName)
-    log.info("  填写持卡人姓名...")
-    name_input = _find_element(page, "css:#billingName", timeout=5)
-    if name_input:
-        _type_slowly(name_input, data["cardholder_name"])
-        log.success("  持卡人姓名已填写")
-    else:
-        log.warning("  未找到持卡人姓名输入框")
-
-    _human_delay()
-
-    log.info("  跳过国家选择(使用默认值)...")
-
-    _human_delay()
-
-    # 7. 填写地址 (#billingAddressLine1)
-    log.info("  填写地址...")
-    addr_input = _find_element(page, "css:#billingAddressLine1", timeout=5)
-    if addr_input:
-        _type_slowly(addr_input, data["address_line1"])
-        log.success("  地址已填写")
-    else:
-        log.warning("  未找到地址输入框")
-
-    _human_delay()
-
-    # 8. 填写城市 (#billingLocality)
-    log.info("  填写城市...")
-    city_input = _find_element(page, "css:#billingLocality", timeout=5)
-    if city_input:
-        _type_slowly(city_input, data["city"])
-        log.success("  城市已填写")
-
-    _human_delay()
-
-    # 9. 填写邮编 (#billingPostalCode)
-    log.info("  填写邮编...")
-    postal_input = _find_element(page, "css:#billingPostalCode", timeout=5)
-    if postal_input:
-        _type_slowly(postal_input, data["postal_code"])
-        log.success("  邮编已填写")
-
-    _human_delay()
-
-    # 10. 选择州 (#billingAdministrativeArea)
-    log.info("  选择州...")
-    try:
-        state_select = page.ele("css:#billingAdministrativeArea")
-        if state_select:
-            state_select.select(data["state"])
-            log.success("  州已选择")
-    except Exception:
-        log.warning("  选择州失败")
-
-    _human_delay()
+    # 5-10. 持卡人姓名/国家/地址/城市/邮编/州 — 在 Stripe address iframe 内
+    _fill_address_fields(page, data)
 
     # 11. 勾选许可协议
     log.info("  勾选许可协议...")

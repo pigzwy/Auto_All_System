@@ -184,8 +184,8 @@ class CardViewSet(viewsets.ModelViewSet):
             }, status=status.HTTP_400_BAD_REQUEST)
         
         try:
-            # 使用 query_url（如果有），否则用 redeem_url
-            api_url = api_config.query_url or api_config.redeem_url
+            # 激活操作优先使用 redeem_url，query_url 仅用于查询
+            api_url = api_config.redeem_url or api_config.query_url
             if not api_url:
                 return Response({
                     'code': 400,
@@ -243,20 +243,30 @@ class CardViewSet(viewsets.ModelViewSet):
                     }
                 }, status=status.HTTP_400_BAD_REQUEST)
             
-            # 检查卡是否过期
+            # 提取 expire_time（用于存入 key_expire_time，不阻止激活）
             from django.utils import timezone
             from datetime import datetime
             expire_time_str = result.get('card', {}).get('expire_time')
-            if expire_time_str:
+
+            # 检查卡的信用卡有效期（exp_month/exp_year）是否已过期
+            card_data_check = result.get('card', {})
+            field_map_check = (api_config.response_mapping or {}).get('fields', {})
+            check_exp_month = card_data_check.get(field_map_check.get('exp_month', 'exp_month'))
+            check_exp_year = card_data_check.get(field_map_check.get('exp_year', 'exp_year'))
+            if check_exp_month and check_exp_year:
                 try:
-                    expire_time = datetime.fromisoformat(expire_time_str.replace('Z', '+00:00'))
-                    if expire_time < timezone.now():
+                    ey = int(check_exp_year)
+                    em = int(check_exp_month)
+                    if ey < 100:
+                        ey += 2000
+                    now = timezone.now()
+                    if now.year > ey or (now.year == ey and now.month > em):
                         return Response({
                             'code': 400,
                             'message': '该卡已过期，无法使用',
                             'data': {
                                 'expired': True,
-                                'expire_time': expire_time_str
+                                'expiry': f'{em:02d}/{ey}'
                             }
                         }, status=status.HTTP_400_BAD_REQUEST)
                 except (ValueError, TypeError):

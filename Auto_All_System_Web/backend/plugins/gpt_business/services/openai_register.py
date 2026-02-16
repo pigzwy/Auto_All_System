@@ -146,6 +146,11 @@ def connect_to_browser(debug_port: int, host: str | None = None) -> ChromiumPage
     co.set_address(connect_addr)
     page = ChromiumPage(co)
     logger.info(f"已连接到浏览器 {connect_addr}" + (f" (via {host}:{debug_port})" if host != "127.0.0.1" else ""))
+
+    # Geekez Browser 已通过 Chrome Extension (fingerprint.js) 注入了完整的 stealth 脚本，
+    # 包括 webdriver/chrome/plugins/canvas/audio/webrtc 等全部伪装。
+    # 不再重复注入 stealth.py，避免双重 hook 被风控检测为异常。
+
     return page
 
 
