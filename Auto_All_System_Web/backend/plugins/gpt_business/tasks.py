@@ -587,6 +587,50 @@ def _cloudmail_email_config_from_account(acc: dict[str, Any]) -> dict[str, Any]:
         "web_url": "",
     }
 
+def _collect_workspace_hints(
+    task_record: dict[str, Any] | None,
+    account: dict[str, Any] | None,
+) -> list[str]:
+    """从任务记录和账号信息里提取 workspace/团队名称候选。"""
+    hints: list[str] = []
+    keys = ("team_name", "workspace_name", "team_workspace", "workspace")
+    for source in (task_record or {}, account or {}):
+        if not isinstance(source, dict):
+            continue
+        for key in keys:
+            value = str(source.get(key) or "").strip()
+            if value and value not in hints:
+                hints.append(value)
+    return hints
+
+
+def _ensure_access_token_via_login(
+    *,
+    page,
+    email: str,
+    password: str,
+    get_verification_code,
+    timeout: int,
+    log_callback,
+    screenshot_callback=None,
+    workspace_hints: list[str] | None = None,
+    require_team_workspace: bool = False,
+):
+    """统一封装 ensure_access_token 调用，减少重复参数拼装。"""
+    from .services.chatgpt_session import ensure_access_token
+
+    return ensure_access_token(
+        page,
+        email=email,
+        password=password,
+        get_verification_code=get_verification_code,
+        timeout=timeout,
+        log_callback=log_callback,
+        screenshot_callback=screenshot_callback,
+        preferred_workspace_names=workspace_hints or None,
+        require_team_workspace=require_team_workspace,
+    )
+
 
 @shared_task(bind=True)
 def self_register_task(self, record_id: str):
@@ -1278,12 +1322,14 @@ def auto_invite_task(self, record_id: str):
 
         token = str(mother.get("auth_token") or "").strip()
         account_id = str(mother.get("account_id") or "").strip()
+        workspace_hints = _collect_workspace_hints(task_record, mother)
+        if workspace_hints:
+            _append_log(f"workspace hints: {workspace_hints}")
 
         # NOTE: 这里必须走浏览器内的 fetch（见 chatgpt_backend_api.py）
         # 因为 Celery 容器内 requests 可能无法直连 chatgpt.com（例如 Errno 101 Network is unreachable）。
         from .services.browser_service import BrowserService
         from .services.chatgpt_backend_api import browser_fetch_account_id, browser_invite_emails
-        from .services.chatgpt_session import ensure_access_token
 
         def _safe_name(raw: str) -> str:
             s = (raw or "").strip()
@@ -1433,14 +1479,16 @@ def auto_invite_task(self, record_id: str):
                     _append_log("reuse existing auth_token")
                 else:
                     _append_log("auth_token missing, login via Geekez + /api/auth/session")
-                    token, _session = ensure_access_token(
-                        browser.page,
+                    token, _session = _ensure_access_token_via_login(
+                        page=browser.page,
                         email=email,
                         password=password,
                         get_verification_code=_get_code_mother,
                         timeout=180,
                         log_callback=_append_log,
                         screenshot_callback=_shot,
+                        workspace_hints=workspace_hints,
+                        require_team_workspace=True,
                     )
 
                 if not token:
@@ -1459,14 +1507,16 @@ def auto_invite_task(self, record_id: str):
                         )
                     except Exception as e:
                         _append_log(f"fetch account_id failed: {e}; try relogin")
-                        token, _session = ensure_access_token(
-                            browser.page,
+                        token, _session = _ensure_access_token_via_login(
+                            page=browser.page,
                             email=email,
                             password=password,
                             get_verification_code=_get_code_mother,
                             timeout=180,
                             log_callback=_append_log,
                             screenshot_callback=_shot,
+                            workspace_hints=workspace_hints,
+                            require_team_workspace=True,
                         )
                         account_id = browser_fetch_account_id(
                             browser.page,
@@ -1659,14 +1709,16 @@ def auto_invite_task(self, record_id: str):
 
                                 if not child_token:
                                     _append_log(log_prefix + "login via /api/auth/session")
-                                    child_token, _sess = ensure_access_token(
-                                        child_browser.page,
+                                    child_token, _sess = _ensure_access_token_via_login(
+                                        page=child_browser.page,
                                         email=child_email,
                                         password=child_pwd,
                                         get_verification_code=_get_code_child,
                                         timeout=180,
                                         log_callback=lambda m: _append_log(log_prefix + m),
                                         screenshot_callback=child_shot,
+                                        workspace_hints=workspace_hints,
+                                        require_team_workspace=False,
                                     )
 
                                 try:
@@ -1706,14 +1758,16 @@ def auto_invite_task(self, record_id: str):
                                     # 可能账号已创建但 session 没落地（会回到未登录首页）。尝试再登录一次兜底。
                                     _append_log(log_prefix + "register returned False, try login anyway")
                                     try:
-                                        child_token, _sess = ensure_access_token(
-                                            child_browser.page,
+                                        child_token, _sess = _ensure_access_token_via_login(
+                                            page=child_browser.page,
                                             email=child_email,
                                             password=child_pwd,
                                             get_verification_code=_get_code_child,
                                             timeout=180,
                                             log_callback=lambda m: _append_log(log_prefix + m),
                                             screenshot_callback=child_shot,
+                                            workspace_hints=workspace_hints,
+                                            require_team_workspace=False,
                                         )
                                         register_ok = True
                                     except Exception:
@@ -1757,14 +1811,16 @@ def auto_invite_task(self, record_id: str):
                                     child_token = sess_token
 
                                 if not child_token:
-                                    child_token, _sess = ensure_access_token(
-                                        child_browser.page,
+                                    child_token, _sess = _ensure_access_token_via_login(
+                                        page=child_browser.page,
                                         email=child_email,
                                         password=child_pwd,
                                         get_verification_code=_get_code_child,
                                         timeout=180,
                                         log_callback=lambda m: _append_log(log_prefix + m),
                                         screenshot_callback=child_shot,
+                                        workspace_hints=workspace_hints,
+                                        require_team_workspace=False,
                                     )
 
                                 try:
@@ -2870,7 +2926,7 @@ def team_push_task(
     """
     import httpx
     from .services.browser_service import BrowserService
-    from .services.chatgpt_session import ensure_access_token, fetch_auth_session
+    from .services.chatgpt_session import fetch_auth_session
     from .storage import find_account, patch_account, patch_task
 
     settings = get_settings()
@@ -2918,6 +2974,14 @@ def team_push_task(
         email = mother.get("email", "")
         password = str(mother.get("account_password") or "").strip()
         trace_email = email  # 设置 trace 邮箱（用于 trace 日志文件命名）
+
+        task_record = _get_task_record(settings, record_id)
+        workspace_hints = _collect_workspace_hints(
+            task_record if isinstance(task_record, dict) else None,
+            mother if isinstance(mother, dict) else None,
+        )
+        if workspace_hints:
+            _log(f"workspace hints: {workspace_hints}")
 
         _log(f"母号: {email}")
         _log(f"座位数: {seat_total}, 备注: {note}")
@@ -2981,13 +3045,15 @@ def team_push_task(
                     _log(f"CloudMail 未配置或不可用: {mail_err}（如遇验证码页面将无法自动处理）")
 
                 try:
-                    _token, session_data = ensure_access_token(
-                        page,
+                    _token, session_data = _ensure_access_token_via_login(
+                        page=page,
                         email=email,
                         password=password,
                         get_verification_code=_get_code_cb,
                         timeout=180,
                         log_callback=_log,
+                        workspace_hints=workspace_hints,
+                        require_team_workspace=True,
                     )
                     _log(f"登录成功, accessToken len={len(_token)}")
                 except Exception as login_err:

@@ -14,6 +14,9 @@ class NeedsRegistrationError(RuntimeError):
     """Raised when the flow reaches account creation / email verification screens."""
 
 
+class WorkspaceSelectionError(RuntimeError):
+    """Raised when workspace chooser appears but target team workspace cannot be selected."""
+
 
 def fetch_auth_session(page, *, timeout: int = 7) -> dict[str, Any]:
     """从 https://chatgpt.com/api/auth/session 获取 session JSON。
@@ -60,6 +63,8 @@ def ensure_access_token(
     timeout: int = 120,
     log_callback: Callable[[str], None] | None = None,
     screenshot_callback: Callable[[str], None] | None = None,
+    preferred_workspace_names: list[str] | None = None,
+    require_team_workspace: bool = False,
 ) -> tuple[str, dict[str, Any]]:
     """确保已登录指定账号并返回 accessToken。
 
@@ -72,6 +77,14 @@ def ensure_access_token(
         raise ValueError("missing email")
     if not (password or "").strip():
         raise ValueError("missing password")
+
+    normalized_workspace_names: list[str] = []
+    for raw_name in preferred_workspace_names or []:
+        name = str(raw_name or "").strip()
+        if not name:
+            continue
+        if name not in normalized_workspace_names:
+            normalized_workspace_names.append(name)
 
     def _log(msg: str):
         try:
@@ -122,7 +135,7 @@ def ensure_access_token(
     )
 
     def _handle_workspace_chooser() -> bool:
-        """处理 workspace 选择页/弹窗，优先选择团队工作区并避免 Personal account。"""
+        """处理 workspace 选择弹窗，优先选择团队工作区并避免 Personal account。"""
         js_detect_chooser = """
         (function() {
             try {
@@ -148,15 +161,18 @@ def ensure_access_token(
             detected = str(page.run_js(js_detect_chooser, timeout=3) or "")
         except Exception:
             detected = ""
+
         if detected != "yes":
             return False
 
-        _log("detected workspace chooser, selecting non-personal workspace")
+        _log("detected workspace chooser, selecting workspace")
         _shot("workspace_chooser.png")
 
+        preferred_json = json.dumps(normalized_workspace_names, ensure_ascii=False)
         js_pick_workspace = """
         (function() {
             try {
+                var preferredNames = __PREFERRED_NAMES__;
                 var lower = function(v) { return String(v || '').toLowerCase(); };
                 var compact = function(v) { return String(v || '').replace(/\\s+/g, ' ').trim(); };
                 var isVisible = function(el) {
@@ -186,7 +202,8 @@ def ensure_access_token(
                     'button[role="radio"]',
                     '[data-radix-collection-item][role="radio"]'
                 ];
-                var all = [];
+
+                var rawButtons = [];
                 var seen = new Set();
                 for (var si = 0; si < selectors.length; si++) {
                     var items = root.querySelectorAll(selectors[si]);
@@ -194,45 +211,68 @@ def ensure_access_token(
                         var el = items[i];
                         if (!el || seen.has(el) || !isVisible(el)) continue;
                         seen.add(el);
-                        all.push(el);
+                        rawButtons.push(el);
                     }
                 }
-                if (!all.length) return 'no_buttons';
+                if (!rawButtons.length) return 'no_buttons';
 
                 var personalPhrases = ['personal account', '个人账号', '个人账户'];
-                var teamBtn = null;
-                var texts = [];
+                var candidates = [];
 
-                for (var bi = 0; bi < all.length; bi++) {
-                    var btn = all[bi];
-                    var txt = compact(btn.innerText || btn.textContent || '');
-                    if (!txt) continue;
-                    texts.push(txt.slice(0, 80));
-                    var lo = lower(txt);
+                for (var bi = 0; bi < rawButtons.length; bi++) {
+                    var btn = rawButtons[bi];
+                    var text = compact(btn.innerText || btn.textContent || '');
+                    if (!text) continue;
+                    var norm = lower(text);
                     var isPersonal = false;
                     for (var pi = 0; pi < personalPhrases.length; pi++) {
-                        if (lo.indexOf(personalPhrases[pi]) !== -1) {
+                        if (norm.indexOf(personalPhrases[pi]) !== -1) {
                             isPersonal = true;
                             break;
                         }
                     }
-                    if (!isPersonal && !teamBtn) {
-                        teamBtn = btn;
+                    candidates.push({ el: btn, text: text, norm: norm, isPersonal: isPersonal });
+                }
+
+                if (!candidates.length) return 'no_buttons';
+
+                var nonPersonal = candidates.filter(function(c) { return !c.isPersonal; });
+                var preferredNorm = preferredNames
+                    .map(function(n) { return lower(compact(n)); })
+                    .filter(function(n) { return !!n; });
+
+                var picked = null;
+                if (preferredNorm.length > 0) {
+                    for (var ki = 0; ki < preferredNorm.length && !picked; ki++) {
+                        var key = preferredNorm[ki];
+                        for (var ni = 0; ni < nonPersonal.length; ni++) {
+                            if (nonPersonal[ni].norm.indexOf(key) !== -1) {
+                                picked = nonPersonal[ni];
+                                break;
+                            }
+                        }
+                    }
+
+                    if (!picked && nonPersonal.length > 0) {
+                        return 'preferred_not_found:' + nonPersonal.map(function(c) { return c.text.slice(0, 60); }).join(' | ').slice(0, 260);
                     }
                 }
 
-                if (!teamBtn) {
-                    return 'team_not_found:' + texts.join(' | ').slice(0, 240);
+                if (!picked && nonPersonal.length > 0) {
+                    picked = nonPersonal[0];
                 }
 
-                var chosen = compact(teamBtn.innerText || teamBtn.textContent || '');
-                teamBtn.click();
-                return 'clicked:' + chosen.slice(0, 120);
+                if (!picked) {
+                    return 'personal_only:' + candidates.map(function(c) { return c.text.slice(0, 60); }).join(' | ').slice(0, 260);
+                }
+
+                picked.el.click();
+                return 'clicked:' + picked.text.slice(0, 120);
             } catch (e) {
                 return 'error:' + String(e);
             }
         })();
-        """
+        """.replace("__PREFERRED_NAMES__", preferred_json)
 
         try:
             from .openai_register import human_delay
@@ -242,19 +282,32 @@ def ensure_access_token(
                 click_result = str(page.run_js(js_pick_workspace, timeout=6) or "")
                 _log(f"workspace chooser click result: {click_result}")
                 if click_result.startswith("clicked:"):
-                    break
+                    human_delay(0.3, 0.8)
+                    time.sleep(1.5)
+                    _probe("after_workspace_select")
+                    _shot("workspace_after_select.png")
+                    return True
                 time.sleep(1.0)
 
-            if not click_result.startswith("clicked:"):
-                return False
-
-            human_delay(0.3, 0.8)
-            time.sleep(1.5)
-            _probe("after_workspace_select")
-            _shot("workspace_after_select.png")
-            return True
+            fatal_status = (
+                click_result.startswith("personal_only:")
+                or click_result.startswith("preferred_not_found:")
+                or click_result.startswith("no_buttons")
+                or click_result.startswith("error:")
+            )
+            if require_team_workspace and fatal_status:
+                detail = click_result[:320]
+                hint_text = ", ".join(normalized_workspace_names) if normalized_workspace_names else "<none>"
+                raise WorkspaceSelectionError(
+                    f"workspace selection failed: {detail}; preferred={hint_text}"
+                )
+            return False
+        except WorkspaceSelectionError:
+            raise
         except Exception as e:
             _log(f"workspace chooser handling failed: {e}")
+            if require_team_workspace:
+                raise WorkspaceSelectionError(f"workspace chooser handling failed: {e}") from e
             return False
 
     _log(f"ensure_access_token start email={target_email}")
@@ -311,6 +364,8 @@ def ensure_access_token(
         if token2:
             _log("got accessToken from existing cookies")
             return token2, sess2
+    except WorkspaceSelectionError:
+        raise
     except Exception:
         pass
 
@@ -791,6 +846,8 @@ def ensure_access_token(
         _handle_workspace_chooser()
         _probe("back_home")
         _shot("invite_login_99_back_to_chatgpt.png")
+    except WorkspaceSelectionError:
+        raise
     except Exception:
         pass
 
