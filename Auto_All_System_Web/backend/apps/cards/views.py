@@ -223,15 +223,55 @@ class CardViewSet(viewsets.ModelViewSet):
                 }, status=status.HTTP_400_BAD_REQUEST)
             
             result = response.json()
-            
-            # 检查是否成功
+
+            # 检查是否成功；如果激活接口返回"已被使用"，回退到 query_url 查询
             if not result.get('success', False):
                 error_msg = str(result.get('error', '') or result.get('message', '') or 'API 返回失败')
-                return Response({
-                    'code': 400,
-                    'message': f'激活失败: {error_msg}',
-                    'data': result
-                }, status=status.HTTP_400_BAD_REQUEST)
+                # 如果是 redeem_url 返回已被使用，且有 query_url 可用，则回退查询
+                query_url = api_config.query_url
+                if query_url and api_url != query_url:
+                    try:
+                        query_body = {'key_id': key_id}
+                        if api_config.request_body_template:
+                            import json as _json
+                            _tpl = _json.dumps(api_config.request_body_template)
+                            _tpl = _tpl.replace('{key_id}', key_id)
+                            query_body = _json.loads(_tpl)
+                        query_resp = requests.request(
+                            method=api_config.request_method,
+                            url=query_url,
+                            json=query_body,
+                            headers=headers,
+                            timeout=api_config.timeout,
+                        )
+                        if query_resp.status_code == 200:
+                            query_result = query_resp.json()
+                            if query_result.get('success', False) and query_result.get('card'):
+                                result = query_result
+                            else:
+                                return Response({
+                                    'code': 400,
+                                    'message': f'激活失败: {error_msg}',
+                                    'data': result
+                                }, status=status.HTTP_400_BAD_REQUEST)
+                        else:
+                            return Response({
+                                'code': 400,
+                                'message': f'激活失败: {error_msg}',
+                                'data': result
+                            }, status=status.HTTP_400_BAD_REQUEST)
+                    except Exception:
+                        return Response({
+                            'code': 400,
+                            'message': f'激活失败: {error_msg}',
+                            'data': result
+                        }, status=status.HTTP_400_BAD_REQUEST)
+                else:
+                    return Response({
+                        'code': 400,
+                        'message': f'激活失败: {error_msg}',
+                        'data': result
+                    }, status=status.HTTP_400_BAD_REQUEST)
             
             # 检查卡是否已销毁
             if result.get('destroyed', False):
@@ -331,6 +371,17 @@ class CardViewSet(viewsets.ModelViewSet):
                     key_expire_time = datetime.fromisoformat(expire_time_str.replace('Z', '+00:00'))
                 except (ValueError, TypeError):
                     pass
+
+            # 检查卡密是否已过期（expire_time 是卡密有效期，不是信用卡有效期）
+            if key_expire_time and timezone.now() >= key_expire_time:
+                return Response({
+                    'code': 400,
+                    'message': f'该卡密已过期（{key_expire_time.strftime("%Y-%m-%d %H:%M")}），无法使用',
+                    'data': {
+                        'key_expired': True,
+                        'key_expire_time': expire_time_str,
+                    }
+                }, status=status.HTTP_400_BAD_REQUEST)
             
             # 自动识别卡类型
             card_type = 'other'
@@ -341,6 +392,26 @@ class CardViewSet(viewsets.ModelViewSet):
             elif card_number.startswith('3'):
                 card_type = 'amex'
             
+            # 检查本地是否已有同卡号记录（避免重复导入）
+            existing = Card.objects.filter(card_number=card_number).first()
+            if existing:
+                # 更新已有记录的信息（可能之前导入时信息不完整）
+                existing.card_holder = card_holder_name or existing.card_holder
+                existing.cvv = card_cvc or existing.cvv
+                existing.expiry_month = expiry_month
+                existing.expiry_year = expiry_year
+                existing.billing_address = billing_address or existing.billing_address
+                existing.key_expire_time = key_expire_time or existing.key_expire_time
+                if existing.status in ('in_use', 'expired', 'disabled'):
+                    existing.status = 'available'
+                existing.save()
+                serializer = self.get_serializer(existing)
+                return Response({
+                    'code': 200,
+                    'message': '该卡已存在，已更新信息',
+                    'data': serializer.data
+                })
+
             # 创建卡记录
             card = Card.objects.create(
                 card_number=card_number,
