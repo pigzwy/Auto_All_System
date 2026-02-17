@@ -1404,6 +1404,31 @@ def auto_invite_task(self, record_id: str):
                 except Exception:
                     pass
 
+                # 构建验证码获取回调（母号配置了 CloudMail 时可自动处理邮箱验证）
+                _get_code_mother = None
+                try:
+                    email_cfg = _cloudmail_email_config_from_account(mother)
+                    from apps.integrations.email.services.client import CloudMailClient
+                    _mail_client_mother = CloudMailClient(
+                        api_base=str(email_cfg.get("api_base") or ""),
+                        api_token=str(email_cfg.get("api_auth") or ""),
+                        domains=list(email_cfg.get("domains") or []),
+                        default_role=str(email_cfg.get("role") or "user"),
+                    )
+                    def _get_code_mother(email_addr: str) -> str | None:
+                        _append_log(f"等待验证码 ({email_addr})...")
+                        code = _mail_client_mother.wait_for_verification_code(
+                            to_email=email_addr,
+                            timeout=120,
+                            poll_interval=5,
+                            sender_contains=None,
+                        )
+                        _append_log("验证码已获取" if code else "验证码获取失败")
+                        return code
+                    _append_log("已配置 CloudMail 验证码回调")
+                except Exception as mail_err:
+                    _append_log(f"CloudMail 未配置或不可用: {mail_err}（如遇验证码页面将无法自动处理）")
+
                 if token:
                     _append_log("reuse existing auth_token")
                 else:
@@ -1412,6 +1437,7 @@ def auto_invite_task(self, record_id: str):
                         browser.page,
                         email=email,
                         password=password,
+                        get_verification_code=_get_code_mother,
                         timeout=180,
                         log_callback=_append_log,
                         screenshot_callback=_shot,
@@ -1437,6 +1463,7 @@ def auto_invite_task(self, record_id: str):
                             browser.page,
                             email=email,
                             password=password,
+                            get_verification_code=_get_code_mother,
                             timeout=180,
                             log_callback=_append_log,
                             screenshot_callback=_shot,
@@ -1584,6 +1611,18 @@ def auto_invite_task(self, record_id: str):
 
                             # 1) 登录（若不存在则注册）
                             child_token = ""
+
+                            def _get_code_child(_email: str) -> str | None:
+                                _append_log(log_prefix + "wait verification code start")
+                                code = mail_client_child.wait_for_verification_code(
+                                    to_email=child_email,
+                                    timeout=600,
+                                    poll_interval=5,
+                                    sender_contains=None,
+                                )
+                                _append_log(log_prefix + ("verification code received" if code else "verification code missing"))
+                                return code
+
                             try:
                                 try:
                                     patch_account(
@@ -1624,6 +1663,7 @@ def auto_invite_task(self, record_id: str):
                                         child_browser.page,
                                         email=child_email,
                                         password=child_pwd,
+                                        get_verification_code=_get_code_child,
                                         timeout=180,
                                         log_callback=lambda m: _append_log(log_prefix + m),
                                         screenshot_callback=child_shot,
@@ -1653,23 +1693,11 @@ def auto_invite_task(self, record_id: str):
                                 except Exception:
                                     pass
 
-                                def _get_code(_email: str) -> str | None:
-                                    # 不强依赖 sender_contains，避免不同环境发件人字段差异导致拿不到验证码
-                                    _append_log(log_prefix + "wait verification code start")
-                                    code = mail_client_child.wait_for_verification_code(
-                                        to_email=child_email,
-                                        timeout=600,
-                                        poll_interval=5,
-                                        sender_contains=None,
-                                    )
-                                    _append_log(log_prefix + ("verification code received" if code else "verification code missing"))
-                                    return code
-
                                 register_ok = register_openai_account(
                                     child_browser.page,
                                     email=child_email,
                                     password=child_pwd,
-                                    get_verification_code=_get_code,
+                                    get_verification_code=_get_code_child,
                                     log_callback=lambda m: _append_log(log_prefix + m),
                                     screenshot_callback=child_shot,
                                 )
@@ -1682,6 +1710,7 @@ def auto_invite_task(self, record_id: str):
                                             child_browser.page,
                                             email=child_email,
                                             password=child_pwd,
+                                            get_verification_code=_get_code_child,
                                             timeout=180,
                                             log_callback=lambda m: _append_log(log_prefix + m),
                                             screenshot_callback=child_shot,
@@ -1732,6 +1761,7 @@ def auto_invite_task(self, record_id: str):
                                         child_browser.page,
                                         email=child_email,
                                         password=child_pwd,
+                                        get_verification_code=_get_code_child,
                                         timeout=180,
                                         log_callback=lambda m: _append_log(log_prefix + m),
                                         screenshot_callback=child_shot,
@@ -2220,6 +2250,89 @@ def sub2api_sink_task(self, record_id: str):
                     if not cemail or not cid:
                         continue
 
+                    # 构建 CloudMail 验证码获取函数（用于 OAuth 流程中可能的邮箱验证）
+                    _s2a_mail_client = None
+                    try:
+                        email_cfg = _cloudmail_email_config_from_account(c)
+                        from apps.integrations.email.services.client import CloudMailClient
+                        _s2a_mail_client = CloudMailClient(
+                            api_base=str(email_cfg.get("api_base") or ""),
+                            api_token=str(email_cfg.get("api_auth") or ""),
+                            domains=list(email_cfg.get("domains") or []),
+                            default_role=str(email_cfg.get("role") or "user"),
+                        )
+                    except Exception:
+                        pass
+
+                    def _s2a_handle_email_verification(page_ref, account_email: str) -> bool:
+                        """检测并处理 email-verification 页面，返回是否处理成功。"""
+                        try:
+                            cur = str(page_ref.url or "")
+                        except Exception:
+                            return False
+                        if "email-verification" not in cur or "auth.openai.com" not in cur:
+                            return False
+
+                        _log_line(f"[{account_email}] email-verification page detected")
+
+                        if not _s2a_mail_client:
+                            _log_line(f"[{account_email}] no CloudMail client, cannot get verification code")
+                            return False
+
+                        _log_line(f"[{account_email}] waiting for verification code...")
+                        vcode = _s2a_mail_client.wait_for_verification_code(
+                            to_email=account_email,
+                            timeout=120,
+                            poll_interval=5,
+                            sender_contains=None,
+                        )
+                        if not vcode:
+                            _log_line(f"[{account_email}] verification code not received")
+                            return False
+
+                        _log_line(f"[{account_email}] got verification code len={len(vcode)}")
+
+                        # 填写验证码
+                        code_inputs = page_ref.eles(
+                            'css:input[name="code"], input[autocomplete="one-time-code"], '
+                            'input[inputmode="numeric"], input[type="tel"], '
+                            'input[placeholder*="代码"], input[placeholder*="code"]'
+                        )
+                        code_inputs = [x for x in (code_inputs or []) if x]
+                        if not code_inputs:
+                            _log_line(f"[{account_email}] verification code input not found")
+                            return False
+
+                        digits = [ch for ch in vcode if ch.isdigit()]
+                        if len(code_inputs) >= 6 and len(digits) >= 6:
+                            for ci in range(6):
+                                try:
+                                    code_inputs[ci].click()
+                                    time.sleep(0.08)
+                                    code_inputs[ci].input(digits[ci], clear=True)
+                                    time.sleep(0.08)
+                                except Exception:
+                                    pass
+                        else:
+                            try:
+                                code_inputs[0].clear()
+                            except Exception:
+                                pass
+                            try:
+                                type_slowly(page_ref, code_inputs[0], vcode, base_delay=0.08)
+                            except Exception:
+                                pass
+
+                        time.sleep(0.6)
+                        submit_btn = wait_for_element(page_ref, 'css:button[type="submit"]', timeout=10)
+                        if submit_btn:
+                            _log_line(f"[{account_email}] submit verification code")
+                            submit_btn.click()
+                            time.sleep(3)
+
+                        _log_line(f"[{account_email}] verification code submitted")
+                        return True
+
                     try:
                         existing = sub2api_find_openai_oauth_account(sub2_cfg, cemail, timeout=timeout)
                         if existing:
@@ -2332,6 +2445,11 @@ def sub2api_sink_task(self, record_id: str):
                                             time.sleep(1)
                                             continue
 
+                                        # 邮箱验证码页面
+                                        if _s2a_handle_email_verification(page, cemail):
+                                            time.sleep(2)
+                                            continue
+
                                         break
 
                                     # 2) Click consent/authorize (avoid clicking submit when login inputs exist).
@@ -2358,6 +2476,11 @@ def sub2api_sink_task(self, record_id: str):
                                             human_delay(0.4, 0.9)
                                             _click_submit_if_any(2)
                                             time.sleep(1)
+                                            continue
+
+                                        # 邮箱验证码页面
+                                        if _s2a_handle_email_verification(page, cemail):
+                                            time.sleep(2)
                                             continue
 
                                         btn = None
@@ -2913,6 +3036,7 @@ def team_push_task(
         patch_account(
             mother_id,
             {
+                "team_status": "success",
                 "team_push_status": "success",
                 "team_push_updated_at": timezone.now().isoformat(),
                 "team_push_url": target_url,
@@ -2955,6 +3079,7 @@ def team_push_task(
             patch_account(
                 mother_id,
                 {
+                    "team_status": "failed",
                     "team_push_status": "failed",
                     "team_push_updated_at": timezone.now().isoformat(),
                 },

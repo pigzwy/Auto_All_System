@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import random
 import time
 from typing import Any, Callable
 
@@ -120,6 +121,142 @@ def ensure_access_token(
         'input[autocomplete="current-password"], input[autocomplete="new-password"]'
     )
 
+    def _handle_workspace_chooser() -> bool:
+        """处理 workspace 选择页/弹窗，优先选择团队工作区并避免 Personal account。"""
+        js_detect_chooser = """
+        (function() {
+            try {
+                var lower = function(v) { return String(v || '').toLowerCase(); };
+                var compact = function(v) { return String(v || '').replace(/\\s+/g, ' ').trim(); };
+                var currentUrl = lower(location.href || '');
+                var dialog = document.querySelector('[role="dialog"]');
+                var dialogText = lower(compact(dialog ? dialog.innerText : ''));
+                var hasChooserText =
+                    dialogText.indexOf('select a workspace') !== -1 ||
+                    dialogText.indexOf('choose a workspace') !== -1 ||
+                    dialogText.indexOf('选择工作区') !== -1 ||
+                    dialogText.indexOf('工作区') !== -1;
+                var hasChooser = currentUrl.indexOf('/workspace') !== -1 || hasChooserText;
+                return hasChooser ? 'yes' : 'no';
+            } catch (e) {
+                return 'error:' + String(e);
+            }
+        })();
+        """
+
+        try:
+            detected = str(page.run_js(js_detect_chooser, timeout=3) or "")
+        except Exception:
+            detected = ""
+        if detected != "yes":
+            return False
+
+        _log("detected workspace chooser, selecting non-personal workspace")
+        _shot("workspace_chooser.png")
+
+        js_pick_workspace = """
+        (function() {
+            try {
+                var lower = function(v) { return String(v || '').toLowerCase(); };
+                var compact = function(v) { return String(v || '').replace(/\\s+/g, ' ').trim(); };
+                var isVisible = function(el) {
+                    if (!el) return false;
+                    var style = window.getComputedStyle(el);
+                    if (!style) return false;
+                    if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') return false;
+                    var rect = el.getBoundingClientRect();
+                    return !!rect && rect.width > 0 && rect.height > 0;
+                };
+
+                var currentUrl = lower(location.href || '');
+                var dialog = document.querySelector('[role="dialog"]');
+                var dialogText = lower(compact(dialog ? dialog.innerText : ''));
+                var hasChooserText =
+                    dialogText.indexOf('select a workspace') !== -1 ||
+                    dialogText.indexOf('choose a workspace') !== -1 ||
+                    dialogText.indexOf('选择工作区') !== -1 ||
+                    dialogText.indexOf('工作区') !== -1;
+                var hasChooser = currentUrl.indexOf('/workspace') !== -1 || hasChooserText;
+                if (!hasChooser) return 'no_chooser';
+
+                var root = dialog || document;
+                var selectors = [
+                    'button[name="workspace_id"]',
+                    '[role="group"] button[role="radio"]',
+                    'button[role="radio"]',
+                    '[data-radix-collection-item][role="radio"]'
+                ];
+                var all = [];
+                var seen = new Set();
+                for (var si = 0; si < selectors.length; si++) {
+                    var items = root.querySelectorAll(selectors[si]);
+                    for (var i = 0; i < items.length; i++) {
+                        var el = items[i];
+                        if (!el || seen.has(el) || !isVisible(el)) continue;
+                        seen.add(el);
+                        all.push(el);
+                    }
+                }
+                if (!all.length) return 'no_buttons';
+
+                var personalPhrases = ['personal account', '个人账号', '个人账户'];
+                var teamBtn = null;
+                var texts = [];
+
+                for (var bi = 0; bi < all.length; bi++) {
+                    var btn = all[bi];
+                    var txt = compact(btn.innerText || btn.textContent || '');
+                    if (!txt) continue;
+                    texts.push(txt.slice(0, 80));
+                    var lo = lower(txt);
+                    var isPersonal = false;
+                    for (var pi = 0; pi < personalPhrases.length; pi++) {
+                        if (lo.indexOf(personalPhrases[pi]) !== -1) {
+                            isPersonal = true;
+                            break;
+                        }
+                    }
+                    if (!isPersonal && !teamBtn) {
+                        teamBtn = btn;
+                    }
+                }
+
+                if (!teamBtn) {
+                    return 'team_not_found:' + texts.join(' | ').slice(0, 240);
+                }
+
+                var chosen = compact(teamBtn.innerText || teamBtn.textContent || '');
+                teamBtn.click();
+                return 'clicked:' + chosen.slice(0, 120);
+            } catch (e) {
+                return 'error:' + String(e);
+            }
+        })();
+        """
+
+        try:
+            from .openai_register import human_delay
+
+            click_result = "not_run"
+            for _attempt in range(2):
+                click_result = str(page.run_js(js_pick_workspace, timeout=6) or "")
+                _log(f"workspace chooser click result: {click_result}")
+                if click_result.startswith("clicked:"):
+                    break
+                time.sleep(1.0)
+
+            if not click_result.startswith("clicked:"):
+                return False
+
+            human_delay(0.3, 0.8)
+            time.sleep(1.5)
+            _probe("after_workspace_select")
+            _shot("workspace_after_select.png")
+            return True
+        except Exception as e:
+            _log(f"workspace chooser handling failed: {e}")
+            return False
+
     _log(f"ensure_access_token start email={target_email}")
     try:
         _probe("start")
@@ -167,6 +304,7 @@ def ensure_access_token(
         _log("open chatgpt.com homepage")
         page.get("https://chatgpt.com/")
         time.sleep(2)
+        _handle_workspace_chooser()
         _probe("home")
         _shot("invite_login_00c_home.png")
         token2, sess2 = _poll_session(time.time() + 8)
@@ -271,6 +409,14 @@ def ensure_access_token(
             if token3 and email3 and email3.lower() == target_email.lower():
                 return token3, sess_data
 
+            # a2) 工作区选择页面 — 自动选择后重新检查 session
+            if _handle_workspace_chooser():
+                sess_data = fetch_auth_session(page, timeout=7)
+                token3, email3 = _get_access_token_and_email(sess_data)
+                if token3 and email3 and email3.lower() == target_email.lower():
+                    return token3, sess_data
+                continue
+
             # b) chatgpt.com 弹窗模式：直接输入 email
             if "chatgpt.com" in current_url and "auth.openai.com" not in current_url:
                 # 某些版本在 /auth/login 会先出现 login-button，点击后才进入真正的登录流程
@@ -368,11 +514,31 @@ def ensure_access_token(
                 time.sleep(1)
                 continue
 
-            # d) auth.openai.com：密码页
+            # d) auth.openai.com：创建账号密码页（账号不存在，需要注册）
             if "auth.openai.com/create-account/password" in current_url:
-                _log("auth.openai.com create-account password page detected; require registration + email verification")
-                _shot("invite_login_need_register.png")
-                raise NeedsRegistrationError("account needs registration (create-account/password)")
+                _log("auth.openai.com create-account/password page (new account)")
+                _shot("invite_login_create_account_password.png")
+
+                # 有密码就直接填写继续注册流程，后续会走验证码页面
+                password_input = wait_for_element(page, password_selector, timeout=10)
+                if not password_input:
+                    _shot("invite_login_err_create_password_input_missing.png")
+                    raise NeedsRegistrationError("account needs registration (create-account/password input not found)")
+                human_delay()
+                type_slowly(page, password_input, str(password))
+                _log("filled password on create-account page")
+                _shot("invite_login_create_account_password_filled.png")
+                human_delay(0.5, 1.2)
+                submit_btn = wait_for_element(page, 'css:button[type="submit"]', timeout=5)
+                if submit_btn:
+                    _log("click submit on create-account password page")
+                    old_url = current_url
+                    submit_btn.click()
+                    wait_for_url_change(page, old_url, timeout=20)
+                    _probe("after_create_account_password_submit")
+                    _shot("invite_login_create_account_password_submitted.png")
+                time.sleep(2)
+                continue
 
             if "auth.openai.com/email-verification" in current_url:
                 # 检查页面标题：如果已经是 "Email verified" 说明验证码已提交成功，等待跳转即可
@@ -470,6 +636,87 @@ def ensure_access_token(
                 time.sleep(2)
                 continue
 
+            # d2) auth.openai.com about-you 页面（注册新账号后需要填写姓名+生日）
+            if "auth.openai.com/onboarding/about-you" in current_url or "about-you" in current_url:
+                _log("auth.openai.com about-you page (name + birthday)")
+                _shot("invite_login_about_you.png")
+
+                random_name = f"{random.choice(['Tom', 'John', 'Mike', 'David', 'James'])} {random.choice(['Smith', 'Lee', 'Wang', 'Brown', 'Wilson'])}"
+                year = str(random.randint(1990, 2000))
+                month = f"{random.randint(1, 12):02d}"
+                day = f"{random.randint(1, 28):02d}"
+                birthday_mmddyyyy = f"{month}/{day}/{year}"
+
+                # Full name
+                name_input = wait_for_element(page, 'css:input[name="name"]', timeout=5)
+                if not name_input:
+                    name_input = wait_for_element(page, 'css:input[autocomplete="name"]', timeout=3)
+                if not name_input:
+                    name_input = wait_for_element(page, 'css:input[aria-label*="name"], input[aria-label*="Name"]', timeout=3)
+                if not name_input:
+                    name_input = wait_for_element(page, 'css:input[placeholder*="name"], input[placeholder*="Name"], input[placeholder*="James"]', timeout=3)
+
+                if name_input:
+                    _log(f"fill name: {random_name}")
+                    human_delay()
+                    type_slowly(page, name_input, random_name)
+                else:
+                    _log("about-you: name input not found, skip")
+
+                # Birthday — 优先单输入框，兜底分段输入
+                bday_input = wait_for_element(
+                    page,
+                    'css:input[aria-label="Birthday"], input[name*="birth"], input[autocomplete*="bday"], input[aria-label*="Birth"], input[aria-label*="birth"], input[placeholder*="/"]',
+                    timeout=6,
+                )
+                if bday_input:
+                    _log(f"fill birthday (single): {birthday_mmddyyyy}")
+                    try:
+                        bday_input.click()
+                        time.sleep(0.12)
+                        bday_input.input(birthday_mmddyyyy, clear=True)
+                    except Exception:
+                        try:
+                            type_slowly(page, bday_input, birthday_mmddyyyy)
+                        except Exception:
+                            _log("about-you: birthday fill failed")
+                else:
+                    year_input = wait_for_element(page, 'css:[data-type="year"]', timeout=3)
+                    month_input = wait_for_element(page, 'css:[data-type="month"]', timeout=3) if year_input else None
+                    day_input = wait_for_element(page, 'css:[data-type="day"]', timeout=3) if year_input else None
+                    if year_input and month_input and day_input:
+                        _log(f"fill birthday (segments): {year}/{month}/{day}")
+                        try:
+                            year_input.click()
+                            time.sleep(0.15)
+                            year_input.input(year, clear=True)
+                            time.sleep(0.2)
+                            month_input.click()
+                            time.sleep(0.15)
+                            month_input.input(month, clear=True)
+                            time.sleep(0.2)
+                            day_input.click()
+                            time.sleep(0.15)
+                            day_input.input(day, clear=True)
+                        except Exception:
+                            _log("about-you: birthday segment fill failed")
+                    else:
+                        _log("about-you: birthday input not found")
+
+                time.sleep(0.6)
+                submit_btn = wait_for_element(page, 'css:button[type="submit"]', timeout=8)
+                if not submit_btn:
+                    submit_btn = wait_for_element(page, 'text:Continue', timeout=3)
+                if submit_btn:
+                    _log("click submit on about-you page")
+                    old_url = current_url
+                    submit_btn.click()
+                    wait_for_url_change(page, old_url, timeout=20)
+                    _probe("after_about_you_submit")
+                    _shot("invite_login_about_you_after_submit.png")
+                time.sleep(2)
+                continue
+
             if "auth.openai.com/log-in/password" in current_url:
                 _log("auth.openai.com password page")
                 password_input = wait_for_element(page, password_selector, timeout=10)
@@ -541,6 +788,7 @@ def ensure_access_token(
         _log("navigate back to chatgpt.com to fetch session")
         page.get("https://chatgpt.com/")
         time.sleep(2)
+        _handle_workspace_chooser()
         _probe("back_home")
         _shot("invite_login_99_back_to_chatgpt.png")
     except Exception:
