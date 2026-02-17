@@ -926,6 +926,7 @@ const handleImport = async () => {
 
 onMounted(() => {
   fetchCards()
+  loadApiConfigs()
 })
 
 watch(poolFilter, () => {

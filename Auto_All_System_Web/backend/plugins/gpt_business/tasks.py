@@ -168,13 +168,19 @@ def _append_trace_line(
 def _get_available_card_for_checkout(selected_card_id: int | None = None) -> dict[str, Any] | None:
     """从虚拟卡管理获取一张可用卡用于绑卡"""
     from apps.cards.models import Card
+    from django.db.models import Q
 
     if selected_card_id:
         card = Card.objects.filter(id=selected_card_id).first()
         if not card or not card.is_available():
             return None
     else:
-        card = Card.objects.filter(status="available").order_by("?").first()
+        now = timezone.now()
+        card = Card.objects.filter(
+            status="available",
+        ).filter(
+            Q(key_expire_time__isnull=True) | Q(key_expire_time__gt=now)
+        ).order_by("?").first()
 
     if not card:
         return None
@@ -207,18 +213,16 @@ def _mark_card_as_used(card_id: int, account_id: str, purpose: str) -> None:
         card.use_count += 1
         card.last_used_at = timezone.now()
         card.save(update_fields=["status", "use_count", "last_used_at", "updated_at"])
-        
-        # CardUsageLog 需要 user 字段，但这里没有用户上下文，暂时跳过日志记录
-        # 如果需要记录，可以在 card.metadata 中存储
+
         card.metadata = card.metadata or {}
         card.metadata["last_account_id"] = account_id
         card.metadata["last_purpose"] = purpose
         card.save(update_fields=["metadata"])
-        
-    except Exception as e:
-        logger.warning(f"Failed to mark card as used: {e}")
+
     except Card.DoesNotExist:
         logger.warning(f"Card {card_id} not found when marking as used")
+    except Exception as e:
+        logger.warning(f"Failed to mark card as used: {e}")
 
 
 DEFAULT_TIMEOUT_SECONDS = 30

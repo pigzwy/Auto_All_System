@@ -173,6 +173,11 @@ class Card(models.Model):
             return False
         if self.max_use_count > 0 and self.use_count >= self.max_use_count:
             return False
+        # 检查卡密过期时间
+        if self.key_expire_time:
+            from django.utils import timezone
+            if timezone.now() >= self.key_expire_time:
+                return False
         return True
     
     def is_expired(self):

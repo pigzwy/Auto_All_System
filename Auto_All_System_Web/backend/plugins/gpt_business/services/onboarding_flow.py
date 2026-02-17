@@ -361,6 +361,47 @@ def _fill_address_fields(page, data: dict) -> bool:
 
     _human_delay()
 
+    def _js_select_option(select_el, value: str, ctx_ref) -> bool:
+        """用 JS 方式选择 <select> 的 option，兼容 Stripe iframe。"""
+        try:
+            # 方法 1: DrissionPage 原生 select
+            select_el.select(value)
+            return True
+        except Exception:
+            pass
+        try:
+            # 方法 2: JS 设置 value 并触发 change 事件
+            js = """
+            (function(sel, val) {
+                for (var i = 0; i < sel.options.length; i++) {
+                    if (sel.options[i].value === val || sel.options[i].text === val) {
+                        sel.selectedIndex = i;
+                        sel.value = sel.options[i].value;
+                        sel.dispatchEvent(new Event('change', {bubbles: true}));
+                        sel.dispatchEvent(new Event('input', {bubbles: true}));
+                        return 'ok';
+                    }
+                }
+                return 'not_found';
+            })(arguments[0], arguments[1]);
+            """.strip()
+            result = ctx_ref.run_js(js, select_el, value, timeout=3) if hasattr(ctx_ref, 'run_js') else None
+            if result == 'ok':
+                return True
+        except Exception:
+            pass
+        try:
+            # 方法 3: 直接用 run_js_loaded 操作 select 元素
+            select_el.run_js(f"""
+                this.value = '{value}';
+                this.dispatchEvent(new Event('change', {{bubbles: true}}));
+                this.dispatchEvent(new Event('input', {{bubbles: true}}));
+            """)
+            return True
+        except Exception:
+            pass
+        return False
+
     # 国家选择 — 默认 US，尝试选择
     log.info("  选择国家...")
     country_select = _find_visible_input(
@@ -374,11 +415,11 @@ def _fill_address_fields(page, data: dict) -> bool:
         timeout=3,
     )
     if country_select:
-        try:
-            country_select.select(data.get("country", "US"))
+        country_val = data.get("country", "US")
+        if _js_select_option(country_select, country_val, ctx):
             log.success(f"  国家已选择 ({ctx_label})")
             time.sleep(0.5)
-        except Exception:
+        else:
             log.warning(f"  选择国家失败 ({ctx_label})")
     else:
         log.info(f"  跳过国家选择(使用默认值)")
@@ -438,10 +479,10 @@ def _fill_address_fields(page, data: dict) -> bool:
         timeout=5,
     )
     if state_select:
-        try:
-            state_select.select(data.get("state", "NY"))
+        state_val = data.get("state", "NY")
+        if _js_select_option(state_select, state_val, ctx):
             log.success(f"  州已选择 ({ctx_label})")
-        except Exception:
+        else:
             log.warning(f"  选择州失败 ({ctx_label})")
 
     _human_delay()

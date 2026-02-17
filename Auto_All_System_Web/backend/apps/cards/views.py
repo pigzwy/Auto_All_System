@@ -226,9 +226,10 @@ class CardViewSet(viewsets.ModelViewSet):
             
             # 检查是否成功
             if not result.get('success', False):
+                error_msg = str(result.get('error', '') or result.get('message', '') or 'API 返回失败')
                 return Response({
                     'code': 400,
-                    'message': '查询失败: API 返回失败',
+                    'message': f'激活失败: {error_msg}',
                     'data': result
                 }, status=status.HTTP_400_BAD_REQUEST)
             
@@ -314,8 +315,14 @@ class CardViewSet(viewsets.ModelViewSet):
                 'country': address_data.get(field_map.get('country', 'country'), 'US'),
             }
             
-            # 获取账户邮箱作为持卡人信息（如果有）
-            account_email = card_data.get('account_email', '')
+            # 解析持卡人姓名：优先 legal_address 中的 first_name + last_name，兜底 card_holder
+            first_name = str(address_data.get(field_map.get('first_name', 'first_name'), '') or '').strip()
+            last_name = str(address_data.get(field_map.get('last_name', 'last_name'), '') or '').strip()
+            card_holder_name = f"{first_name} {last_name}".strip()
+            if not card_holder_name:
+                card_holder_name = str(card_data.get('card_holder', '') or card_data.get('cardholder_name', '') or '').strip()
+            if not card_holder_name:
+                card_holder_name = str(address_data.get('name', '') or '').strip()
             
             # 解析卡密过期时间
             key_expire_time = None
@@ -337,7 +344,7 @@ class CardViewSet(viewsets.ModelViewSet):
             # 创建卡记录
             card = Card.objects.create(
                 card_number=card_number,
-                card_holder=account_email,
+                card_holder=card_holder_name,
                 expiry_month=expiry_month,
                 expiry_year=expiry_year,
                 cvv=card_cvc,
