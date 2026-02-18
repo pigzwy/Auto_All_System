@@ -40,13 +40,9 @@
             <UserPlus class="h-4 w-4" />
             开通
           </Button>
-          <Button size="sm" class="gap-2 bg-blue-600 hover:bg-blue-700 text-white" :disabled="!hasSelection" @click="runAutoInvite">
+          <Button size="sm" class="gap-2 bg-blue-600 hover:bg-blue-700 text-white" :disabled="!hasSelection" @click="runInviteAndPool">
             <ArrowRightToLine class="h-4 w-4" />
-            邀请
-          </Button>
-          <Button size="sm" class="gap-2 bg-sky-600 hover:bg-sky-700 text-white" :disabled="!hasSelection" @click="runSub2apiSink">
-            <LayoutList class="h-4 w-4" />
-            入池
+            邀请并入池
           </Button>
           <Button size="sm" class="gap-2 bg-purple-600 hover:bg-purple-700 text-white" :disabled="!hasSelection" @click="openTeamPush">
             <Send class="h-4 w-4" />
@@ -149,7 +145,6 @@ import { computed, provide, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from '@/lib/element'
 import {
   ArrowRightToLine,
-  LayoutList,
   Plus,
   RefreshCcw,
   Send,
@@ -316,27 +311,15 @@ const runSelfRegister = async () => {
   await openSelfRegisterDialog(ids)
 }
 
-const runAutoInvite = async () => {
-  const ids = getSelectedIds()
-  if (!ids.length) return
-  try {
-    await gptBusinessApi.batchAutoInvite({
-      mother_ids: ids,
-      concurrency: 5,
-      open_geekez: true
-    })
-    ElMessage.success(`已启动 ${ids.length} 个母号的自动邀请`)
-  } catch (e: any) {
-    ElMessage.error(e?.response?.data?.detail || e?.message || '启动失败')
-  }
-}
-
-const runSub2apiSink = async () => {
+const runInviteAndPool = async () => {
   const ids = getSelectedIds()
   if (!ids.length) return
   window.dispatchEvent(
     new CustomEvent('gpt-open-sub2api-sink', {
-      detail: { mother_ids: ids }
+      detail: {
+        mother_ids: ids,
+        action: 'invite_and_pool'
+      }
     })
   )
 }

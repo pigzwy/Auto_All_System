@@ -355,17 +355,13 @@
       
       <SimpleForm :model="redeemForm" label-width="100px">
         <SimpleFormItem label="API 配置">
-          <SelectNative 
-            v-model="redeemForm.config_id" 
-            placeholder="选择 API 配置（默认使用系统默认）"
-            clearable
-            class="w-full"
-          >
-            <SelectOption 
-              v-for="config in apiConfigs" 
-              :key="config.id" 
-              :label="config.name + (config.is_default ? ' (默认)' : '')" 
+          <SelectNative v-model="redeemForm.config_id" class="w-full" placeholder="选择 API 配置">
+            <SelectOption value="" label="系统默认" />
+            <SelectOption
+              v-for="config in apiConfigs"
+              :key="config.id"
               :value="config.id"
+              :label="`${config.name}${config.is_default ? ' (默认)' : ''}`"
             />
           </SelectNative>
           <div class="text-xs text-gray-400 mt-1">
@@ -559,7 +555,7 @@ const importPlaceholder = computed(() => {
 const redeemForm = reactive({
   key_id: '',
   pool_type: 'public',
-  config_id: undefined as number | undefined
+  config_id: '' as string | number
 })
 
 const editForm = reactive({
@@ -964,7 +960,7 @@ const handleRedeem = async () => {
     const response = await cardsApi.redeemCard({
       key_id: redeemForm.key_id.trim(),
       pool_type: redeemForm.pool_type,
-      config_id: redeemForm.config_id
+      config_id: redeemForm.config_id || undefined
     })
     
     // axios 拦截器已解包，response 可能是 {code, data} 或直接是 data

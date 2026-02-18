@@ -41,6 +41,122 @@ class ProfileInfo:
     metadata: Dict[str, Any] = field(default_factory=dict)
 
 
+# ==================== 指纹生成 ====================
+
+# 常用分辨率池
+_RESOLUTIONS = [
+    (1920, 1080), (2560, 1440), (1366, 768),
+    (1536, 864), (1440, 900),
+]
+
+# 常用 Windows User-Agent 池 (Chrome 最新几个大版本)
+_USER_AGENTS = [
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36",
+]
+
+
+def generate_fingerprint(
+    *,
+    timezone: str = "Auto",
+    language: str = "auto",
+    city: Optional[str] = None,
+    geolocation: Optional[Dict[str, float]] = None,
+    screen_width: Optional[int] = None,
+    screen_height: Optional[int] = None,
+    hardware_concurrency: Optional[int] = None,
+    device_memory: Optional[int] = None,
+    user_agent: Optional[str] = None,
+) -> Dict[str, Any]:
+    """生成完整的浏览器指纹配置
+
+    Geekez 支持的指纹参数:
+      - platform: 操作系统平台 (自动匹配宿主机)
+      - screen: 屏幕分辨率 {width, height}
+      - window: 窗口大小 {width, height}
+      - hardwareConcurrency: CPU 核心数 (4/8/12/16)
+      - deviceMemory: 设备内存 GB (2/4/8)
+      - canvasNoise: Canvas 指纹噪声 {r, g, b, a}
+      - audioNoise: Audio 指纹噪声 (float)
+      - noiseSeed: 噪声种子
+      - timezone: 时区 (IANA 格式 或 "Auto")
+      - language: 浏览器语言 (如 "en-US" 或 "auto")
+      - city: 城市名 (用于 UI 显示)
+      - geolocation: 地理位置 {latitude, longitude, accuracy}
+
+    Args:
+        timezone: 时区, "Auto" 表示根据代理 IP 自动检测
+        language: 语言, "auto" 表示根据代理 IP 自动检测
+        city: 城市名, None 表示根据代理 IP 自动检测
+        geolocation: 地理坐标 {latitude, longitude}, None 表示自动检测
+        screen_width: 屏幕宽度, None 随机
+        screen_height: 屏幕高度, None 随机
+        hardware_concurrency: CPU 核心数, None 随机 (4/8/12/16)
+        device_memory: 设备内存 GB, None 随机 (2/4/8)
+        user_agent: UA 字符串, None 随机
+
+    Returns:
+        完整的 fingerprint 字典, 可直接传给 Geekez API
+    """
+    import random
+
+    # 分辨率
+    if screen_width and screen_height:
+        res_w, res_h = screen_width, screen_height
+    else:
+        res_w, res_h = random.choice(_RESOLUTIONS)
+
+    # 硬件参数
+    cores = hardware_concurrency or random.choice([4, 8, 12, 16])
+    memory = device_memory or random.choice([2, 4, 8])
+
+    # Canvas 噪声 (每通道 -5 ~ +5)
+    canvas_noise = {
+        "r": random.randint(-5, 5),
+        "g": random.randint(-5, 5),
+        "b": random.randint(-5, 5),
+        "a": random.randint(-5, 5),
+    }
+
+    # 平台 (匹配当前宿主机)
+    sys_platform = platform.system().lower()
+    if sys_platform == "windows":
+        fp_platform = "Win32"
+    elif sys_platform == "darwin":
+        fp_platform = "MacIntel"
+    else:
+        fp_platform = "Linux x86_64"
+
+    fp: Dict[str, Any] = {
+        "platform": fp_platform,
+        "screen": {"width": res_w, "height": res_h},
+        "window": {"width": res_w, "height": res_h},
+        "hardwareConcurrency": cores,
+        "deviceMemory": memory,
+        "canvasNoise": canvas_noise,
+        "audioNoise": random.random() * 0.000001,
+        "noiseSeed": random.randint(0, 9999999),
+        "languages": ["en-US", "en"],
+    }
+
+    # 时区 / 语言 / 地理位置 — "Auto" 由 Geekez 启动时根据代理 IP 自动检测
+    fp["timezone"] = timezone
+    fp["language"] = language
+
+    if city:
+        fp["city"] = city
+    if geolocation:
+        fp["geolocation"] = {
+            "latitude": geolocation.get("latitude", 0),
+            "longitude": geolocation.get("longitude", 0),
+            "accuracy": geolocation.get("accuracy", 100),
+        }
+
+    return fp
+
+
 class GeekezBrowserAPI:
     """
     GeekezBrowser 控制端口 API 封装
@@ -352,19 +468,20 @@ class GeekezBrowserAPI:
         name: str,
         proxy: Optional[str] = None,
         metadata: Optional[Dict[str, Any]] = None,
+        fingerprint: Optional[Dict[str, Any]] = None,
     ) -> ProfileInfo:
-        """
-        创建或更新 Profile
+        """创建或更新 Profile（使用完整指纹参数）
 
         Args:
             name: Profile 名称 (通常使用 email)
             proxy: 代理地址
             metadata: 元数据 (如账号信息)
+            fingerprint: 指纹配置, None 则自动生成 (调用 generate_fingerprint())
         """
         # Prefer official API server (matches Geekez UI / refresh semantics)
         existing = self.get_profile_by_name(name)
         if existing:
-            # best-effort update proxy via API server
+            # 已存在: 只更新 proxy，保持原有指纹不变
             if proxy is not None:
                 self._api_request_json(
                     "PUT",
@@ -373,6 +490,12 @@ class GeekezBrowserAPI:
                 )
             return existing
 
+        # 创建新 Profile — 生成完整指纹
+        fp = fingerprint or generate_fingerprint()
+
+        # 注意: Geekez Control Server 的 POST /api/profiles 会忽略传入的 fingerprint,
+        # 它内部会调用 generateFingerprint() 重新生成。
+        # 所以创建后必须立即用 PUT 覆盖完整指纹。
         api_created = self._api_request_json(
             "POST",
             "/api/profiles",
@@ -380,23 +503,32 @@ class GeekezBrowserAPI:
                 "name": name,
                 "proxyStr": proxy or "",
                 "tags": [],
-                # 优化指纹参数，提升 Stripe 等支付风控通过率
-                "fingerprint": {
-                    "window": {"width": 1280, "height": 800},
-                    "webgl": {"noise": True},
-                    "canvas": {"noise": True},
-                    "audio": {"noise": True},
-                    # 不设置 webrtc — Geekez 默认用 relay 模式（不泄露 IP 且不被检测为异常）
-                },
-                "startupArgs": [
-                    "--disable-blink-features=AutomationControlled",
-                ],
             },
         )
         if api_created and isinstance(api_created.get("profile"), dict):
             p = api_created["profile"]
+            profile_id = str(p.get("id", ""))
+
+            # 立即 PUT 覆盖完整指纹 + 启动参数
+            self._api_request_json(
+                "PUT",
+                f"/api/profiles/{quote(profile_id, safe='')}",
+                json_body={
+                    "fingerprint": fp,
+                    "startupArgs": [
+                        "--disable-blink-features=AutomationControlled",
+                    ],
+                },
+            )
+            logger.info(
+                f"Profile 已创建并设置指纹: {name} | "
+                f"TZ={fp.get('timezone')} | Lang={fp.get('language')} | "
+                f"Screen={fp.get('screen', {}).get('width')}x{fp.get('screen', {}).get('height')} | "
+                f"Cores={fp.get('hardwareConcurrency')} | Mem={fp.get('deviceMemory')}G"
+            )
+
             return ProfileInfo(
-                id=str(p.get("id", "")),
+                id=profile_id,
                 name=str(p.get("name", name)),
                 proxy=str(p.get("proxyStr", "")) or None,
                 metadata={},
@@ -417,6 +549,7 @@ class GeekezBrowserAPI:
         if existing_json is not None:
             if proxy is not None:
                 existing_json["proxyStr"] = proxy
+            existing_json["fingerprint"] = fp
             if metadata is not None:
                 existing_json["metadata"] = metadata
             profile_id = str(existing_json.get("id", ""))
@@ -427,13 +560,7 @@ class GeekezBrowserAPI:
                 "name": name,
                 "proxyStr": proxy or "",
                 "tags": [],
-                "fingerprint": {
-                    "window": {"width": 1280, "height": 800},
-                    "webgl": {"noise": True},
-                    "canvas": {"noise": True},
-                    "audio": {"noise": True},
-                    "webrtc": {"mode": "disabled"},
-                },
+                "fingerprint": fp,
                 "startupArgs": [
                     "--disable-blink-features=AutomationControlled",
                 ],

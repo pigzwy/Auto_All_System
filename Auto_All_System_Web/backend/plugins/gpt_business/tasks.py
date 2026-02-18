@@ -999,6 +999,11 @@ def self_register_task(self, record_id: str):
             "details": flow_result,
         }
 
+        if success:
+            _log(
+                f"self_register task success mother_id={mother_id} email={email} open_status={open_status}"
+            )
+
         _set_task_progress(record_id, 3, 3, "完成处理")
         patch_task(
             record_id,
@@ -1579,12 +1584,463 @@ def auto_invite_task(self, record_id: str):
             patch["account_id"] = account_id
         patch_account(mother_id, patch)
 
-        # ==================== 子号：注册/登录 + 接受邀请 + 验证加入 Team ====================
+        # ==================== 子号：注册/登录 + 接受邀请 + 验证加入 Team + 入池 ====================
         from apps.integrations.email.services.client import CloudMailClient
-        from plugins.gpt_business.services.openai_register import register_openai_account
+        from plugins.gpt_business.services.openai_register import (
+            human_delay,
+            register_openai_account,
+            type_slowly,
+            wait_for_element,
+            wait_for_url_change,
+        )
+        from .services.sub2api_sink_service import (
+            Sub2ApiConfig,
+            sub2api_create_openai_oauth_account,
+            sub2api_find_openai_oauth_account,
+            sub2api_openai_create_from_oauth,
+            sub2api_openai_exchange_code,
+            sub2api_openai_generate_auth_url,
+            sub2api_resolve_group_ids,
+            sub2api_test_connection,
+        )
+
+        pool_mode_raw = str(task_record.get("pool_mode") or "").strip().lower()
+        if pool_mode_raw in {"", "s2a", "s2a_oauth", "oauth", "oauth_browser"}:
+            auto_pool_mode = "s2a_oauth"
+        elif pool_mode_raw in {"off", "none", "disable", "disabled"}:
+            auto_pool_mode = "disabled"
+        else:
+            auto_pool_mode = pool_mode_raw
+
+        s2a_target_key = str(task_record.get("s2a_target_key") or "").strip()
+        auto_pool_disabled_reason = ""
+        pool_timeout = int((settings.get("request") or {}).get("timeout") or 30)
+        pool_concurrency = 1
+        pool_priority = 50
+        pool_group_ids: list[int] = []
+        sub2_cfg: Sub2ApiConfig | None = None
+
+        if auto_pool_mode != "s2a_oauth":
+            auto_pool_disabled_reason = f"unsupported_pool_mode:{auto_pool_mode}"
+        else:
+            s2a_raw = settings.get("s2a")
+            s2a: dict[str, Any] = s2a_raw if isinstance(s2a_raw, dict) else {}
+
+            s2a_targets_raw = settings.get("s2a_targets")
+            if isinstance(s2a_targets_raw, list):
+                default_key = str(settings.get("s2a_default_target") or "").strip()
+                chosen_key = s2a_target_key or default_key
+                if chosen_key:
+                    for target in s2a_targets_raw:
+                        if not isinstance(target, dict):
+                            continue
+                        if str(target.get("key") or "").strip() != chosen_key:
+                            continue
+                        cfg = target.get("config")
+                        if isinstance(cfg, dict):
+                            s2a = cfg
+                            s2a_target_key = chosen_key
+                            break
+
+            sub2api_api_base = str(s2a.get("api_base") or "").strip()
+            sub2api_admin_api_key = str(s2a.get("admin_key") or "").strip()
+            sub2api_admin_jwt = str(s2a.get("admin_token") or "").strip()
+
+            if not sub2api_api_base:
+                auto_pool_disabled_reason = "missing_s2a_api_base"
+            elif not sub2api_admin_api_key and not sub2api_admin_jwt:
+                auto_pool_disabled_reason = "missing_s2a_admin_key_or_token"
+            else:
+                ok, msg = sub2api_test_connection(
+                    api_base=sub2api_api_base,
+                    admin_key=sub2api_admin_api_key,
+                    admin_token=sub2api_admin_jwt,
+                    timeout=min(pool_timeout, 20),
+                )
+                if not ok:
+                    auto_pool_disabled_reason = f"s2a_connection_failed:{msg}"
+                else:
+                    raw_group_ids = s2a.get("group_ids")
+                    if isinstance(raw_group_ids, list):
+                        for gid in raw_group_ids:
+                            try:
+                                pool_group_ids.append(int(gid))
+                            except Exception:
+                                continue
+
+                    if not pool_group_ids:
+                        group_names = s2a.get("group_names")
+                        if isinstance(group_names, list):
+                            try:
+                                pool_group_ids = sub2api_resolve_group_ids(
+                                    api_base=sub2api_api_base,
+                                    admin_key=sub2api_admin_api_key,
+                                    admin_token=sub2api_admin_jwt,
+                                    group_names=[str(x or "").strip() for x in group_names if str(x or "").strip()],
+                                    timeout=min(pool_timeout, 20),
+                                )
+                            except Exception:
+                                pool_group_ids = []
+
+                    try:
+                        pool_concurrency = max(1, int(s2a.get("concurrency") or 1))
+                    except Exception:
+                        pool_concurrency = 1
+
+                    try:
+                        pool_priority = max(1, min(int(s2a.get("priority") or 50), 999))
+                    except Exception:
+                        pool_priority = 50
+
+                    sub2_cfg = Sub2ApiConfig(
+                        api_base=sub2api_api_base,
+                        admin_api_key=sub2api_admin_api_key,
+                        admin_jwt=sub2api_admin_jwt,
+                        group_ids=pool_group_ids,
+                        concurrency=pool_concurrency,
+                        priority=pool_priority,
+                    )
+
+        if auto_pool_disabled_reason:
+            _append_log(
+                f"auto pool disabled mode={auto_pool_mode} reason={auto_pool_disabled_reason} "
+                f"target={s2a_target_key or '-'}"
+            )
+        else:
+            _append_log(
+                f"auto pool enabled mode={auto_pool_mode} target={s2a_target_key or '-'} "
+                f"group_ids={pool_group_ids or []}"
+            )
+
+        def _mark_child_pool_status(child_account_id: str, status_text: str) -> None:
+            if not child_account_id:
+                return
+            try:
+                patch_account(
+                    child_account_id,
+                    {
+                        "pool_status": status_text,
+                        "pool_last_task": record_id,
+                        "pool_updated_at": timezone.now().isoformat(),
+                    },
+                )
+            except Exception:
+                pass
+
+        def _pool_child_with_current_browser(
+            *,
+            child_id: str,
+            child_email: str,
+            child_pwd: str,
+            child_browser,
+            mail_client_child,
+            log_prefix: str,
+        ) -> dict[str, Any]:
+            if not sub2_cfg:
+                return {"status": "skipped", "reason": auto_pool_disabled_reason or "auto_pool_disabled"}
+            if not child_id:
+                return {"status": "failed", "reason": "missing_child_id"}
+            if not child_pwd:
+                _mark_child_pool_status(child_id, "failed")
+                return {"status": "failed", "reason": "missing_account_password"}
+
+            _mark_child_pool_status(child_id, "running")
+
+            try:
+                existing = sub2api_find_openai_oauth_account(sub2_cfg, child_email, timeout=pool_timeout)
+                if existing:
+                    _mark_child_pool_status(child_id, "success")
+                    _append_log(log_prefix + "pool skip: already exists in sub2")
+                    return {"status": "skipped", "reason": "already_exists"}
+            except Exception:
+                pass
+
+            page = child_browser.page
+            if page is None:
+                _mark_child_pool_status(child_id, "failed")
+                return {"status": "failed", "reason": "child_browser_page_not_available"}
+
+            email_selector = (
+                'css:input[type="email"], input[name="email"], input[id="email"], '
+                'input[name="username"], input[id="username"], '
+                'input[autocomplete="username"], input[autocomplete="email"], input[inputmode="email"]'
+            )
+            password_selector = (
+                'css:input[type="password"], input[name="password"], input[id="password"], '
+                'input[autocomplete="current-password"], input[autocomplete="new-password"]'
+            )
+
+            def _handle_email_verification() -> bool:
+                try:
+                    cur = str(page.url or "")
+                except Exception:
+                    return False
+                if "email-verification" not in cur or "auth.openai.com" not in cur:
+                    return False
+
+                _append_log(log_prefix + "pool email verification detected")
+                try:
+                    vcode = mail_client_child.wait_for_verification_code(
+                        to_email=child_email,
+                        timeout=120,
+                        poll_interval=5,
+                        sender_contains=None,
+                    )
+                except Exception:
+                    vcode = None
+                if not vcode:
+                    _append_log(log_prefix + "pool email verification code missing")
+                    return False
+
+                code_inputs = page.eles(
+                    'css:input[name="code"], input[autocomplete="one-time-code"], '
+                    'input[inputmode="numeric"], input[type="tel"], '
+                    'input[placeholder*="代码"], input[placeholder*="code"]'
+                )
+                code_inputs = [x for x in (code_inputs or []) if x]
+                if not code_inputs:
+                    _append_log(log_prefix + "pool verification input not found")
+                    return False
+
+                digits = [ch for ch in str(vcode) if ch.isdigit()]
+                if len(code_inputs) >= 6 and len(digits) >= 6:
+                    for ci in range(6):
+                        try:
+                            code_inputs[ci].click()
+                            time.sleep(0.08)
+                            code_inputs[ci].input(digits[ci], clear=True)
+                            time.sleep(0.08)
+                        except Exception:
+                            continue
+                else:
+                    try:
+                        code_inputs[0].clear()
+                    except Exception:
+                        pass
+                    try:
+                        type_slowly(page, code_inputs[0], str(vcode), base_delay=0.08)
+                    except Exception:
+                        pass
+
+                time.sleep(0.6)
+                submit_btn = wait_for_element(page, 'css:button[type="submit"]', timeout=10)
+                if submit_btn:
+                    try:
+                        submit_btn.click()
+                    except Exception:
+                        pass
+                    time.sleep(2)
+                return True
+
+            def _click_submit_if_any(timeout_sec: int) -> bool:
+                btn = wait_for_element(page, 'css:button[type="submit"]', timeout=timeout_sec)
+                if not btn:
+                    return False
+                old_url = str(child_browser.current_url() or "")
+                try:
+                    btn.click()
+                except Exception:
+                    return False
+                wait_for_url_change(page, old_url, timeout=20)
+                human_delay(0.8, 1.6)
+                return True
+
+            try:
+                max_attempts = 2
+                code = ""
+                session_id = ""
+                for attempt in range(1, max_attempts + 1):
+                    try:
+                        auth = sub2api_openai_generate_auth_url(sub2_cfg, email=child_email, timeout=pool_timeout)
+                        auth_url = str(auth.get("auth_url") or "").strip()
+                        session_id = str(auth.get("session_id") or "").strip()
+                        if not auth_url or not session_id:
+                            raise RuntimeError("generate-auth-url returned empty auth_url/session_id")
+
+                        page.get(auth_url)
+                        time.sleep(2)
+
+                        for _ in range(40):
+                            cur_url = str(child_browser.current_url() or "")
+                            if "code=" in cur_url:
+                                break
+
+                            email_input = wait_for_element(page, email_selector, timeout=1)
+                            if email_input:
+                                human_delay()
+                                type_slowly(page, email_input, child_email)
+                                human_delay(0.4, 0.9)
+                                _click_submit_if_any(2)
+                                time.sleep(1)
+                                continue
+
+                            password_input = wait_for_element(page, password_selector, timeout=1)
+                            if password_input:
+                                human_delay()
+                                type_slowly(page, password_input, str(child_pwd))
+                                human_delay(0.4, 0.9)
+                                _click_submit_if_any(2)
+                                time.sleep(1)
+                                continue
+
+                            if _handle_email_verification():
+                                time.sleep(2)
+                                continue
+
+                            consent_btn = None
+                            for sel in [
+                                "text:Authorize",
+                                "text:Allow",
+                                "text:Approve",
+                                "text:同意",
+                                "text:授权",
+                                "text:继续",
+                                "text:Continue",
+                            ]:
+                                consent_btn = wait_for_element(page, sel, timeout=1)
+                                if consent_btn:
+                                    break
+
+                            if consent_btn:
+                                try:
+                                    consent_btn.click()
+                                except Exception:
+                                    pass
+                                human_delay(0.8, 1.6)
+                                time.sleep(1)
+                                continue
+
+                            if any(
+                                x in cur_url
+                                for x in [
+                                    "auth.openai.com/log-in",
+                                    "auth.openai.com/log-in-or-create-account",
+                                    "auth0.openai.com/u/login",
+                                    "/u/login/",
+                                    "/login/identifier",
+                                    "/login/password",
+                                ]
+                            ):
+                                time.sleep(0.5)
+                                continue
+
+                            if _click_submit_if_any(1):
+                                time.sleep(1)
+                                continue
+
+                            time.sleep(0.5)
+
+                        code = ""
+                        for _ in range(120):
+                            cur_url = str(child_browser.current_url() or "")
+                            if "code=" in cur_url:
+                                m = re.search(r"[?&]code=([^&]+)", cur_url)
+                                if m:
+                                    code = unquote(m.group(1))
+                                    break
+                            time.sleep(0.5)
+
+                    except Exception as attempt_exc:
+                        _append_log(log_prefix + f"pool oauth attempt {attempt} failed: {attempt_exc}")
+                        if attempt < max_attempts:
+                            time.sleep(2)
+                            continue
+                        raise
+
+                    if code:
+                        break
+
+                if not code or not session_id:
+                    raise RuntimeError("oauth callback code not found")
+
+                created = sub2api_openai_create_from_oauth(
+                    sub2_cfg,
+                    session_id=session_id,
+                    code=code,
+                    name=child_email,
+                    concurrency=pool_concurrency,
+                    priority=pool_priority,
+                    group_ids=[int(x) for x in (pool_group_ids or [])],
+                    timeout=pool_timeout,
+                )
+
+                if not created:
+                    token_info_raw = sub2api_openai_exchange_code(
+                        sub2_cfg,
+                        session_id=session_id,
+                        code=code,
+                        timeout=pool_timeout,
+                    )
+                    token_info = token_info_raw
+                    if isinstance(token_info_raw, dict):
+                        if isinstance(token_info_raw.get("tokenInfo"), dict):
+                            token_info = token_info_raw.get("tokenInfo")
+                        elif isinstance(token_info_raw.get("token_info"), dict):
+                            token_info = token_info_raw.get("token_info")
+
+                    access_token = ""
+                    refresh_token = ""
+                    expires_in: int | None = None
+                    if isinstance(token_info, dict):
+                        access_token = str(
+                            token_info.get("access_token")
+                            or token_info.get("accessToken")
+                            or token_info.get("access")
+                            or ""
+                        ).strip()
+                        refresh_token = str(
+                            token_info.get("refresh_token")
+                            or token_info.get("refreshToken")
+                            or token_info.get("refresh")
+                            or ""
+                        ).strip()
+
+                        expires_in_val = token_info.get("expires_in") or token_info.get("expiresIn")
+                        expires_at_val = token_info.get("expires_at") or token_info.get("expiresAt")
+                        if isinstance(expires_in_val, int):
+                            expires_in = expires_in_val
+                        elif isinstance(expires_in_val, str) and expires_in_val.strip():
+                            try:
+                                expires_in = int(expires_in_val)
+                            except Exception:
+                                expires_in = None
+                        elif expires_at_val is not None:
+                            try:
+                                expires_at_i = int(expires_at_val)
+                                now_i = int(time.time())
+                                if expires_at_i > now_i:
+                                    expires_in = expires_at_i - now_i
+                            except Exception:
+                                expires_in = None
+
+                    created2, msg2 = sub2api_create_openai_oauth_account(
+                        sub2_cfg,
+                        email=child_email,
+                        access_token=access_token,
+                        refresh_token=refresh_token,
+                        expires_in=expires_in,
+                        timeout=pool_timeout,
+                        dry_run=False,
+                    )
+                    created = bool(created2)
+                    if not created and msg2:
+                        raise RuntimeError(f"exchange-code/create-account failed: {msg2}")
+
+                if created:
+                    _mark_child_pool_status(child_id, "success")
+                    _append_log(log_prefix + "pool success")
+                    return {"status": "ok"}
+
+                _mark_child_pool_status(child_id, "failed")
+                return {"status": "failed", "reason": "oauth_create_failed"}
+            except Exception as pool_exc:
+                _mark_child_pool_status(child_id, "failed")
+                _append_log(log_prefix + f"pool failed: {pool_exc}")
+                return {"status": "failed", "reason": str(pool_exc)}
 
         children_results: list[dict[str, Any]] = []
         join_failed: list[str] = []
+        pool_failed: list[str] = []
         _append_log("children accept stage start")
 
         for idx, child in enumerate(children, start=1):
@@ -1594,6 +2050,7 @@ def auto_invite_task(self, record_id: str):
             child_join_status = str(child.get("team_join_status") or "").strip()
             child_team_account_id_saved = str(child.get("team_account_id") or "").strip()
             child_login_status = str(child.get("login_status") or "").strip()
+            child_pool_status = str(child.get("pool_status") or "").strip()
 
             log_prefix = f"[child {idx}/{len(children)} {child_email}] "
             if not child_email:
@@ -1601,8 +2058,11 @@ def auto_invite_task(self, record_id: str):
 
             _append_log(log_prefix + "start")
 
-            # 已入队的子号：直接跳过（避免重复登录/重复点邀请）
-            if child_join_status == "success" or child_team_account_id_saved:
+            child_is_joined = child_join_status == "success" or bool(child_team_account_id_saved)
+            child_is_pooled = child_pool_status == "success"
+
+            # 已入队且已入池：直接跳过（避免重复登录/重复点邀请）
+            if child_is_joined and child_is_pooled:
                 children_results.append(
                     {
                         "email": child_email,
@@ -1610,12 +2070,14 @@ def auto_invite_task(self, record_id: str):
                         "joined": True,
                         "team_account_id": child_team_account_id_saved,
                         "skipped": True,
-                        "reason": "already_joined",
+                        "reason": "already_joined_and_pooled",
+                        "pool": {"status": "skipped", "reason": "already_pooled"},
                     }
                 )
-                _append_log(log_prefix + "skip: already joined")
+                _append_log(log_prefix + "skip: already joined and pooled")
                 continue
-            if not child_pwd:
+
+            if not child_pwd and not child_is_joined:
                 children_results.append({"email": child_email, "joined": False, "error": "missing account_password"})
                 join_failed.append(child_email)
                 continue
@@ -1897,6 +2359,21 @@ def auto_invite_task(self, record_id: str):
                                     child_result["joined"] = False
                                     join_failed.append(child_email)
 
+                            if child_result.get("joined"):
+                                pool_info = _pool_child_with_current_browser(
+                                    child_id=child_id,
+                                    child_email=child_email,
+                                    child_pwd=child_pwd,
+                                    child_browser=child_browser,
+                                    mail_client_child=mail_client_child,
+                                    log_prefix=log_prefix,
+                                )
+                                child_result["pool"] = pool_info
+                                if str(pool_info.get("status") or "") == "failed" and child_email not in pool_failed:
+                                    pool_failed.append(child_email)
+                            else:
+                                child_result["pool"] = {"status": "skipped", "reason": "join_failed"}
+
                             # 写回子号状态（不写 token/password）
                             try:
                                 patch_account(
@@ -1946,9 +2423,11 @@ def auto_invite_task(self, record_id: str):
 
             children_results.append(child_result)
 
-        _append_log(f"children accept stage done failed={len(join_failed)}")
+        _append_log(
+            f"children accept stage done join_failed={len(join_failed)} pool_failed={len(pool_failed)}"
+        )
 
-        overall_ok = (not has_failed) and (len(join_failed) == 0)
+        overall_ok = (not has_failed) and (len(join_failed) == 0) and (len(pool_failed) == 0)
 
         result: dict[str, Any] = {
             "success": overall_ok,
@@ -1962,7 +2441,16 @@ def auto_invite_task(self, record_id: str):
             },
             "children": children_results,
             "children_join_failed": join_failed,
+            "children_pool_failed": pool_failed,
+            "auto_pool_mode": auto_pool_mode,
+            "auto_pool_target": s2a_target_key,
+            "auto_pool_disabled_reason": auto_pool_disabled_reason,
         }
+
+        if overall_ok:
+            _append_log(
+                f"auto_invite task success mother_id={mother_id} invited={len(child_emails_to_invite)} pool_mode={auto_pool_mode}"
+            )
 
         _set_task_progress(record_id, 3, 3, "完成处理")
         patch_task(
@@ -1978,7 +2466,11 @@ def auto_invite_task(self, record_id: str):
                         "error": (
                             "auto_invite has failed invites"
                             if has_failed
-                            else f"auto_invite child join failed: {','.join(join_failed[:20])}"
+                            else (
+                                f"auto_invite child join failed: {','.join(join_failed[:20])}"
+                                if join_failed
+                                else f"auto_invite child pool failed: {','.join(pool_failed[:20])}"
+                            )
                         )
                     }
                 ),
@@ -2854,6 +3346,11 @@ def sub2api_sink_task(self, record_id: str):
                 **({} if return_code == 0 else {"error": error_msg}),
             },
         )
+
+        if return_code == 0:
+            _log_line(
+                f"sub2api_sink task success mother_id={mother_id} ok={ok_n} skip={skip_n} fail={fail_n}"
+            )
 
         return result
     except Exception as exc:

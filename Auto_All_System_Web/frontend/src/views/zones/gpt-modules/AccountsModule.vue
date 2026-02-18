@@ -462,7 +462,7 @@
     <Dialog v-model:open="sub2apiDialogVisible">
       <DialogContent class="sm:max-w-[620px]">
         <DialogHeader>
-          <DialogTitle>自动入池配置</DialogTitle>
+          <DialogTitle>{{ sub2apiAction === 'invite_and_pool' ? '自动邀请并入池配置' : '自动入池配置' }}</DialogTitle>
           <DialogDescription>
             保存配置后先测试连接，通过后再开始执行（当前将对 {{ sub2apiMotherIds.length }} 个母号生效）
           </DialogDescription>
@@ -473,13 +473,13 @@
             <div class="mt-1 text-xs text-muted-foreground">保存配置后测试连接，通过后再开始。</div>
 
             <div class="mt-3 grid gap-2">
-              <label class="text-sm font-medium">入池到</label>
+              <label class="text-sm font-medium">{{ sub2apiAction === 'invite_and_pool' ? '入到哪里' : '入池到' }}</label>
               <Select v-model="poolMode">
                 <SelectTrigger>
                   <SelectValue placeholder="请选择" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="crs">crs</SelectItem>
+                  <SelectItem v-if="sub2apiAction !== 'invite_and_pool'" value="crs">crs</SelectItem>
                   <SelectItem value="s2a">s2a</SelectItem>
                 </SelectContent>
               </Select>
@@ -538,7 +538,9 @@
               </div>
             </template>
 
-            <div class="text-xs text-muted-foreground">流程：保存 → 测试连接 → 开始入池</div>
+            <div class="text-xs text-muted-foreground">
+              流程：保存 → 测试连接 → {{ sub2apiAction === 'invite_and_pool' ? '开始邀请并入池' : '开始入池' }}
+            </div>
             <div v-if="sub2apiTestMessage" class="text-xs" :class="sub2apiTestOk ? 'text-emerald-600' : 'text-rose-600'">{{ sub2apiTestMessage }}</div>
           </div>
         </div>
@@ -554,7 +556,7 @@
           </Button>
           <Button :disabled="!sub2apiTestOk || sub2apiStarting" class="bg-violet-600 hover:bg-violet-700 text-white" @click="startSub2apiSink">
             <Loader2 v-if="sub2apiStarting" class="mr-2 h-4 w-4 animate-spin" />
-            开始入池
+            {{ sub2apiAction === 'invite_and_pool' ? '开始邀请并入池' : '开始入池' }}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -1057,22 +1059,12 @@ const batchRunSelfRegister = async () => {
 const batchRunAutoInvite = async () => {
   if (selectedIds.value.size === 0) return
   const ids = Array.from(selectedIds.value)
-  try {
-    await gptBusinessApi.batchAutoInvite({
-      mother_ids: ids,
-      concurrency: 5,
-      open_geekez: true
-    })
-    ElMessage.success(`已启动 ${ids.length} 个母号的自动邀请`)
-    selectedIds.value.clear()
-    refresh()
-  } catch (e: any) {
-    ElMessage.error(e?.response?.data?.detail || e?.message || '批量操作失败')
-  }
+  await openSub2apiSinkDialog(ids, 'invite_and_pool')
 }
 
 const sub2apiDialogVisible = ref(false)
 const sub2apiMotherIds = ref<string[]>([])
+const sub2apiAction = ref<'pool_only' | 'invite_and_pool'>('pool_only')
 
 const sub2apiForm = reactive({
   api_base: '',
@@ -1137,8 +1129,15 @@ const loadSinkSettingsFromSettings = async () => {
   sub2apiTestMessage.value = ''
 }
 
-const openSub2apiSinkDialog = async (motherIds: string[]) => {
+const openSub2apiSinkDialog = async (
+  motherIds: string[],
+  action: 'pool_only' | 'invite_and_pool' = 'pool_only'
+) => {
   sub2apiMotherIds.value = motherIds
+  sub2apiAction.value = action
+  if (sub2apiAction.value === 'invite_and_pool') {
+    poolMode.value = 's2a'
+  }
   try {
     await loadSinkSettingsFromSettings()
   } catch (e: any) {
@@ -1236,12 +1235,22 @@ const startSub2apiSink = async () => {
   sub2apiStarting.value = true
   try {
     const ids = sub2apiMotherIds.value || []
-    await gptBusinessApi.batchSub2apiSink({
-      mother_ids: ids,
-      concurrency: Number(sub2apiForm.concurrency || 5),
-      mode: poolMode.value
-    })
-    ElMessage.success(`已启动 ${ids.length} 个母号的自动入池`)
+    if (sub2apiAction.value === 'invite_and_pool') {
+      await gptBusinessApi.batchAutoInvite({
+        mother_ids: ids,
+        concurrency: Number(sub2apiForm.concurrency || 5),
+        mode: poolMode.value,
+        open_geekez: true
+      })
+      ElMessage.success(`已启动 ${ids.length} 个母号的自动邀请并入池`)
+    } else {
+      await gptBusinessApi.batchSub2apiSink({
+        mother_ids: ids,
+        concurrency: Number(sub2apiForm.concurrency || 5),
+        mode: poolMode.value
+      })
+      ElMessage.success(`已启动 ${ids.length} 个母号的自动入池`)
+    }
     selectedIds.value.clear()
     selectedIds.value = new Set(selectedIds.value)
     sub2apiDialogVisible.value = false
@@ -1255,7 +1264,7 @@ const startSub2apiSink = async () => {
 const batchRunSub2apiSink = async () => {
   if (selectedIds.value.size === 0) return
   const ids = Array.from(selectedIds.value)
-  await openSub2apiSinkDialog(ids)
+  await openSub2apiSinkDialog(ids, 'pool_only')
 }
 
 // ========== Team Push ==========
@@ -1981,7 +1990,7 @@ const onCeleryDialogClosed = () => {
 const getFallbackSteps = (taskType?: string) => {
   const map: Record<string, string[]> = {
     self_register: ['创建账号', '初始化环境', '完成处理'],
-    auto_invite: ['准备邀请', '发送邀请', '完成处理'],
+    auto_invite: ['准备邀请', '邀请并入池', '完成处理'],
     sub2api_sink: ['准备入池', '推送任务', '完成处理']
   }
   return map[taskType || ''] || ['任务开始', '执行中', '任务完成']
@@ -2152,7 +2161,7 @@ const reloadTaskLog = async () => {
 const getTaskTypeName = (type: string) => {
   const map: Record<string, string> = {
     self_register: '自动开通',
-    auto_invite: '自动邀请',
+    auto_invite: '自动邀请并入池',
     sub2api_sink: '自动入池'
   }
   return map[type] || type
@@ -2183,12 +2192,13 @@ const handleViewTasks = (e: Event) => {
 const handleOpenSub2apiSink = (e: Event) => {
   const detail = (e as CustomEvent).detail || {}
   const ids = Array.isArray(detail.mother_ids) ? detail.mother_ids : []
+  const action: 'pool_only' | 'invite_and_pool' = detail.action === 'invite_and_pool' ? 'invite_and_pool' : 'pool_only'
   if (ids.length > 0) {
-    openSub2apiSinkDialog(ids)
+    openSub2apiSinkDialog(ids, action)
     return
   }
   if (selectedMother.value?.id) {
-    openSub2apiSinkDialog([selectedMother.value.id])
+    openSub2apiSinkDialog([selectedMother.value.id], action)
   }
 }
 

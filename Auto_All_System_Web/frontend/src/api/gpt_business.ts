@@ -213,14 +213,22 @@ export const gptBusinessApi = {
     return request.post('/plugins/gpt-business/accounts/batch/self_register/', data)
   },
 
-  autoInvite(motherAccountId: string): Promise<{ message?: string; task_id?: string }> {
-    return request.post(`/plugins/gpt-business/accounts/${motherAccountId}/auto_invite/`)
+  autoInvite(
+    motherAccountId: string,
+    data?: {
+      target_key?: string
+      mode?: string
+    }
+  ): Promise<{ message?: string; task_id?: string; record_id?: string; target_key?: string; mode?: string }> {
+    return request.post(`/plugins/gpt-business/accounts/${motherAccountId}/auto_invite/`, data || {})
   },
 
   batchAutoInvite(data: {
     mother_ids: string[]
     concurrency?: number
     open_geekez?: boolean
+    target_key?: string
+    mode?: string
   }): Promise<{ message?: string; results?: any[] }> {
     return request.post('/plugins/gpt-business/accounts/batch/auto_invite/', data)
   },

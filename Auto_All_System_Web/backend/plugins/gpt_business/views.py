@@ -1242,6 +1242,9 @@ class AccountsViewSet(ViewSet):
         if not isinstance(acc, dict) or str(acc.get("type")) != "mother":
             return Response({"detail": "Mother account not found"}, status=status.HTTP_400_BAD_REQUEST)
 
+        target_key = str(request.data.get("target_key") or request.data.get("s2a_target_key") or "").strip()
+        mode = str(request.data.get("mode") or request.data.get("pool_mode") or "").strip() or "s2a_oauth"
+
         mother_id = str(pk)
         seat_total = int(acc.get("seat_total") or 0)
         accounts = list_accounts(settings)
@@ -1277,6 +1280,8 @@ class AccountsViewSet(ViewSet):
             "id": record_id,
             "type": "auto_invite",
             "mother_id": mother_id,
+            "s2a_target_key": target_key,
+            "pool_mode": mode,
             "status": "pending",
             "progress_current": 0,
             "progress_total": 3,
@@ -1286,7 +1291,15 @@ class AccountsViewSet(ViewSet):
         })
 
         async_result = auto_invite_task.delay(record_id)
-        return Response({"message": "已启动：自动邀请", "task_id": async_result.id, "record_id": record_id})
+        return Response(
+            {
+                "message": "已启动：自动邀请",
+                "task_id": async_result.id,
+                "record_id": record_id,
+                "target_key": target_key,
+                "mode": mode,
+            }
+        )
 
     @action(detail=True, methods=["post"], url_path="sub2api_sink")
     def sub2api_sink(self, request, pk=None):
@@ -1427,6 +1440,8 @@ class AccountsViewSet(ViewSet):
         concurrency = int(request.data.get("concurrency") or 5)
         # open_geekez 参数已废弃，auto_invite_task 内部会自动启动浏览器
         # 不再单独调用 launch_geekez_task，避免并发冲突
+        target_key = str(request.data.get("target_key") or request.data.get("s2a_target_key") or "").strip()
+        mode = str(request.data.get("mode") or request.data.get("pool_mode") or "").strip() or "s2a_oauth"
         accounts = list_accounts(settings)
 
         results: list[dict[str, Any]] = []
@@ -1471,6 +1486,8 @@ class AccountsViewSet(ViewSet):
                 "id": record_id,
                 "type": "auto_invite",
                 "mother_id": str(mother_id),
+                "s2a_target_key": target_key,
+                "pool_mode": mode,
                 "status": "pending",
                 "progress_current": 0,
                 "progress_total": 3,
@@ -1484,6 +1501,8 @@ class AccountsViewSet(ViewSet):
                 "mother_id": mother_id,
                 "record_id": record_id,
                 "task_id": async_result.id,
+                "target_key": target_key,
+                "mode": mode,
             })
 
         return Response({"message": "已启动：批量自动邀请", "results": results})

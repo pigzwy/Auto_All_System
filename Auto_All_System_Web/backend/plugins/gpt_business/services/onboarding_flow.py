@@ -44,6 +44,80 @@ PAGE_WAIT = 5
 HUMAN_DELAY = (0.5, 1.5)
 STEP_DELAY = (2, 3)
 
+
+# ==================== 鼠标行为模拟 ====================
+
+def _move_and_click(page, element) -> bool:
+    """先把鼠标移动到元素上，再点击（模拟真人操作轨迹）
+
+    Stripe 的风控会收集 mousemove 事件，如果没有鼠标移动轨迹直接触发 click，
+    会被判定为自动化操作。使用 DrissionPage 的 actions 动作链产生真实的
+    Input.dispatchMouseEvent CDP 事件。
+    """
+    try:
+        page.actions.move_to(element, duration=random.uniform(0.3, 0.8))
+        time.sleep(random.uniform(0.05, 0.15))
+        page.actions.click()
+        return True
+    except Exception:
+        # 降级：直接点击
+        try:
+            element.click()
+            return True
+        except Exception:
+            return False
+
+
+def _random_mouse_wander(page, times: int = 3):
+    """在页面上随机移动鼠标几次，产生 mousemove 事件
+
+    Stripe 在页面加载后会持续收集鼠标事件。如果从页面加载到表单提交
+    期间完全没有鼠标移动事件，风控评分会大幅降低。
+    """
+    try:
+        for _ in range(times):
+            x = random.randint(200, 900)
+            y = random.randint(150, 600)
+            page.actions.move_to((x, y), duration=random.uniform(0.2, 0.5))
+            time.sleep(random.uniform(0.1, 0.4))
+    except Exception:
+        pass
+
+
+def _inject_stealth_to_all_frames(page):
+    """向所有 frame（包括跨域 Stripe iframe）注入 stealth 脚本
+
+    Page.addScriptToEvaluateOnNewDocument 默认只注入到主 frame。
+    Stripe 的 iframe (js.stripe.com) 是跨域的，需要单独处理。
+    """
+    from .stealth import STEALTH_JS
+
+    try:
+        # 方法 1: 使用 runIfWaitingForDebugger=True 让脚本在所有 frame 生效
+        # (Chrome 92+ 支持 includeCommandLineAPI / worldName)
+        page.run_cdp(
+            "Page.addScriptToEvaluateOnNewDocument",
+            source=STEALTH_JS,
+            runImmediately=True,
+        )
+    except Exception:
+        pass
+
+    # 方法 2: 遍历所有 iframe，逐个注入
+    try:
+        frames = page.get_frames()
+        for frame in (frames or []):
+            try:
+                frame_url = frame.url or ""
+                # 只对 stripe 相关 iframe 注入
+                if "stripe.com" in frame_url or "elements-inner" in frame_url:
+                    frame.run_js(STEALTH_JS, timeout=3)
+                    logger.info(f"Stealth 已注入 Stripe iframe: {frame_url[:80]}")
+            except Exception:
+                pass
+    except Exception:
+        pass
+
 # ==================== 测试数据 ====================
 TEST_CHECKOUT_DATA = {
     "email": "test@example.com",
@@ -79,7 +153,7 @@ def _step_delay():
 def _wait_and_click(
     page, selector: str, timeout: int = STEP_TIMEOUT, required: bool = True
 ) -> bool:
-    """等待元素出现并点击
+    """等待元素出现并点击（先移动鼠标再点击，模拟真人）
 
     Args:
         page: 浏览器页面实例
@@ -97,7 +171,7 @@ def _wait_and_click(
             element = page.ele(selector, timeout=1)
             if element and element.states.is_displayed:
                 _human_delay()
-                element.click()
+                _move_and_click(page, element)
                 return True
         except Exception:
             pass
@@ -507,18 +581,29 @@ def _fill_address_fields(page, data: dict) -> bool:
     return True
 
 
-def _type_slowly(element, text: str, base_delay: float = 0.08):
+def _type_slowly(element, text: str, base_delay: float = 0.08, page=None):
     """缓慢输入文本 (模拟真人)
 
     Args:
         element: 输入框元素
         text: 要输入的文本
         base_delay: 基础延迟
+        page: 页面对象（可选，用于先移动鼠标到输入框）
     """
     import random
 
     if not text:
         return
+
+    # 先移动鼠标到输入框再点击聚焦（模拟真人）
+    if page:
+        try:
+            page.actions.move_to(element, duration=random.uniform(0.2, 0.5))
+            time.sleep(random.uniform(0.05, 0.15))
+            page.actions.click()
+            time.sleep(random.uniform(0.1, 0.2))
+        except Exception:
+            pass
 
     # 先确保清空已有内容
     try:
@@ -536,11 +621,14 @@ def _type_slowly(element, text: str, base_delay: float = 0.08):
     element.input(text[0], clear=True)
     time.sleep(random.uniform(0.1, 0.2))
 
-    for char in text[1:]:
+    for i, char in enumerate(text[1:], 1):
         element.input(char, clear=False)
         actual_delay = base_delay * random.uniform(0.5, 1.2)
         if char in " @._-":
             actual_delay *= 1.3
+        # 模拟真人打字中偶尔的短暂停顿
+        if random.random() < 0.08:
+            actual_delay += random.uniform(0.3, 0.8)
         time.sleep(actual_delay)
 
 
@@ -874,6 +962,15 @@ def step_fill_checkout_form(
     log.success(f"已进入支付页面: {page.url}")
     _step_delay()
 
+    # 向 Stripe iframe 注入 stealth 脚本（防止 iframe 内检测到自动化）
+    log.info("  注入 Stealth 到 Stripe iframe...")
+    _inject_stealth_to_all_frames(page)
+
+    # 在页面上随机移动鼠标，产生 mousemove 事件（Stripe 行为分析需要）
+    log.info("  模拟鼠标活动...")
+    _random_mouse_wander(page, times=random.randint(3, 6))
+    time.sleep(random.uniform(0.5, 1.0))
+
     log.step("填写结算表单...")
 
     data = load_checkout_config()
@@ -906,13 +1003,7 @@ def step_fill_checkout_form(
     log.info("  填写邮箱...")
     email_input = _find_element(page, "css:#email", timeout=5)
     if email_input:
-        # 先清空再输入，防止追加导致重复
-        try:
-            email_input.clear()
-            time.sleep(0.2)
-        except Exception:
-            pass
-        _type_slowly(email_input, data["email"])
+        _type_slowly(email_input, data["email"], page=page)
         log.success("  邮箱已填写")
     else:
         log.warning("  未找到邮箱输入框")
@@ -926,7 +1017,7 @@ def step_fill_checkout_form(
         log.info("  填写银行卡...")
         card_input = _find_element(page, "css:#cardNumber", timeout=5)
         if card_input:
-            _type_slowly(card_input, data["card_number"])
+            _type_slowly(card_input, data["card_number"], page=page)
             log.success("  银行卡已填写")
         else:
             log.warning("  未找到银行卡输入框")
@@ -936,7 +1027,7 @@ def step_fill_checkout_form(
         log.info("  填写有效期...")
         expiry_input = _find_element(page, "css:#cardExpiry", timeout=5)
         if expiry_input:
-            _type_slowly(expiry_input, data["card_expiry"])
+            _type_slowly(expiry_input, data["card_expiry"], page=page)
             log.success("  有效期已填写")
         else:
             log.warning("  未找到有效期输入框")
@@ -946,7 +1037,7 @@ def step_fill_checkout_form(
         log.info("  填写 CVC...")
         cvc_input = _find_element(page, "css:#cardCvc", timeout=5)
         if cvc_input:
-            _type_slowly(cvc_input, data["card_cvc"])
+            _type_slowly(cvc_input, data["card_cvc"], page=page)
             log.success("  CVC 已填写")
         else:
             log.warning("  未找到 CVC 输入框")
@@ -956,13 +1047,16 @@ def step_fill_checkout_form(
     # 5-10. 持卡人姓名/国家/地址/城市/邮编/州 — 在 Stripe address iframe 内
     _fill_address_fields(page, data)
 
+    # 在提交前再做一次鼠标随机游走（增强行为数据）
+    _random_mouse_wander(page, times=random.randint(2, 4))
+
     # 11. 勾选许可协议
     log.info("  勾选许可协议...")
     checkbox = _find_element(page, 'css:input[type="checkbox"]', timeout=3)
     if checkbox:
         try:
             if not checkbox.states.is_checked:
-                checkbox.click()
+                _move_and_click(page, checkbox)
                 log.success("  已勾选许可协议")
             else:
                 log.info("  许可协议已勾选")
@@ -973,10 +1067,8 @@ def step_fill_checkout_form(
 
     # 12. 点击订阅/支付按钮
     log.step("点击订阅按钮...")
-    # 查找订阅按钮 (通常包含 'Subscribe', 'Pay', '订阅' 等文字)
     subscribe_btn = None
-    
-    # 尝试多种选择器
+
     selectors = [
         'css:button[type="submit"]',
         'css:button.SubmitButton',
@@ -985,7 +1077,7 @@ def step_fill_checkout_form(
         'text:Pay',
         'text:Start plan',
     ]
-    
+
     for sel in selectors:
         try:
             btn = page.ele(sel, timeout=1)
@@ -994,10 +1086,10 @@ def step_fill_checkout_form(
                 break
         except Exception:
             pass
-            
+
     if subscribe_btn:
         try:
-            subscribe_btn.click()
+            _move_and_click(page, subscribe_btn)
             log.success("已点击订阅按钮")
         except Exception as e:
             log.warning(f"点击订阅按钮失败: {e}")

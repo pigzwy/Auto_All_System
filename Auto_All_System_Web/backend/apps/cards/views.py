@@ -215,21 +215,26 @@ class CardViewSet(viewsets.ModelViewSet):
                 timeout=api_config.timeout
             )
             
-            if response.status_code != 200:
-                return Response({
-                    'code': response.status_code,
-                    'message': f'查询失败: {response.text}',
-                    'data': None
-                }, status=status.HTTP_400_BAD_REQUEST)
-            
-            result = response.json()
+            # 解析响应（无论状态码，先尝试解析 JSON）
+            try:
+                result = response.json()
+            except Exception:
+                result = None
 
-            # 检查是否成功；如果激活接口返回"已被使用"，回退到 query_url 查询
-            if not result.get('success', False):
-                error_msg = str(result.get('error', '') or result.get('message', '') or 'API 返回失败')
-                # 如果是 redeem_url 返回已被使用，且有 query_url 可用，则回退查询
+            # 判断激活是否成功：HTTP 200 且 success=True
+            redeem_ok = response.status_code == 200 and isinstance(result, dict) and result.get('success', False)
+
+            # 激活失败时，回退到 query_url 查询（卡密可能已被激活过，query 仍可返回卡数据）
+            if not redeem_ok:
+                error_msg = ''
+                if isinstance(result, dict):
+                    error_msg = str(result.get('error', '') or result.get('message', '') or '')
+                if not error_msg:
+                    error_msg = f'HTTP {response.status_code}'
+
                 query_url = api_config.query_url
                 if query_url and api_url != query_url:
+                    logger.info(f'Redeem 失败({error_msg})，回退到 query_url 查询: {query_url}')
                     try:
                         query_body = {'key_id': key_id}
                         if api_config.request_body_template:
@@ -248,6 +253,7 @@ class CardViewSet(viewsets.ModelViewSet):
                             query_result = query_resp.json()
                             if query_result.get('success', False) and query_result.get('card'):
                                 result = query_result
+                                redeem_ok = True
                             else:
                                 return Response({
                                     'code': 400,
