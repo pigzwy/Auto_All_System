@@ -282,6 +282,55 @@ class GoogleAccountViewSet(viewsets.ModelViewSet):
         """只返回当前用户的账号"""
         queryset = GoogleAccount.objects.filter(owner_user=self.request.user)
 
+        login_failed_q = (
+            Q(status__in=["locked", "disabled"])
+            | Q(notes__icontains="机器人验证")
+            | Q(notes__icontains="验证码")
+            | Q(notes__icontains="登录失败")
+        )
+        logged_once_q = (
+            Q(last_login_at__isnull=False)
+            | Q(
+                status__in=[
+                    "logged_in",
+                    "link_ready",
+                    "verified",
+                    "subscribed",
+                    "ineligible",
+                    "locked",
+                    "disabled",
+                ]
+            )
+            | Q(
+                metadata__google_one_status__in=[
+                    "logged_in",
+                    "opened",
+                    "link_ready",
+                    "verified",
+                    "subscribed",
+                    "ineligible",
+                ]
+            )
+            | (Q(sheerid_link__isnull=False) & ~Q(sheerid_link=""))
+            | Q(sheerid_verified=True)
+            | Q(card_bound=True)
+            | Q(gemini_status="active")
+            | login_failed_q
+        )
+        student_qualified_q = (
+            Q(sheerid_verified=True)
+            | Q(metadata__google_one_status__in=["link_ready", "verified", "subscribed"])
+            | Q(status__in=["link_ready", "verified", "subscribed"])
+        )
+        student_unqualified_q = Q(metadata__google_one_status="ineligible") | Q(
+            status="ineligible"
+        )
+        subscription_completed_q = (
+            Q(gemini_status="active")
+            | Q(metadata__google_one_status="subscribed")
+            | Q(status="subscribed")
+        )
+
         # 过滤状态
         status_filter = self.request.query_params.get("status")
         if status_filter:
@@ -310,15 +359,30 @@ class GoogleAccountViewSet(viewsets.ModelViewSet):
         type_tag = self.request.query_params.get(
             "type_tag"
         ) or self.request.query_params.get("type")
-        login_result = (self.request.query_params.get("login_result") or "").strip().lower()
-        if type_tag:
-            login_failed_q = (
-                Q(status__in=["locked", "disabled"])
-                | Q(notes__icontains="机器人验证")
-                | Q(notes__icontains="验证码")
-                | Q(notes__icontains="登录失败")
-            )
+        login_result = (
+            self.request.query_params.get("login_result") or ""
+        ).strip().lower()
+        login_state = (
+            self.request.query_params.get("login_state")
+            or self.request.query_params.get("login_status")
+            or ""
+        ).strip().lower()
+        student_qualification = (
+            self.request.query_params.get("student_qualification")
+            or self.request.query_params.get("student_status")
+            or ""
+        ).strip().lower()
+        subscription_state = (
+            self.request.query_params.get("subscription_state")
+            or self.request.query_params.get("subscription_status")
+            or ""
+        ).strip().lower()
 
+        effective_login_state = login_state
+        if not effective_login_state and type_tag == "logged_in":
+            effective_login_state = login_result
+
+        if type_tag:
             if type_tag == "ineligible":
                 queryset = queryset.filter(
                     Q(metadata__google_one_status="ineligible") | Q(status="ineligible")
@@ -333,11 +397,7 @@ class GoogleAccountViewSet(viewsets.ModelViewSet):
                     )
                 )
             elif type_tag == "success":
-                queryset = queryset.filter(
-                    Q(gemini_status="active")
-                    | Q(metadata__google_one_status="subscribed")
-                    | Q(status="subscribed")
-                )
+                queryset = queryset.filter(subscription_completed_q)
             elif type_tag == "other":
                 # other: 排除已知类型
                 queryset = queryset.exclude(
@@ -351,9 +411,7 @@ class GoogleAccountViewSet(viewsets.ModelViewSet):
                             | Q(status="verified")
                         )
                     )
-                    | Q(gemini_status="active")
-                    | Q(metadata__google_one_status="subscribed")
-                    | Q(status="subscribed")
+                    | subscription_completed_q
                 )
             # === 主线流程状态筛选 ===
             elif type_tag in ["pending", "unopened"]:
@@ -368,41 +426,7 @@ class GoogleAccountViewSet(viewsets.ModelViewSet):
             elif type_tag == "logged_in":
                 # 登录账号（宽口径）：只要“登录过”都算，包含登录失败与后续阶段账号。
                 # 业务约定：不再把 logged_in 视为“中间阶段”，而是“曾登录过”。
-                logged_once_q = (
-                    Q(last_login_at__isnull=False)
-                    | Q(
-                        status__in=[
-                            "logged_in",
-                            "link_ready",
-                            "verified",
-                            "subscribed",
-                            "ineligible",
-                            "locked",
-                            "disabled",
-                        ]
-                    )
-                    | Q(
-                        metadata__google_one_status__in=[
-                            "logged_in",
-                            "opened",
-                            "link_ready",
-                            "verified",
-                            "subscribed",
-                            "ineligible",
-                        ]
-                    )
-                    | (Q(sheerid_link__isnull=False) & ~Q(sheerid_link=""))
-                    | Q(sheerid_verified=True)
-                    | Q(card_bound=True)
-                    | Q(gemini_status="active")
-                    | login_failed_q
-                )
-                if login_result == "success":
-                    queryset = queryset.filter(logged_once_q & ~login_failed_q)
-                elif login_result == "failed":
-                    queryset = queryset.filter(logged_once_q & login_failed_q)
-                else:
-                    queryset = queryset.filter(logged_once_q)
+                queryset = queryset.filter(logged_once_q)
             elif type_tag == "link_ready":
                 # 已检测/链接就绪：严格按进度语义，仅保留 link_ready 阶段账号。
                 queryset = queryset.filter(
@@ -429,11 +453,7 @@ class GoogleAccountViewSet(viewsets.ModelViewSet):
                 )
             elif type_tag == "subscribed":
                 # 已订阅/完成：gemini_status=active 或 google_one_status=subscribed
-                queryset = queryset.filter(
-                    Q(gemini_status="active")
-                    | Q(metadata__google_one_status="subscribed")
-                    | Q(status="subscribed")
-                )
+                queryset = queryset.filter(subscription_completed_q)
             elif type_tag == "login_failed":
                 # 登录失败：status=locked/disabled 或 notes 包含失败关键词
                 queryset = queryset.filter(login_failed_q)
@@ -449,6 +469,28 @@ class GoogleAccountViewSet(viewsets.ModelViewSet):
                     | Q(notes__icontains="绑卡失败")
                     | Q(notes__icontains="绑卡过程出错")
                 )
+
+        if student_qualification in ["qualified", "yes", "eligible", "true", "1"]:
+            queryset = queryset.filter(student_qualified_q)
+        elif student_qualification in ["unqualified", "no", "ineligible", "false", "0"]:
+            queryset = queryset.filter(student_unqualified_q)
+
+        if effective_login_state in ["success", "ok", "passed"]:
+            queryset = queryset.filter(logged_once_q & ~login_failed_q)
+        elif effective_login_state in ["failed", "fail", "error"]:
+            queryset = queryset.filter(logged_once_q & login_failed_q)
+
+        if subscription_state in ["completed", "subscribed", "yes", "true", "1"]:
+            queryset = queryset.filter(subscription_completed_q)
+        elif subscription_state in [
+            "uncompleted",
+            "pending",
+            "not_subscribed",
+            "no",
+            "false",
+            "0",
+        ]:
+            queryset = queryset.exclude(subscription_completed_q)
 
         return queryset.order_by("-created_at")
 

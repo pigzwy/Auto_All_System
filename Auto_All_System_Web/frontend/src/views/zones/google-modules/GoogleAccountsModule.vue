@@ -113,17 +113,44 @@
           </Select>
 
           <Select
-            v-if="filterType === 'logged_in'"
+            :model-value="filterStudentQualification"
+            @update:modelValue="(v) => onFilterStudentQualificationChange(v)"
+          >
+            <SelectTrigger class="h-9 w-40">
+              <SelectValue placeholder="学生资格" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">学生资格：全部</SelectItem>
+              <SelectItem value="qualified">有学生资格</SelectItem>
+              <SelectItem value="unqualified">无学生资格</SelectItem>
+            </SelectContent>
+          </Select>
+
+          <Select
             :model-value="filterLoginResult"
             @update:modelValue="(v) => onFilterLoginResultChange(v)"
           >
-            <SelectTrigger class="h-9 w-32">
+            <SelectTrigger class="h-9 w-36">
               <SelectValue placeholder="登录结果" />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="all">全部结果</SelectItem>
+              <SelectItem value="all">登录结果：全部</SelectItem>
               <SelectItem value="success">登录成功</SelectItem>
               <SelectItem value="failed">登录失败</SelectItem>
+            </SelectContent>
+          </Select>
+
+          <Select
+            :model-value="filterSubscriptionState"
+            @update:modelValue="(v) => onFilterSubscriptionStateChange(v)"
+          >
+            <SelectTrigger class="h-9 w-40">
+              <SelectValue placeholder="订阅状态" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">订阅状态：全部</SelectItem>
+              <SelectItem value="completed">完成订阅</SelectItem>
+              <SelectItem value="uncompleted">未完成订阅</SelectItem>
             </SelectContent>
           </Select>
 
@@ -163,13 +190,43 @@
                     @update:modelValue="onToggleAllOnPage"
                   />
                 </TableHead>
-                <TableHead class="w-20">ID</TableHead>
-                <TableHead class="min-w-[260px]">邮箱</TableHead>
-                <TableHead class="min-w-[320px]">状态</TableHead>
-                <TableHead class="w-24">n-2fa</TableHead>
+                <TableHead class="w-20">
+                  <button type="button" class="inline-flex items-center gap-1 text-left" @click="toggleSort('id')">
+                    ID
+                    <span class="text-xs text-muted-foreground">{{ getSortIndicator('id') }}</span>
+                  </button>
+                </TableHead>
+                <TableHead class="min-w-[260px]">
+                  <button type="button" class="inline-flex items-center gap-1 text-left" @click="toggleSort('email')">
+                    邮箱
+                    <span class="text-xs text-muted-foreground">{{ getSortIndicator('email') }}</span>
+                  </button>
+                </TableHead>
+                <TableHead class="min-w-[320px]">
+                  <button type="button" class="inline-flex items-center gap-1 text-left" @click="toggleSort('status')">
+                    状态
+                    <span class="text-xs text-muted-foreground">{{ getSortIndicator('status') }}</span>
+                  </button>
+                </TableHead>
+                <TableHead class="w-24">
+                  <button type="button" class="inline-flex items-center gap-1 text-left" @click="toggleSort('n2fa')">
+                    n-2fa
+                    <span class="text-xs text-muted-foreground">{{ getSortIndicator('n2fa') }}</span>
+                  </button>
+                </TableHead>
                 <TableHead class="w-28">环境</TableHead>
-                <TableHead class="w-28">分组</TableHead>
-                <TableHead class="w-44">创建时间</TableHead>
+                <TableHead class="w-28">
+                  <button type="button" class="inline-flex items-center gap-1 text-left" @click="toggleSort('group_name')">
+                    分组
+                    <span class="text-xs text-muted-foreground">{{ getSortIndicator('group_name') }}</span>
+                  </button>
+                </TableHead>
+                <TableHead class="w-44">
+                  <button type="button" class="inline-flex items-center gap-1 text-left" @click="toggleSort('created_at')">
+                    创建时间
+                    <span class="text-xs text-muted-foreground">{{ getSortIndicator('created_at') }}</span>
+                  </button>
+                </TableHead>
                 <TableHead class="min-w-[220px]">备注</TableHead>
                 <TableHead class="w-28 text-right">操作</TableHead>
               </TableRow>
@@ -193,7 +250,7 @@
 
               <TableRow 
                 v-else 
-                v-for="row in accounts" 
+                v-for="row in sortedAccounts" 
                 :key="row.id" 
                 class="cursor-pointer transition-colors"
                 :class="isRowSelected(row) ? 'bg-primary/10 hover:bg-primary/15' : 'hover:bg-muted/30'"
@@ -1495,11 +1552,18 @@ const showDetailPassword = ref(false)
 const selectedAccount = ref<GoogleAccount | null>(null)
 const importText = ref('')
 const filterType = ref('all')
+const filterStudentQualification = ref('all')
 const filterLoginResult = ref('all')
+const filterSubscriptionState = ref('all')
 const filterGroup = ref('all')
 const filterEmail = ref('')
 const groupList = ref<Array<{ id: string; name: string; account_count: number }>>([])
 const selectedAccounts = ref<GoogleAccount[]>([])
+type AccountSortKey = 'id' | 'email' | 'status' | 'n2fa' | 'group_name' | 'created_at'
+const sortKey = ref<AccountSortKey>('created_at')
+const sortOrder = ref<'asc' | 'desc'>('desc')
+const ACCOUNT_SORT_STORAGE_KEY = 'google_accounts_module_sort_v1'
+const ACCOUNT_SORT_KEYS: AccountSortKey[] = ['id', 'email', 'status', 'n2fa', 'group_name', 'created_at']
 let filterEmailDebounceTimer: number | null = null
 
 const totalPages = computed(() => {
@@ -1509,6 +1573,112 @@ const totalPages = computed(() => {
 })
 
 const selectedIds = computed(() => new Set(selectedAccounts.value.map(a => a.id)))
+
+const isAccountSortKey = (value: string): value is AccountSortKey => {
+  return ACCOUNT_SORT_KEYS.includes(value as AccountSortKey)
+}
+
+const loadSortPreference = () => {
+  if (typeof window === 'undefined') return
+
+  try {
+    const raw = window.localStorage.getItem(ACCOUNT_SORT_STORAGE_KEY)
+    if (!raw) return
+
+    const parsed = JSON.parse(raw) as { key?: string; order?: string }
+    if (parsed?.key && isAccountSortKey(parsed.key)) {
+      sortKey.value = parsed.key
+    }
+    if (parsed?.order === 'asc' || parsed?.order === 'desc') {
+      sortOrder.value = parsed.order
+    }
+  } catch {
+    // ignore
+  }
+}
+
+const saveSortPreference = () => {
+  if (typeof window === 'undefined') return
+
+  try {
+    window.localStorage.setItem(
+      ACCOUNT_SORT_STORAGE_KEY,
+      JSON.stringify({ key: sortKey.value, order: sortOrder.value })
+    )
+  } catch {
+    // ignore
+  }
+}
+
+const getSortIndicator = (key: AccountSortKey) => {
+  if (sortKey.value !== key) return '↕'
+  return sortOrder.value === 'asc' ? '↑' : '↓'
+}
+
+const toggleSort = (key: AccountSortKey) => {
+  if (sortKey.value === key) {
+    sortOrder.value = sortOrder.value === 'asc' ? 'desc' : 'asc'
+    return
+  }
+
+  sortKey.value = key
+  sortOrder.value = key === 'created_at' || key === 'id' || key === 'n2fa' ? 'desc' : 'asc'
+}
+
+const get2faWeight = (account: GoogleAccount) => {
+  const has2fa = Boolean((account.new_2fa_display || account.new_2fa || account.two_fa || '').trim())
+  const updatedAt = Date.parse(account.new_2fa_updated_at || '') || 0
+  return { has2fa: has2fa ? 1 : 0, updatedAt }
+}
+
+const sortedAccounts = computed(() => {
+  const list = [...accounts.value]
+  const direction = sortOrder.value === 'asc' ? 1 : -1
+
+  return list.sort((a, b) => {
+    if (sortKey.value === 'n2fa') {
+      const a2fa = get2faWeight(a)
+      const b2fa = get2faWeight(b)
+      if (a2fa.has2fa !== b2fa.has2fa) {
+        return (a2fa.has2fa - b2fa.has2fa) * direction
+      }
+      if (a2fa.updatedAt !== b2fa.updatedAt) {
+        return (a2fa.updatedAt - b2fa.updatedAt) * direction
+      }
+      return (a.id - b.id) * direction
+    }
+
+    if (sortKey.value === 'id') {
+      return ((a.id || 0) - (b.id || 0)) * direction
+    }
+
+    if (sortKey.value === 'created_at') {
+      const at = Date.parse(a.created_at || '') || 0
+      const bt = Date.parse(b.created_at || '') || 0
+      return (at - bt) * direction
+    }
+
+    if (sortKey.value === 'status') {
+      const av = String(a.type_display || a.type_tag || a.status_display || a.status || '').toLowerCase()
+      const bv = String(b.type_display || b.type_tag || b.status_display || b.status || '').toLowerCase()
+      return av.localeCompare(bv) * direction
+    }
+
+    if (sortKey.value === 'group_name') {
+      const av = String(a.group_name || '').toLowerCase()
+      const bv = String(b.group_name || '').toLowerCase()
+      return av.localeCompare(bv) * direction
+    }
+
+    const av = String(a.email || '').toLowerCase()
+    const bv = String(b.email || '').toLowerCase()
+    return av.localeCompare(bv) * direction
+  })
+})
+
+watch([sortKey, sortOrder], () => {
+  saveSortPreference()
+})
 
 // 账号运行态（用于列表“运行中”指示）
 const runningAccountCounts = reactive(new Map<number, number>())
@@ -1696,17 +1866,17 @@ const isRowSelected = (row: GoogleAccount) => {
 }
 
 const allSelectedOnPage = computed(() => {
-  return accounts.value.length > 0 && accounts.value.every(a => selectedIds.value.has(a.id))
+  return sortedAccounts.value.length > 0 && sortedAccounts.value.every(a => selectedIds.value.has(a.id))
 })
 
 const someSelectedOnPage = computed(() => {
-  const any = accounts.value.some(a => selectedIds.value.has(a.id))
+  const any = sortedAccounts.value.some(a => selectedIds.value.has(a.id))
   return any && !allSelectedOnPage.value
 })
 
 const onToggleAllOnPage = (checked: boolean | 'indeterminate') => {
   const isChecked = checked === true
-  const idsOnPage = new Set(accounts.value.map(a => a.id))
+  const idsOnPage = new Set(sortedAccounts.value.map(a => a.id))
 
   if (isChecked) {
     const merged: GoogleAccount[] = []
@@ -1717,7 +1887,7 @@ const onToggleAllOnPage = (checked: boolean | 'indeterminate') => {
         seen.add(a.id)
       }
     }
-    for (const a of accounts.value) {
+    for (const a of sortedAccounts.value) {
       if (!seen.has(a.id)) {
         merged.push(a)
         seen.add(a.id)
@@ -2290,9 +2460,13 @@ const normalizeSelectValue = (v: unknown, fallback: string) => {
 
 const onFilterTypeChange = async (v: unknown) => {
   filterType.value = normalizeSelectValue(v, 'all')
-  if (filterType.value !== 'logged_in') {
-    filterLoginResult.value = 'all'
-  }
+  currentPage.value = 1
+  selectedAccounts.value = []
+  await fetchAccounts()
+}
+
+const onFilterStudentQualificationChange = async (v: unknown) => {
+  filterStudentQualification.value = normalizeSelectValue(v, 'all')
   currentPage.value = 1
   selectedAccounts.value = []
   await fetchAccounts()
@@ -2300,6 +2474,13 @@ const onFilterTypeChange = async (v: unknown) => {
 
 const onFilterLoginResultChange = async (v: unknown) => {
   filterLoginResult.value = normalizeSelectValue(v, 'all')
+  currentPage.value = 1
+  selectedAccounts.value = []
+  await fetchAccounts()
+}
+
+const onFilterSubscriptionStateChange = async (v: unknown) => {
+  filterSubscriptionState.value = normalizeSelectValue(v, 'all')
   currentPage.value = 1
   selectedAccounts.value = []
   await fetchAccounts()
@@ -2335,8 +2516,17 @@ const fetchAccounts = async () => {
     if (filterType.value && filterType.value !== 'all') {
       params.type_tag = filterType.value
     }
-    if (filterType.value === 'logged_in' && filterLoginResult.value !== 'all') {
-      params.login_result = filterLoginResult.value
+    if (filterStudentQualification.value !== 'all') {
+      params.student_qualification = filterStudentQualification.value
+    }
+    if (filterLoginResult.value !== 'all') {
+      params.login_state = filterLoginResult.value
+      if (filterType.value === 'logged_in') {
+        params.login_result = filterLoginResult.value
+      }
+    }
+    if (filterSubscriptionState.value !== 'all') {
+      params.subscription_state = filterSubscriptionState.value
     }
     if (filterGroup.value && filterGroup.value !== 'all') {
       if (filterGroup.value === 'ungrouped') {
@@ -3444,6 +3634,7 @@ const handleSubscriptionCommandEvent = (e: Event) => { handleSubscriptionCommand
 const handleBulkDeleteEvent = () => { handleBulkDelete() }
 
 onMounted(() => {
+  loadSortPreference()
   fetchAccounts()
   fetchGroups()
 
