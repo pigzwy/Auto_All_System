@@ -224,6 +224,13 @@ batch_process_task (入口)
 3. 通过 `playwright.chromium.connect_over_cdp(ws_endpoint)` 连接
 4. 任务完成后 `GeekezBrowserAPI().close_profile()` 关闭
 
+**风控指纹说明**：
+- 首次创建 Profile 时，系统会调用 `generate_fingerprint()` 生成随机指纹参数（屏幕分辨率、CPU/内存、Canvas/Audio 噪声等）
+- 后续复用 Profile 时，保持原有指纹不变，只更新 proxy（避免风控检测到"同一浏览器频繁变化"）
+- 启动参数中会自动注入 `--disable-blink-features=AutomationControlled` 隐藏自动化特征
+
+> 详细指纹参数说明见：[11-GeekezBrowser API 变更适配说明](./docs/11-GeekezBrowser_API_变更适配说明.md#风控指纹参数说明)
+
 ### resume_mode（续跑机制）
 
 one_click 默认开启 `resume_mode`：根据账号当前状态自动跳过已完成步骤：

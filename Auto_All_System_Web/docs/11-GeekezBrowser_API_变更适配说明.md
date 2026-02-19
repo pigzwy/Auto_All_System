@@ -1,6 +1,6 @@
 # GeekezBrowser API 变更适配说明
 
-最后更新：2026-01-27
+最后更新：2026-02-18
 
 本文档用于记录 GeekezBrowser（GeekezBrowser / GeekezBrowser 上游）控制 API 的关键变更点，并说明对 Auto All System（Google 业务插件）的影响与适配建议。
 
@@ -154,7 +154,7 @@ Token 是否必须？
 
 ## 兼容模式（本项目实现）
 
-说明：为了同时兼容新旧 GeekezBrowser，Auto All System Web 后端采用“优先官方服务、失败再 fallback 文件”的策略。
+说明：为了同时兼容新旧 GeekezBrowser，Auto All System Web 后端采用"优先官方服务、失败再 fallback 文件"的策略。
 
 当前调用顺序（重点）：
 
@@ -163,6 +163,93 @@ Token 是否必须？
 - `delete_profile`：`DELETE /api/profiles/{idOrName}` → 读写本地 `profiles.json`
 - `launch_profile`：`POST /profiles/{uuid}/launch`（Control Server，返回 `wsEndpoint`）
 - `stop_profile/close_profile`：`POST /profiles/{uuid}/stop` → `POST /api/profiles/{idOrName}/stop` → `POST /profiles/{id}/close`
+
+---
+
+## 风控指纹参数说明
+
+### 指纹生成逻辑
+
+创建新 Profile 时，系统会调用 `generate_fingerprint()` 生成完整的浏览器指纹配置，用于规避风控检测。
+
+**代码位置**：`backend/apps/integrations/geekez/api.py` → `generate_fingerprint()`
+
+### 指纹参数详解
+
+| 参数 | 类型 | 说明 | 示例值 |
+|------|------|------|--------|
+| `platform` | string | 操作系统平台 | `Win32`, `MacIntel`, `Linux x86_64` |
+| `screen` | object | 屏幕分辨率 | `{"width": 1920, "height": 1080}` |
+| `window` | object | 窗口大小 | `{"width": 1920, "height": 1080}` |
+| `hardwareConcurrency` | int | CPU 核心数 | `4`, `8`, `12`, `16` |
+| `deviceMemory` | int | 设备内存 GB | `2`, `4`, `8` |
+| `canvasNoise` | object | Canvas 指纹噪声 | `{"r": 3, "g": -2, "b": 5, "a": 1}` |
+| `audioNoise` | float | Audio 指纹噪声 | `0.000001` ~ `0.000002` |
+| `noiseSeed` | int | 噪声种子 | `0` ~ `9999999` |
+| `timezone` | string | 时区（IANA 或 Auto） | `Auto`, `Asia/Shanghai` |
+| `language` | string | 浏览器语言 | `auto`, `en-US` |
+| `city` | string | 城市名（UI 显示用） | `Tokyo` |
+| `geolocation` | object | 地理坐标 | `{"latitude": 35.68, "longitude": 139.69, "accuracy": 100}` |
+| `languages` | array | 语言列表 | `["en-US", "en"]` |
+
+### 随机池配置
+
+```python
+# 常用分辨率池
+_RESOLUTIONS = [
+    (1920, 1080), (2560, 1440), (1366, 768),
+    (1536, 864), (1440, 900),
+]
+
+# 常用 Windows User-Agent 池
+_USER_AGENTS = [
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 ...",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 ...",
+    ...
+]
+```
+
+### 指纹复用逻辑（重要）
+
+**每次创建环境都会生成新指纹吗？答案是：不一定。**
+
+| 场景 | 行为 |
+|------|------|
+| **Profile 不存在** | ✅ 每次调用 `generate_fingerprint()` 生成新随机指纹 |
+| **Profile 已存在** | ❌ 复用原有指纹，**只更新 proxy** |
+
+关键代码逻辑（`create_or_update_profile`）：
+
+```python
+existing = self.get_profile_by_name(name)
+if existing:
+    # 已存在: 只更新 proxy，保持原有指纹不变
+    if proxy is not None:
+        self._api_request_json("PUT", f"/api/profiles/{id}", json_body={"proxyStr": proxy})
+    return existing  # 直接返回，不生成新指纹
+
+# 创建新 Profile — 才调用 generate_fingerprint()
+fp = fingerprint or generate_fingerprint()
+```
+
+**为什么这样设计？**
+- 风控系统会检测"同一浏览器指纹频繁变化"
+- 复用指纹可以降低被标记为机器人的风险
+- 只有首次创建时才需要随机指纹参数
+
+### 启动参数
+
+创建 Profile 时还会设置额外的启动参数：
+
+```python
+"startupArgs": [
+    "--disable-blink-features=AutomationControlled",
+]
+```
+
+这个参数用于隐藏 `navigator.webdriver` 等自动化特征。
+
+---
 
 ## 部署/配置建议
 

@@ -325,10 +325,26 @@ class GoogleAccountViewSet(viewsets.ModelViewSet):
         student_unqualified_q = Q(metadata__google_one_status="ineligible") | Q(
             status="ineligible"
         )
+        verify_failed_q = (
+            Q(notes__icontains="学生验证失败")
+            | Q(notes__icontains="学生资格不符合")
+            | Q(notes__icontains="账号不符合学生优惠资格")
+        )
+        bindcard_failed_q = (
+            Q(notes__icontains="订阅失败")
+            | Q(notes__icontains="绑卡失败")
+            | Q(notes__icontains="绑卡过程出错")
+        )
         subscription_completed_q = (
             Q(gemini_status="active")
             | Q(metadata__google_one_status="subscribed")
             | Q(status="subscribed")
+        )
+        subscription_completed_strict_q = (
+            subscription_completed_q
+            & ~student_unqualified_q
+            & ~verify_failed_q
+            & ~bindcard_failed_q
         )
 
         # 过滤状态
@@ -397,7 +413,7 @@ class GoogleAccountViewSet(viewsets.ModelViewSet):
                     )
                 )
             elif type_tag == "success":
-                queryset = queryset.filter(subscription_completed_q)
+                queryset = queryset.filter(subscription_completed_strict_q)
             elif type_tag == "other":
                 # other: 排除已知类型
                 queryset = queryset.exclude(
@@ -453,22 +469,16 @@ class GoogleAccountViewSet(viewsets.ModelViewSet):
                 )
             elif type_tag == "subscribed":
                 # 已订阅/完成：gemini_status=active 或 google_one_status=subscribed
-                queryset = queryset.filter(subscription_completed_q)
+                queryset = queryset.filter(subscription_completed_strict_q)
             elif type_tag == "login_failed":
                 # 登录失败：status=locked/disabled 或 notes 包含失败关键词
                 queryset = queryset.filter(login_failed_q)
             elif type_tag == "verify_failed":
                 # 验证失败
-                queryset = queryset.filter(
-                    Q(notes__icontains="学生验证失败")
-                )
+                queryset = queryset.filter(verify_failed_q)
             elif type_tag == "bindcard_failed":
                 # 绑卡失败
-                queryset = queryset.filter(
-                    Q(notes__icontains="订阅失败")
-                    | Q(notes__icontains="绑卡失败")
-                    | Q(notes__icontains="绑卡过程出错")
-                )
+                queryset = queryset.filter(bindcard_failed_q)
 
         if student_qualification in ["qualified", "yes", "eligible", "true", "1"]:
             queryset = queryset.filter(student_qualified_q)
@@ -481,7 +491,7 @@ class GoogleAccountViewSet(viewsets.ModelViewSet):
             queryset = queryset.filter(logged_once_q & login_failed_q)
 
         if subscription_state in ["completed", "subscribed", "yes", "true", "1"]:
-            queryset = queryset.filter(subscription_completed_q)
+            queryset = queryset.filter(subscription_completed_strict_q)
         elif subscription_state in [
             "uncompleted",
             "pending",
@@ -490,7 +500,7 @@ class GoogleAccountViewSet(viewsets.ModelViewSet):
             "false",
             "0",
         ]:
-            queryset = queryset.exclude(subscription_completed_q)
+            queryset = queryset.exclude(subscription_completed_strict_q)
 
         return queryset.order_by("-created_at")
 
