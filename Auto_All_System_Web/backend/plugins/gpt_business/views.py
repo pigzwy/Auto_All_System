@@ -862,6 +862,10 @@ class AccountsViewSet(ViewSet):
             if str(acc.get("type")) == "mother":
                 active_task = active_tasks_by_mother.get(str(acc.get("id") or "").strip())
 
+            # 只返回是否存在可用 session，避免将 accessToken 暴露给前端
+            session_data = acc.get("session")
+            has_session = bool(isinstance(session_data, dict) and str(session_data.get("accessToken") or "").strip())
+
             return {
                 **acc,
                 "geekez_profile_exists": has_profile,
@@ -873,6 +877,7 @@ class AccountsViewSet(ViewSet):
                 "team_join_status": team_join_status,
                 **({"active_task": active_task} if active_task else {}),
                 **({"geekez_env": geekez_env} if isinstance(geekez_env, dict) else {}),
+                "has_session": has_session,
             }
 
         normalized_mothers: list[dict[str, Any]] = []
@@ -1120,6 +1125,13 @@ class AccountsViewSet(ViewSet):
 
     @action(detail=True, methods=["post"], url_path="launch_geekez")
     def launch_geekez(self, request, pk=None):
+        """
+        启动浏览器环境
+        
+        支持两种模式:
+        - geekez (默认): 启动远程 GeekezBrowser
+        - local: 本地浏览器无痕模式，直接打开目标 URL
+        """
         settings = get_settings()
         acc_raw = find_account(settings, str(pk))
         if not isinstance(acc_raw, dict):
@@ -1131,6 +1143,33 @@ class AccountsViewSet(ViewSet):
         if not email:
             return Response({"detail": "Email missing"}, status=status.HTTP_400_BAD_REQUEST)
 
+        # 获取启动模式，默认为 geekez
+        launch_type = str(request.data.get("launch_type", "geekez")).lower()
+        
+        # 本地无痕模式：直接返回 URL 让前端打开
+        if launch_type == "local":
+            # 确定目标 URL（根据账号类型）
+            account_type = str(acc.get("type", "mother"))
+            if account_type == "mother":
+                # 母号直接打开 ChatGPT
+                target_url = "https://chatgpt.com/"
+            else:
+                # 子号打开团队邀请链接或 ChatGPT
+                team_account_id = acc.get("team_account_id")
+                if team_account_id:
+                    target_url = f"https://chatgpt.com/g/{team_account_id}"
+                else:
+                    target_url = "https://chatgpt.com/"
+            
+            return Response({
+                "success": True,
+                "launch_type": "local",
+                "browser_type": "local",
+                "target_url": target_url,
+                "email": email,
+            })
+
+        # 远程 GeekezBrowser 模式
         from apps.integrations.browser_base import BrowserType, get_browser_manager
 
         manager = get_browser_manager()
@@ -1555,6 +1594,25 @@ class AccountsViewSet(ViewSet):
             })
 
         return Response({"message": "已启动：批量自动入池", "results": results})
+
+    @action(detail=True, methods=["get"], url_path="session")
+    def session(self, request, pk=None):
+        settings = get_settings()
+        acc = find_account(settings, str(pk))
+        if not isinstance(acc, dict):
+            return Response({"detail": "Account not found"}, status=status.HTTP_404_NOT_FOUND)
+
+        session_data = acc.get("session")
+        has_session = bool(isinstance(session_data, dict) and str(session_data.get("accessToken") or "").strip())
+
+        return Response(
+            {
+                "id": str(acc.get("id") or ""),
+                "has_session": has_session,
+                "session": session_data if has_session else None,
+            },
+            headers={"Cache-Control": "no-store"},
+        )
 
 
 class CeleryTaskViewSet(ViewSet):

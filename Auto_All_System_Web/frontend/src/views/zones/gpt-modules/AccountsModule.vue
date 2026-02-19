@@ -238,6 +238,16 @@
                       <Button
                         variant="ghost"
                         size="xs"
+                        class="gap-1 text-indigo-600 hover:text-indigo-700 hover:bg-indigo-50 dark:text-indigo-400 dark:hover:bg-indigo-950"
+                        title="本地无痕模式"
+                        @click="launchLocal(mother)"
+                      >
+                        <Glasses class="h-3.5 w-3.5" />
+                        无痕
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="xs"
                         class="gap-1 text-orange-600 hover:text-orange-700 hover:bg-orange-50 dark:text-orange-400 dark:hover:bg-orange-950"
                         @click="openCreateChild(mother)"
                       >
@@ -324,6 +334,9 @@
                                 <div class="flex items-center justify-end gap-1">
                                   <Button variant="ghost" size="xs" @click.stop="launchGeekez(child)">
                                     {{ getGeekezActionLabel(child) }}
+                                  </Button>
+                                  <Button variant="ghost" size="xs" class="text-indigo-600 hover:text-indigo-700" title="本地无痕模式" @click.stop="launchLocal(child)">
+                                    <Glasses class="h-3.5 w-3.5" />
                                   </Button>
                                   <Button variant="ghost" size="xs" class="text-destructive hover:text-destructive" @click.stop="removeAccount(child.id)">删除</Button>
                                 </div>
@@ -684,6 +697,18 @@
               </Button>
             </div>
           </div>
+          <div class="grid gap-2">
+            <label class="text-sm font-medium text-muted-foreground">Session</label>
+            <div class="flex items-center gap-2">
+              <Button variant="outline" size="sm" :disabled="sessionLoading" @click="toggleSessionVisible">
+                {{ sessionVisible ? '隐藏 Session' : '显示 Session' }}
+              </Button>
+              <Button v-if="sessionVisible && sessionText" variant="outline" size="sm" @click="copyText(sessionText)">
+                <Copy class="h-4 w-4" />
+              </Button>
+            </div>
+            <pre v-if="sessionVisible" class="max-h-48 overflow-auto rounded bg-muted p-3 text-xs leading-5 whitespace-pre-wrap break-all">{{ sessionText || '-' }}</pre>
+          </div>
         </div>
         <DialogFooter>
           <Button variant="outline" @click="accountDetailDialogVisible = false">关闭</Button>
@@ -918,6 +943,7 @@ import {
   Copy,
   ExternalLink,
   FileText,
+  Glasses,
   Loader2,
   Monitor,
   Plus,
@@ -1428,10 +1454,46 @@ const motherDialogVisible = ref(false)
 const childDialogVisible = ref(false)
 const accountDetailDialogVisible = ref(false)
 const accountDetailData = ref<GptBusinessAccount | null>(null)
+const sessionVisible = ref(false)
+const sessionLoading = ref(false)
+const sessionText = ref('')
 
 const openAccountDetail = (account: GptBusinessAccount) => {
   accountDetailData.value = account
+  sessionVisible.value = false
+  sessionLoading.value = false
+  sessionText.value = ''
   accountDetailDialogVisible.value = true
+}
+
+const toggleSessionVisible = async () => {
+  if (sessionVisible.value) {
+    sessionVisible.value = false
+    return
+  }
+  const accountId = accountDetailData.value?.id
+  if (!accountId) return
+
+  if (sessionText.value) {
+    sessionVisible.value = true
+    return
+  }
+
+  sessionLoading.value = true
+  try {
+    const res = await gptBusinessApi.getAccountSession(accountId)
+    if (!res?.has_session || !res?.session) {
+      sessionText.value = ''
+      ElMessage.warning('当前账号暂无可用 Session')
+      return
+    }
+    sessionText.value = JSON.stringify(res.session, null, 2)
+    sessionVisible.value = true
+  } catch (e: any) {
+    ElMessage.error(e?.response?.data?.detail || e?.message || '获取 Session 失败')
+  } finally {
+    sessionLoading.value = false
+  }
 }
 
 const activeMother = ref<MotherRow | null>(null)
@@ -1643,16 +1705,16 @@ const getAccountStatusBadges = (account: any): StatusBadge[] => {
   const teamJoinStatus = String(account?.team_join_status || 'not_started')
   const poolStatus = String(account?.pool_status || 'not_started')
   const teamStatus = String(account?.team_status || 'not_started')
-
+  
   const push = (key: string, text: string, cls: string) => {
     badges.push({ key, text, class: cls })
   }
 
   const clsMap: Record<string, string> = {
     success: 'bg-emerald-100 text-emerald-700 border-emerald-200 dark:bg-emerald-900/30 dark:text-emerald-400 dark:border-emerald-800',
-    running: 'bg-sky-100 text-sky-700 border-sky-200 dark:bg-sky-900/30 dark:text-sky-400 dark:border-sky-800',
+    running: 'bg-slate-100 text-slate-500 border-slate-200 dark:bg-slate-800 dark:text-slate-400 dark:border-slate-700',
     failed: 'bg-rose-100 text-rose-700 border-rose-200 dark:bg-rose-900/30 dark:text-rose-400 dark:border-rose-800',
-    not_started: 'bg-slate-100 text-slate-600 border-slate-200 dark:bg-slate-800 dark:text-slate-400 dark:border-slate-700'
+    not_started: 'bg-slate-100 text-slate-500 border-slate-200 dark:bg-slate-800 dark:text-slate-400 dark:border-slate-700'
   }
 
   const mapStatus = (prefix: string, status: string, label: string) => {
@@ -1695,6 +1757,20 @@ const launchGeekez = async (account: GptBusinessAccount) => {
     }
   } catch (e: any) {
     ElMessage.error(e?.response?.data?.detail || e?.message || '启动失败')
+  }
+}
+
+const launchLocal = async (account: GptBusinessAccount) => {
+  try {
+    const res = await gptBusinessApi.launchLocal(account.id)
+    if (res?.success && res.target_url) {
+      window.open(res.target_url, '_blank')
+      ElMessage.success('已在浏览器中打开')
+    } else {
+      ElMessage.warning('打开失败')
+    }
+  } catch (e: any) {
+    ElMessage.error(e?.response?.data?.detail || e?.message || '打开失败')
   }
 }
 
@@ -2171,7 +2247,7 @@ const getStatusTag = (status: string) => {
   const map: Record<string, string> = {
     success: 'success',
     failed: 'danger',
-    running: 'primary',
+    running: 'info',
     pending: 'info'
   }
   return map[status] || 'info'

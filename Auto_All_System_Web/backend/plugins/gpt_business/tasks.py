@@ -14,7 +14,7 @@ import uuid
 import traceback
 from urllib.parse import unquote
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 import requests
 from celery import shared_task
@@ -975,18 +975,46 @@ def self_register_task(self, record_id: str):
         _log(f"done register_ok={register_ok} checkout_ok={checkout_ok} open_status={open_status}")
         
         now = timezone.now().isoformat()
-        patch_account(
-            mother_id,
-            {
-                "open_status": open_status,
-                "open_last_task": record_id,
-                "open_updated_at": now,
-                "register_status": "success" if register_ok else "failed",
-                "register_updated_at": now,
-                "login_status": "success" if register_ok else "failed",
-                "login_updated_at": now,
-            },
-        )
+        
+        # 保存 session 数据到账号，并校验是否具备 Team 权限
+        session_data = flow_result.get("session_data")
+        team_status = "not_started"
+        team_account_id = ""
+        account_update = {
+            "open_status": open_status,
+            "open_last_task": record_id,
+            "open_updated_at": now,
+            "register_status": "success" if register_ok else "failed",
+            "register_updated_at": now,
+            "login_status": "success" if register_ok else "failed",
+            "login_updated_at": now,
+        }
+
+        # 如果有 session_data，保存到账号中，并尝试直连验证 Team 权限
+        if isinstance(session_data, dict) and session_data:
+            account_update["session"] = session_data
+            session_token = str(session_data.get("accessToken") or "").strip()
+            _log(f"session_data saved to account: {bool(session_token)}")
+            if session_token:
+                try:
+                    team_client = ChatGPTTeamClient(timeout=20)
+                    team_account_id = team_client.fetch_account_id(session_token)
+                    if team_account_id:
+                        team_status = "success"
+                        _log(f"session team permission verified account_id={team_account_id}")
+                    else:
+                        team_status = "failed"
+                        _log("session team permission check failed: account_id empty")
+                except Exception as team_err:
+                    team_status = "failed"
+                    _log(f"session team permission check error: {team_err}")
+
+        account_update["team_status"] = team_status
+        account_update["team_updated_at"] = now
+        if team_account_id:
+            account_update["account_id"] = team_account_id
+
+        patch_account(mother_id, account_update)
 
         if used_card_id:
             _mark_card_as_used(used_card_id, mother_id, "self_register")
@@ -1335,6 +1363,14 @@ def auto_invite_task(self, record_id: str):
         if workspace_hints:
             _append_log(f"workspace hints: {workspace_hints}")
 
+        # 优先使用 session 中的 accessToken
+        session_data = mother.get("session")
+        if session_data and isinstance(session_data, dict):
+            session_access_token = session_data.get("accessToken")
+            if session_access_token:
+                token = session_access_token
+                _append_log("using accessToken from session")
+
         # NOTE: 这里必须走浏览器内的 fetch（见 chatgpt_backend_api.py）
         # 因为 Celery 容器内 requests 可能无法直连 chatgpt.com（例如 Errno 101 Network is unreachable）。
         from .services.browser_service import BrowserService
@@ -1443,112 +1479,140 @@ def auto_invite_task(self, record_id: str):
             return False
 
         invite_response: dict[str, Any] = {"success": [], "failed": [], "raw": {}}
+        invited_via_session = False
 
         if not child_emails_to_invite:
             _append_log("no pending children to invite; skip mother invite stage")
         else:
-            with BrowserService(profile_name=f"gpt_{email}") as browser:
-                _append_log(f"browser launched profile={getattr(browser, '_launched_profile_id', None)}")
-                if not browser.page:
-                    raise RuntimeError("Browser page is not available")
-
-                _shot = _make_shot(browser.page, prefix="mother_")
-
+            # 先尝试 session/token 直连邀请，失败再回退浏览器
+            if token:
                 try:
-                    browser.page.get("https://chatgpt.com/")
-                except Exception:
-                    pass
+                    team_client = ChatGPTTeamClient(timeout=40)
+                    if not account_id:
+                        _append_log("account_id missing, fetch via session request")
+                        account_id = team_client.fetch_account_id(token)
+                    if not account_id:
+                        raise RuntimeError("session invite failed: missing account_id")
 
-                # 构建验证码获取回调（母号配置了 CloudMail 时可自动处理邮箱验证）
-                _get_code_mother = None
-                try:
-                    email_cfg = _cloudmail_email_config_from_account(mother)
-                    from apps.integrations.email.services.client import CloudMailClient
-                    _mail_client_mother = CloudMailClient(
-                        api_base=str(email_cfg.get("api_base") or ""),
-                        api_token=str(email_cfg.get("api_auth") or ""),
-                        domains=list(email_cfg.get("domains") or []),
-                        default_role=str(email_cfg.get("role") or "user"),
+                    _append_log(f"session invite start count={len(child_emails_to_invite)}")
+                    invite_response = team_client.invite_emails(
+                        account_id=account_id,
+                        auth_token=token,
+                        emails=child_emails_to_invite,
                     )
-                    def _get_code_mother(email_addr: str) -> str | None:
-                        _append_log(f"等待验证码 ({email_addr})...")
-                        code = _mail_client_mother.wait_for_verification_code(
-                            to_email=email_addr,
-                            timeout=120,
-                            poll_interval=5,
-                            sender_contains=None,
-                        )
-                        _append_log("验证码已获取" if code else "验证码获取失败")
-                        return code
-                    _append_log("已配置 CloudMail 验证码回调")
-                except Exception as mail_err:
-                    _append_log(f"CloudMail 未配置或不可用: {mail_err}（如遇验证码页面将无法自动处理）")
+                    invited_via_session = True
+                    _append_log("session invite completed")
+                except Exception as invite_err:
+                    _append_log(f"session invite failed, fallback browser: {invite_err}")
 
-                if token:
-                    _append_log("reuse existing auth_token")
-                else:
-                    _append_log("auth_token missing, login via Geekez + /api/auth/session")
-                    token, _session = _ensure_access_token_via_login(
-                        page=browser.page,
-                        email=email,
-                        password=password,
-                        get_verification_code=_get_code_mother,
-                        timeout=180,
-                        log_callback=_append_log,
-                        screenshot_callback=_shot,
-                        workspace_hints=workspace_hints,
-                        require_team_workspace=True,
-                    )
+            if not invited_via_session:
+                with BrowserService(profile_name=f"gpt_{email}") as browser:
+                    _append_log(f"browser launched profile={getattr(browser, '_launched_profile_id', None)}")
+                    if not browser.page:
+                        raise RuntimeError("Browser page is not available")
 
-                if not token:
-                    raise RuntimeError("Failed to get auth_token")
+                    _shot = _make_shot(browser.page, prefix="mother_")
 
-                _append_log(f"auth_token ok len={len(token)}")
-
-                if not account_id:
-                    _append_log("account_id missing, fetch via browser /backend-api/accounts/check")
                     try:
-                        account_id = browser_fetch_account_id(
-                            browser.page,
-                            auth_token=token,
-                            timeout_sec=20,
-                            log_callback=_append_log,
+                        browser.page.get("https://chatgpt.com/")
+                    except Exception:
+                        pass
+
+                    # 构建验证码获取回调（母号配置了 CloudMail 时可自动处理邮箱验证）
+                    _get_code_mother_cb: Callable[[str], str | None] | None = None
+                    try:
+                        email_cfg = _cloudmail_email_config_from_account(mother)
+                        from apps.integrations.email.services.client import CloudMailClient
+
+                        _mail_client_mother = CloudMailClient(
+                            api_base=str(email_cfg.get("api_base") or ""),
+                            api_token=str(email_cfg.get("api_auth") or ""),
+                            domains=list(email_cfg.get("domains") or []),
+                            default_role=str(email_cfg.get("role") or "user"),
                         )
-                    except Exception as e:
-                        _append_log(f"fetch account_id failed: {e}; try relogin")
+
+                        def _get_code_mother_impl(email_addr: str) -> str | None:
+                            _append_log(f"等待验证码 ({email_addr})...")
+                            code = _mail_client_mother.wait_for_verification_code(
+                                to_email=email_addr,
+                                timeout=120,
+                                poll_interval=5,
+                                sender_contains=None,
+                            )
+                            _append_log("验证码已获取" if code else "验证码获取失败")
+                            return code
+
+                        _get_code_mother_cb = _get_code_mother_impl
+
+                        _append_log("已配置 CloudMail 验证码回调")
+                    except Exception as mail_err:
+                        _append_log(f"CloudMail 未配置或不可用: {mail_err}（如遇验证码页面将无法自动处理）")
+
+                    if token:
+                        _append_log("reuse existing auth_token")
+                    else:
+                        _append_log("auth_token missing, login via Geekez + /api/auth/session")
                         token, _session = _ensure_access_token_via_login(
                             page=browser.page,
                             email=email,
                             password=password,
-                            get_verification_code=_get_code_mother,
+                            get_verification_code=_get_code_mother_cb,
                             timeout=180,
                             log_callback=_append_log,
                             screenshot_callback=_shot,
                             workspace_hints=workspace_hints,
                             require_team_workspace=True,
                         )
-                        account_id = browser_fetch_account_id(
-                            browser.page,
-                            auth_token=token,
-                            timeout_sec=20,
-                            log_callback=_append_log,
-                        )
 
-                if account_id:
-                    _append_log(f"account_id ok {account_id}")
+                    if not token:
+                        raise RuntimeError("Failed to get auth_token")
 
-                if not account_id:
-                    raise RuntimeError("Failed to get account_id")
+                    _append_log(f"auth_token ok len={len(token)}")
 
-                _append_log(f"invite start count={len(child_emails_to_invite)}")
-                invite_response = browser_invite_emails(
-                    browser.page,
-                    account_id=account_id,
-                    auth_token=token,
-                    emails=child_emails_to_invite,
-                    timeout_sec=40,
-                    log_callback=_append_log,
-                )
+                    if not account_id:
+                        _append_log("account_id missing, fetch via browser /backend-api/accounts/check")
+                        try:
+                            account_id = browser_fetch_account_id(
+                                browser.page,
+                                auth_token=token,
+                                timeout_sec=20,
+                                log_callback=_append_log,
+                            )
+                        except Exception as e:
+                            _append_log(f"fetch account_id failed: {e}; try relogin")
+                            token, _session = _ensure_access_token_via_login(
+                                page=browser.page,
+                                email=email,
+                                password=password,
+                                get_verification_code=_get_code_mother_cb,
+                                timeout=180,
+                                log_callback=_append_log,
+                                screenshot_callback=_shot,
+                                workspace_hints=workspace_hints,
+                                require_team_workspace=True,
+                            )
+                            account_id = browser_fetch_account_id(
+                                browser.page,
+                                auth_token=token,
+                                timeout_sec=20,
+                                log_callback=_append_log,
+                            )
+
+                    if account_id:
+                        _append_log(f"account_id ok {account_id}")
+
+                    if not account_id:
+                        raise RuntimeError("Failed to get account_id")
+
+                    _append_log(f"invite start count={len(child_emails_to_invite)}")
+                    invite_response = browser_invite_emails(
+                        browser.page,
+                        account_id=account_id,
+                        auth_token=token,
+                        emails=child_emails_to_invite,
+                        timeout_sec=40,
+                        log_callback=_append_log,
+                    )
 
         success_list = invite_response.get("success") or []
         failed_list = invite_response.get("failed") or []
@@ -2127,6 +2191,12 @@ def auto_invite_task(self, record_id: str):
 
                             # 1) 登录（若不存在则注册）
                             child_token = ""
+                            child_session_raw = child.get("session")
+                            child_session_data: dict[str, Any] = child_session_raw if isinstance(child_session_raw, dict) else {}
+                            persisted_child_token = str(child_session_data.get("accessToken") or "").strip()
+                            if persisted_child_token:
+                                child_token = persisted_child_token
+                                _append_log(log_prefix + "reuse persisted session token")
 
                             def _get_code_child(_email: str) -> str | None:
                                 _append_log(log_prefix + "wait verification code start")
@@ -2151,7 +2221,7 @@ def auto_invite_task(self, record_id: str):
                                 except Exception:
                                     pass
                                 # 如果标记为已登录，则先尝试直接复用 session（避免重复跑完整登录流程）
-                                if child_login_status == "success":
+                                if (not child_token) and child_login_status == "success":
                                     _append_log(log_prefix + "skip login: login_status=success, try session")
                                     try:
                                         from .services.chatgpt_session import fetch_auth_session
@@ -2170,6 +2240,7 @@ def auto_invite_task(self, record_id: str):
                                         )
                                         if sess_token and sess_email and sess_email.lower() == child_email.lower():
                                             child_token = sess_token
+                                            child_session_data = sess_data if isinstance(sess_data, dict) else child_session_data
                                     except Exception:
                                         child_token = ""
 
@@ -2186,6 +2257,8 @@ def auto_invite_task(self, record_id: str):
                                         workspace_hints=workspace_hints,
                                         require_team_workspace=False,
                                     )
+                                    if isinstance(_sess, dict) and _sess:
+                                        child_session_data = _sess
 
                                 try:
                                     patch_account(
@@ -2235,6 +2308,8 @@ def auto_invite_task(self, record_id: str):
                                             workspace_hints=workspace_hints,
                                             require_team_workspace=False,
                                         )
+                                        if isinstance(_sess, dict) and _sess:
+                                            child_session_data = _sess
                                         register_ok = True
                                     except Exception:
                                         try:
@@ -2275,6 +2350,8 @@ def auto_invite_task(self, record_id: str):
                                 sess_token = str(sess_data.get("accessToken") or "").strip() if isinstance(sess_data, dict) else ""
                                 if not child_token and sess_token and sess_email and sess_email.lower() == child_email.lower():
                                     child_token = sess_token
+                                if isinstance(sess_data, dict) and sess_data:
+                                    child_session_data = sess_data
 
                                 if not child_token:
                                     child_token, _sess = _ensure_access_token_via_login(
@@ -2288,6 +2365,8 @@ def auto_invite_task(self, record_id: str):
                                         workspace_hints=workspace_hints,
                                         require_team_workspace=False,
                                     )
+                                    if isinstance(_sess, dict) and _sess:
+                                        child_session_data = _sess
 
                                 try:
                                     patch_account(
@@ -2382,6 +2461,12 @@ def auto_invite_task(self, record_id: str):
                                         "team_join_status": "success" if child_result.get("joined") else "failed",
                                         "team_join_task": record_id,
                                         "team_join_updated_at": timezone.now().isoformat(),
+                                        **(
+                                            {"session": child_session_data}
+                                            if isinstance(child_session_data, dict)
+                                            and str(child_session_data.get("accessToken") or "").strip()
+                                            else {}
+                                        ),
                                         **(
                                             {"team_account_id": child_result.get("team_account_id")}
                                             if child_result.get("team_account_id")
@@ -3528,7 +3613,7 @@ def team_push_task(
                 _log("未登录或 session 无效，走登录流程...")
 
                 # 构建验证码获取回调（如果母号配置了 CloudMail）
-                _get_code_cb = None
+                _get_code_cb_fn: Callable[[str], str | None] | None = None
                 try:
                     email_cfg = _cloudmail_email_config_from_account(mother)
                     from apps.integrations.email.services.client import CloudMailClient
@@ -3538,9 +3623,10 @@ def team_push_task(
                         domains=list(email_cfg.get("domains") or []),
                         default_role=str(email_cfg.get("role") or "user"),
                     )
-                    def _get_code_cb(email_addr: str) -> str | None:
+                    def _get_code_cb_impl(email_addr: str) -> str | None:
                         _log(f"等待验证码 ({email_addr})...")
                         return _mail_client.wait_for_verification_code(email_addr, timeout=120)
+                    _get_code_cb_fn = _get_code_cb_impl
                     _log("已配置 CloudMail 验证码回调")
                 except Exception as mail_err:
                     _log(f"CloudMail 未配置或不可用: {mail_err}（如遇验证码页面将无法自动处理）")
@@ -3550,7 +3636,7 @@ def team_push_task(
                         page=page,
                         email=email,
                         password=password,
-                        get_verification_code=_get_code_cb,
+                        get_verification_code=_get_code_cb_fn,
                         timeout=180,
                         log_callback=_log,
                         workspace_hints=workspace_hints,

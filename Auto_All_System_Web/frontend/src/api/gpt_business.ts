@@ -45,6 +45,8 @@ export interface GptBusinessAccount {
 
   active_task?: GptBusinessActiveTask
 
+  has_session?: boolean
+
   // 状态字段（后端 tasks 会写回；用于前端展示/跳过策略）
   open_status?: string
   register_status?: string
@@ -69,6 +71,12 @@ export interface GptBusinessAccount {
 export interface GptBusinessAccountsResponse {
   mothers: Array<GptBusinessAccount & { children: GptBusinessAccount[] }>
   email_domains: string[]
+}
+
+export interface GptBusinessAccountSessionResponse {
+  id: string
+  has_session: boolean
+  session: Record<string, any> | null
 }
 
 export type SelfRegisterCardMode = 'selected' | 'random' | 'manual'
@@ -263,8 +271,30 @@ export const gptBusinessApi = {
     ws_endpoint?: string
     pid?: number
     saved?: boolean
+    // 本地无痕模式
+    launch_type?: string
+    target_url?: string
   }> {
     return request.post(`/plugins/gpt-business/accounts/${accountId}/launch_geekez/`)
+  },
+
+  /**
+   * 本地无痕模式：直接打开目标 URL
+   */
+  launchLocal(accountId: string): Promise<{
+    success: boolean
+    launch_type?: string
+    browser_type?: string
+    target_url?: string
+    email?: string
+  }> {
+    return request.post(`/plugins/gpt-business/accounts/${accountId}/launch_geekez/`, {
+      launch_type: 'local'
+    })
+  },
+
+  getAccountSession(accountId: string): Promise<GptBusinessAccountSessionResponse> {
+    return request.get(`/plugins/gpt-business/accounts/${accountId}/session/`)
   },
 
   testS2aConnection(data: {

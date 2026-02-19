@@ -488,6 +488,74 @@ python tools/sub2api_sink_run.py \
 - [ ] 批量操作支持
 - [ ] 状态自动刷新
 
+### 6) 启动浏览器环境（支持两种模式）
+
+#### 6.1 API 接口
+- `POST /api/v1/plugins/gpt-business/accounts/{account_id}/launch_geekez/`
+
+**Request Body（可选）:**
+```json
+{
+  "launch_type": "geekez"  // 默认，远程 GeekezBrowser
+  // 或
+  "launch_type": "local"   // 本地浏览器无痕模式
+}
+```
+
+**Response（geekez 模式）:**
+```json
+{
+  "success": true,
+  "browser_type": "geekez",
+  "profile_id": "xxx",
+  "ws_endpoint": "ws://xxx",
+  "pid": 12345
+}
+```
+
+**Response（local 无痕模式）:**
+```json
+{
+  "success": true,
+  "launch_type": "local",
+  "browser_type": "local",
+  "target_url": "https://chatgpt.com/",
+  "email": "xxx@domain.com"
+}
+```
+
+#### 6.2 两种模式说明
+
+| 模式 | 说明 | 适用场景 |
+|------|------|----------|
+| GeekezBrowser（默认） | 启动远程浏览器环境，保留 Cookie 和登录状态 | 长期使用，需要保持登录状态 |
+| 本地无痕模式 | 直接用本地浏览器打开目标 URL | 临时查看，不需要登录状态 |
+
+#### 6.3 目标 URL 规则
+- **母号**: `https://chatgpt.com/`
+- **子号**: 如果有 team_account_id，则为 `https://chatgpt.com/g/{team_account_id}`，否则为 `https://chatgpt.com/`
+
+### 7) Session 优先策略（已落地）
+
+#### 7.1 安全策略
+- 账号列表接口不再返回 `session.accessToken` 明文。
+- 前端只接收 `has_session: boolean`，用于展示「有Session/无Session」。
+
+#### 7.2 开通后 Session 校验
+- 母号自动开通成功后，后端会持久化 `session` 到账号记录。
+- 同步使用 session token 请求 `GET /backend-api/accounts/check/v4-2023-04-27` 校验 Team 权限。
+- 校验成功：写回 `team_status=success` 与 `account_id`；失败：`team_status=failed`。
+
+#### 7.3 自动邀请策略
+- 母号邀请阶段优先走 session/token 直连请求：
+  - 先获取 account_id（若缺失）。
+  - 再调用 `POST /backend-api/accounts/{account_id}/invites` 发邀请。
+- 仅当直连失败时，才回退到 BrowserService 浏览器流程。
+
+#### 7.4 自动入池说明
+- 子号「入队 + 入池（S2A OAuth）」当前仍依赖浏览器授权页流程，不能完全去浏览器化。
+- 现阶段已增加子号 session 持久化与复用，减少重复登录；后续可在具备稳定后端 OAuth 直连接口后继续收敛浏览器依赖。
+
 ---
 
 ## 风险与待确认项
