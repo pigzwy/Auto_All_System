@@ -117,7 +117,9 @@ class BitBrowserAdapter(BaseBrowserAPI):
         except Exception:
             return False
 
-    def launch_profile(self, profile_id: str) -> Optional[LaunchInfo]:
+    def launch_profile(
+        self, profile_id: str, *, incognito: bool = False
+    ) -> Optional[LaunchInfo]:
         """启动浏览器 Profile"""
         try:
             result = self._api.open_browser(profile_id)

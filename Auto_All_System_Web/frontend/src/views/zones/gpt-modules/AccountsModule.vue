@@ -1763,14 +1763,14 @@ const launchGeekez = async (account: GptBusinessAccount) => {
 const launchLocal = async (account: GptBusinessAccount) => {
   try {
     const res = await gptBusinessApi.launchLocal(account.id)
-    if (res?.success && res.target_url) {
-      window.open(res.target_url, '_blank')
-      ElMessage.success('已在浏览器中打开')
-    } else {
-      ElMessage.warning('打开失败')
+    if (!res?.success) {
+      ElMessage.warning('启动失败')
+      return
     }
+    ElMessage.success('已启动 Geek 无痕模式')
+    await refresh()
   } catch (e: any) {
-    ElMessage.error(e?.response?.data?.detail || e?.message || '打开失败')
+    ElMessage.error(e?.response?.data?.detail || e?.message || '启动失败')
   }
 }
 

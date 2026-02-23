@@ -81,7 +81,9 @@ class BaseBrowserAPI(ABC):
         pass
 
     @abstractmethod
-    def launch_profile(self, profile_id: str) -> Optional[LaunchInfo]:
+    def launch_profile(
+        self, profile_id: str, *, incognito: bool = False
+    ) -> Optional[LaunchInfo]:
         """启动浏览器 Profile"""
         pass
 
@@ -144,9 +146,15 @@ class BrowserManager:
         return self.get_api(browser_type).list_profiles()
 
     def launch_profile(
-        self, profile_id: str, browser_type: Optional[BrowserType] = None
+        self,
+        profile_id: str,
+        browser_type: Optional[BrowserType] = None,
+        *,
+        incognito: bool = False,
     ) -> Optional[LaunchInfo]:
-        return self.get_api(browser_type).launch_profile(profile_id)
+        return self.get_api(browser_type).launch_profile(
+            profile_id, incognito=incognito
+        )
 
     def close_profile(
         self, profile_id: str, browser_type: Optional[BrowserType] = None

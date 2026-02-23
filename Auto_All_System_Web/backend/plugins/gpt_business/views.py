@@ -111,6 +111,15 @@ def _parse_keep_profile_on_fail(data: Any) -> bool:
     return False
 
 
+def _parse_self_register_launch_type(data: Any) -> tuple[str, str | None]:
+    launch_type = str((data or {}).get("launch_type") or "geekez").strip().lower()
+    if launch_type == "incognito":
+        launch_type = "local"
+    if launch_type not in {"geekez", "local"}:
+        return "", "launch_type must be one of: geekez, local"
+    return launch_type, None
+
+
 def _mask_secret(value: str) -> str:
     value = str(value or "")
     if not value:
@@ -141,9 +150,17 @@ def _mask_settings(settings: dict[str, Any]) -> dict[str, Any]:
 
     # 其它敏感信息
     if isinstance(masked.get("crs"), dict) and "admin_token" in masked["crs"]:
-        masked["crs"] = {**masked["crs"], "admin_token": _mask_secret(str(masked["crs"].get("admin_token") or ""))}
+        masked["crs"] = {
+            **masked["crs"],
+            "admin_token": _mask_secret(str(masked["crs"].get("admin_token") or "")),
+        }
     if isinstance(masked.get("cpa"), dict) and "admin_password" in masked["cpa"]:
-        masked["cpa"] = {**masked["cpa"], "admin_password": _mask_secret(str(masked["cpa"].get("admin_password") or ""))}
+        masked["cpa"] = {
+            **masked["cpa"],
+            "admin_password": _mask_secret(
+                str(masked["cpa"].get("admin_password") or "")
+            ),
+        }
     if isinstance(masked.get("s2a"), dict):
         s2a = {**masked["s2a"]}
         if "admin_key" in s2a:
@@ -165,7 +182,9 @@ def _mask_settings(settings: dict[str, Any]) -> dict[str, Any]:
                 if "admin_key" in cfg2:
                     cfg2["admin_key"] = _mask_secret(str(cfg2.get("admin_key") or ""))
                 if "admin_token" in cfg2:
-                    cfg2["admin_token"] = _mask_secret(str(cfg2.get("admin_token") or ""))
+                    cfg2["admin_token"] = _mask_secret(
+                        str(cfg2.get("admin_token") or "")
+                    )
                 item["config"] = cfg2
             s2a_targets_masked.append(item)
     if s2a_targets_masked:
@@ -222,7 +241,11 @@ class SettingsViewSet(ViewSet):
             # multiple s2a targets (merge + preserve secrets)
             if "s2a_targets" in payload:
                 incoming = payload.get("s2a_targets") or []
-                existing = settings.get("s2a_targets") if isinstance(settings.get("s2a_targets"), list) else []
+                existing = (
+                    settings.get("s2a_targets")
+                    if isinstance(settings.get("s2a_targets"), list)
+                    else []
+                )
 
                 existing_by_key: dict[str, dict[str, Any]] = {}
                 for t in existing:
@@ -241,8 +264,14 @@ class SettingsViewSet(ViewSet):
                         continue
 
                     prev = existing_by_key.get(key) or {}
-                    prev_cfg = prev.get("config") if isinstance(prev.get("config"), dict) else {}
-                    new_cfg = t.get("config") if isinstance(t.get("config"), dict) else {}
+                    prev_cfg = (
+                        prev.get("config")
+                        if isinstance(prev.get("config"), dict)
+                        else {}
+                    )
+                    new_cfg = (
+                        t.get("config") if isinstance(t.get("config"), dict) else {}
+                    )
 
                     cfg = {**prev_cfg, **new_cfg}
                     for secret_field in ["admin_key", "admin_token"]:
@@ -276,14 +305,20 @@ class SettingsViewSet(ViewSet):
             for section in ["crs", "cpa", "s2a", "checkout"]:
                 if section in payload:
                     current_section = settings.get(section) or {}
-                    if isinstance(current_section, dict) and isinstance(payload[section], dict):
+                    if isinstance(current_section, dict) and isinstance(
+                        payload[section], dict
+                    ):
                         merged = {**current_section, **payload[section]}
 
                         # preserve secrets when payload is empty/masked
                         if section == "crs":
-                            v = str((payload[section] or {}).get("admin_token") or "").strip()
+                            v = str(
+                                (payload[section] or {}).get("admin_token") or ""
+                            ).strip()
                             if (not v or "*" in v) and "admin_token" in current_section:
-                                merged["admin_token"] = current_section.get("admin_token")
+                                merged["admin_token"] = current_section.get(
+                                    "admin_token"
+                                )
 
                         settings[section] = merged
                     else:
@@ -307,27 +342,39 @@ class SettingsViewSet(ViewSet):
 
         settings = get_settings()
         target_key = str(payload.get("target_key") or "").strip()
-        config = payload.get("config") if isinstance(payload.get("config"), dict) else None
+        config = (
+            payload.get("config") if isinstance(payload.get("config"), dict) else None
+        )
 
         if not config:
             if target_key and isinstance(settings.get("s2a_targets"), list):
                 for t in settings.get("s2a_targets") or []:
                     if not isinstance(t, dict):
                         continue
-                    if str(t.get("key") or "").strip() == target_key and isinstance(t.get("config"), dict):
+                    if str(t.get("key") or "").strip() == target_key and isinstance(
+                        t.get("config"), dict
+                    ):
                         config = t.get("config")
                         break
             if not config:
-                config = settings.get("s2a") if isinstance(settings.get("s2a"), dict) else {}
+                config = (
+                    settings.get("s2a") if isinstance(settings.get("s2a"), dict) else {}
+                )
 
         api_base = str((config or {}).get("api_base") or "").strip()
         admin_key = str((config or {}).get("admin_key") or "").strip()
         admin_token = str((config or {}).get("admin_token") or "").strip()
 
         if not api_base:
-            return Response({"success": False, "message": "missing s2a.api_base"}, status=status.HTTP_400_BAD_REQUEST)
+            return Response(
+                {"success": False, "message": "missing s2a.api_base"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
         if not admin_key and not admin_token:
-            return Response({"success": False, "message": "missing s2a.admin_key/admin_token"}, status=status.HTTP_400_BAD_REQUEST)
+            return Response(
+                {"success": False, "message": "missing s2a.admin_key/admin_token"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
         timeout = int(((settings.get("request") or {}).get("timeout") or 20))
 
@@ -339,7 +386,9 @@ class SettingsViewSet(ViewSet):
             admin_token=admin_token,
             timeout=timeout,
         )
-        return Response({"success": bool(ok), "message": msg, "target_key": target_key or ""})
+        return Response(
+            {"success": bool(ok), "message": msg, "target_key": target_key or ""}
+        )
 
     @action(detail=False, methods=["get", "post"], url_path="trace-cleanup")
     def trace_cleanup(self, request):
@@ -380,7 +429,9 @@ class SettingsViewSet(ViewSet):
             if "max_age_days" in overrides:
                 effective_settings["max_age_days"] = int(overrides["max_age_days"])
             if "max_total_size_mb" in overrides:
-                effective_settings["max_total_size_mb"] = int(overrides["max_total_size_mb"])
+                effective_settings["max_total_size_mb"] = int(
+                    overrides["max_total_size_mb"]
+                )
             if "max_files" in overrides:
                 effective_settings["max_files"] = int(overrides["max_files"])
             if "min_keep_files" in overrides:
@@ -398,22 +449,34 @@ class SettingsViewSet(ViewSet):
         payload = serializer.validated_data
 
         settings = get_settings()
-        config = payload.get("config") if isinstance(payload.get("config"), dict) else None
+        config = (
+            payload.get("config") if isinstance(payload.get("config"), dict) else None
+        )
         if not config:
-            config = settings.get("crs") if isinstance(settings.get("crs"), dict) else {}
+            config = (
+                settings.get("crs") if isinstance(settings.get("crs"), dict) else {}
+            )
 
         api_base = str((config or {}).get("api_base") or "").strip()
         admin_token = str((config or {}).get("admin_token") or "").strip()
 
         if not api_base:
-            return Response({"success": False, "message": "missing crs.api_base"}, status=status.HTTP_400_BAD_REQUEST)
+            return Response(
+                {"success": False, "message": "missing crs.api_base"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
         if not admin_token:
-            return Response({"success": False, "message": "missing crs.admin_token"}, status=status.HTTP_400_BAD_REQUEST)
+            return Response(
+                {"success": False, "message": "missing crs.admin_token"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
         timeout = int(((settings.get("request") or {}).get("timeout") or 20))
         from .services.sub2api_sink_service import crs_test_connection
 
-        ok, msg = crs_test_connection(api_base=api_base, admin_token=admin_token, timeout=timeout)
+        ok, msg = crs_test_connection(
+            api_base=api_base, admin_token=admin_token, timeout=timeout
+        )
         return Response({"success": bool(ok), "message": msg})
 
 
@@ -441,7 +504,9 @@ class TaskViewSet(ViewSet):
 
         settings = get_settings()
         teams = settings.get("teams") or []
-        team_cfg = next((x for x in teams if x.get("name") == payload["team_name"]), None)
+        team_cfg = next(
+            (x for x in teams if x.get("name") == payload["team_name"]), None
+        )
         if not team_cfg:
             return Response(
                 {"detail": "Team not found in settings"},
@@ -462,7 +527,9 @@ class TaskViewSet(ViewSet):
                     status=status.HTTP_400_BAD_REQUEST,
                 )
         else:
-            return Response({"detail": "Unknown flow"}, status=status.HTTP_400_BAD_REQUEST)
+            return Response(
+                {"detail": "Unknown flow"}, status=status.HTTP_400_BAD_REQUEST
+            )
 
         record_id = uuid.uuid4().hex
         record = {
@@ -544,7 +611,14 @@ class TaskViewSet(ViewSet):
         result = task.get("result") or {}
         artifacts = result.get("artifacts") or []
         filename = str(filename or "")
-        artifact = next((a for a in artifacts if isinstance(a, dict) and str(a.get("name")) == filename), None)
+        artifact = next(
+            (
+                a
+                for a in artifacts
+                if isinstance(a, dict) and str(a.get("name")) == filename
+            ),
+            None,
+        )
 
         file_path: Path | None = None
         if artifact:
@@ -558,7 +632,9 @@ class TaskViewSet(ViewSet):
                 file_path = candidate
 
         if not file_path or not file_path.exists():
-            return Response({"detail": "File missing"}, status=status.HTTP_404_NOT_FOUND)
+            return Response(
+                {"detail": "File missing"}, status=status.HTTP_404_NOT_FOUND
+            )
 
         media_root = Path(str(getattr(django_settings, "MEDIA_ROOT", "")))
         try:
@@ -567,8 +643,16 @@ class TaskViewSet(ViewSet):
             return Response({"detail": "Forbidden"}, status=status.HTTP_403_FORBIDDEN)
 
         # 图片文件内联展示，非图片强制下载
-        is_image = file_path.suffix.lower() in {'.png', '.jpg', '.jpeg', '.gif', '.webp'}
-        response = FileResponse(file_path.open("rb"), as_attachment=not is_image, filename=file_path.name)
+        is_image = file_path.suffix.lower() in {
+            ".png",
+            ".jpg",
+            ".jpeg",
+            ".gif",
+            ".webp",
+        }
+        response = FileResponse(
+            file_path.open("rb"), as_attachment=not is_image, filename=file_path.name
+        )
         response["Content-Length"] = os.path.getsize(str(file_path))
         return response
 
@@ -615,14 +699,19 @@ class TaskViewSet(ViewSet):
                 for line in fp:
                     buf.append(line)
         except Exception:
-            return Response({"detail": "Failed to read log"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            return Response(
+                {"detail": "Failed to read log"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
 
         text = "".join(buf)
         # 构建账号摘要信息
         celery_id = str(task.get("celery_task_id") or "")
         mother_id = str(task.get("mother_id") or "")
         mother = find_account(settings, mother_id) if mother_id else None
-        mother_email = str(mother.get("email") or "") if isinstance(mother, dict) else ""
+        mother_email = (
+            str(mother.get("email") or "") if isinstance(mother, dict) else ""
+        )
         task_status = str(task.get("status") or "")
 
         accounts_summary = []
@@ -707,7 +796,7 @@ class AccountsViewSet(ViewSet):
                 value = value.strip()
                 if value.startswith("["):
                     # 修复末尾多余逗号: ,] -> ]
-                    fixed = re.sub(r',\s*]', ']', value)
+                    fixed = re.sub(r",\s*]", "]", value)
                     try:
                         value = json.loads(fixed)
                     except json.JSONDecodeError:
@@ -724,13 +813,17 @@ class AccountsViewSet(ViewSet):
         raw_domains = parse_domains(cfg.domains)
         raw_domains = [str(x).strip() for x in raw_domains if str(x).strip()]
         if not raw_domains:
-            raise ValueError(f"CloudMailConfig id={config_id} domains is empty, raw value: {cfg.domains!r}")
+            raise ValueError(
+                f"CloudMailConfig id={config_id} domains is empty, raw value: {cfg.domains!r}"
+            )
 
         # 使用 CloudMailClient 的域名标准化逻辑预检查
         normalized = [CloudMailClient._normalize_domain(d) for d in raw_domains]
         valid_domains = [d for d in normalized if d]
         if not valid_domains:
-            raise ValueError(f"CloudMailConfig id={config_id} domains are all invalid after normalization. Raw: {raw_domains!r}, Normalized: {normalized!r}")
+            raise ValueError(
+                f"CloudMailConfig id={config_id} domains are all invalid after normalization. Raw: {raw_domains!r}, Normalized: {normalized!r}"
+            )
 
         return CloudMailClient(
             api_base=str(cfg.api_base),
@@ -783,16 +876,8 @@ class AccountsViewSet(ViewSet):
             manager = get_browser_manager()
             api = manager.get_api(BrowserType.GEEKEZ)
             profiles = api.list_profiles()
-            geekez_names = {
-                str(p.name)
-                for p in profiles
-                if getattr(p, "name", None)
-            }
-            geekez_profile_ids = {
-                str(p.id)
-                for p in profiles
-                if getattr(p, "id", None)
-            }
+            geekez_names = {str(p.name) for p in profiles if getattr(p, "name", None)}
+            geekez_profile_ids = {str(p.id) for p in profiles if getattr(p, "id", None)}
         except Exception:
             geekez_names = set()
             geekez_profile_ids = set()
@@ -820,11 +905,16 @@ class AccountsViewSet(ViewSet):
             profile_name_saved = ""
             if isinstance(geekez_profile, dict):
                 profile_id_saved = str(geekez_profile.get("profile_id") or "").strip()
-                profile_name_saved = str(geekez_profile.get("profile_name") or "").strip()
+                profile_name_saved = str(
+                    geekez_profile.get("profile_name") or ""
+                ).strip()
 
-            has_profile = bool(
-                profile_id_saved and profile_id_saved in geekez_profile_ids
-            ) or bool(profile_name_saved and profile_name_saved in geekez_names) or bool(profile_name_new and profile_name_new in geekez_names) or bool(email and email in geekez_names)
+            has_profile = (
+                bool(profile_id_saved and profile_id_saved in geekez_profile_ids)
+                or bool(profile_name_saved and profile_name_saved in geekez_names)
+                or bool(profile_name_new and profile_name_new in geekez_names)
+                or bool(email and email in geekez_names)
+            )
 
             # 状态字段兜底（兼容旧数据）
             open_status = str(acc.get("open_status") or "").strip()
@@ -860,16 +950,22 @@ class AccountsViewSet(ViewSet):
                     team_join_status = "not_started"
             active_task = None
             if str(acc.get("type")) == "mother":
-                active_task = active_tasks_by_mother.get(str(acc.get("id") or "").strip())
+                active_task = active_tasks_by_mother.get(
+                    str(acc.get("id") or "").strip()
+                )
 
             # 只返回是否存在可用 session，避免将 accessToken 暴露给前端
             session_data = acc.get("session")
-            has_session = bool(isinstance(session_data, dict) and str(session_data.get("accessToken") or "").strip())
+            has_session = bool(
+                isinstance(session_data, dict)
+                and str(session_data.get("accessToken") or "").strip()
+            )
 
             return {
                 **acc,
                 "geekez_profile_exists": has_profile,
-                "open_status": open_status or ("not_started" if str(acc.get("type")) == "mother" else open_status),
+                "open_status": open_status
+                or ("not_started" if str(acc.get("type")) == "mother" else open_status),
                 "register_status": register_status,
                 "login_status": login_status,
                 "pool_status": pool_status,
@@ -883,7 +979,9 @@ class AccountsViewSet(ViewSet):
         normalized_mothers: list[dict[str, Any]] = []
         for m in mothers:
             mid = str(m.get("id") or "")
-            children = [_annotate_account(c) for c in (children_by_parent.get(mid, []) or [])]
+            children = [
+                _annotate_account(c) for c in (children_by_parent.get(mid, []) or [])
+            ]
             seat_total = int(m.get("seat_total") or 0)
             seat_used = len(children)
             normalized_mothers.append(
@@ -895,20 +993,27 @@ class AccountsViewSet(ViewSet):
                 }
             )
 
-        return Response({"mothers": normalized_mothers, "email_domains": _get_email_domains()})
+        return Response(
+            {"mothers": normalized_mothers, "email_domains": _get_email_domains()}
+        )
 
     @action(detail=True, methods=["get", "delete"], url_path="tasks")
     def tasks(self, request, pk=None):
         settings = get_settings()
         acc = find_account(settings, str(pk))
         if not isinstance(acc, dict) or str(acc.get("type")) != "mother":
-            return Response({"detail": "Mother account not found"}, status=status.HTTP_400_BAD_REQUEST)
+            return Response(
+                {"detail": "Mother account not found"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
         if request.method.upper() == "DELETE":
             removed = clear_tasks_for_mother(str(pk), keep_in_progress=True)
             return Response({"status": "cleared", "removed": removed})
 
-        tasks = [t for t in list_tasks(settings) if str(t.get("mother_id") or "") == str(pk)]
+        tasks = [
+            t for t in list_tasks(settings) if str(t.get("mother_id") or "") == str(pk)
+        ]
         return Response({"tasks": tasks})
 
     @action(detail=False, methods=["post"], url_path="mothers")
@@ -931,7 +1036,9 @@ class AccountsViewSet(ViewSet):
             return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
 
         if domain and domain not in (client.domains or []):
-            return Response({"detail": "Domain not allowed"}, status=status.HTTP_400_BAD_REQUEST)
+            return Response(
+                {"detail": "Domain not allowed"}, status=status.HTTP_400_BAD_REQUEST
+            )
 
         now = timezone.now().isoformat()
         created: list[dict[str, Any]] = []
@@ -939,7 +1046,9 @@ class AccountsViewSet(ViewSet):
             try:
                 email, email_password = client.create_random_user(domain=domain)
             except Exception as exc:
-                return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+                return Response(
+                    {"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST
+                )
 
             record_id = uuid.uuid4().hex
             account_password = self._generate_account_password()
@@ -992,13 +1101,21 @@ class AccountsViewSet(ViewSet):
         settings = get_settings()
         parent_raw = find_account(settings, parent_id)
         if not isinstance(parent_raw, dict) or str(parent_raw.get("type")) != "mother":
-            return Response({"detail": "Mother account not found"}, status=status.HTTP_400_BAD_REQUEST)
+            return Response(
+                {"detail": "Mother account not found"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
         parent: dict[str, Any] = parent_raw
 
-        config_id = int(payload.get("cloudmail_config_id") or parent.get("cloudmail_config_id") or 0)
+        config_id = int(
+            payload.get("cloudmail_config_id") or parent.get("cloudmail_config_id") or 0
+        )
         if config_id <= 0:
-            return Response({"detail": "cloudmail_config_id missing"}, status=status.HTTP_400_BAD_REQUEST)
+            return Response(
+                {"detail": "cloudmail_config_id missing"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
         domain = str(payload.get("domain") or "").strip() or None
         count = int(payload.get("count") or 1)
@@ -1012,7 +1129,9 @@ class AccountsViewSet(ViewSet):
             if str(a.get("type")) == "child" and str(a.get("parent_id")) == parent_id
         ]
         if seat_total > 0 and (len(existing_children) + count) > seat_total:
-            return Response({"detail": "No available seats"}, status=status.HTTP_400_BAD_REQUEST)
+            return Response(
+                {"detail": "No available seats"}, status=status.HTTP_400_BAD_REQUEST
+            )
 
         try:
             client = self._get_cloudmail_client(config_id)
@@ -1020,7 +1139,9 @@ class AccountsViewSet(ViewSet):
             return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
 
         if domain and domain not in (client.domains or []):
-            return Response({"detail": "Domain not allowed"}, status=status.HTTP_400_BAD_REQUEST)
+            return Response(
+                {"detail": "Domain not allowed"}, status=status.HTTP_400_BAD_REQUEST
+            )
 
         now = timezone.now().isoformat()
         created: list[dict[str, Any]] = []
@@ -1028,7 +1149,9 @@ class AccountsViewSet(ViewSet):
             try:
                 email, email_password = client.create_random_user(domain=domain)
             except Exception as exc:
-                return Response({"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+                return Response(
+                    {"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST
+                )
 
             record_id = uuid.uuid4().hex
             account_password = self._generate_account_password()
@@ -1083,41 +1206,88 @@ class AccountsViewSet(ViewSet):
 
     def destroy(self, request, pk=None):
         account_id = str(pk)
-        
+
         # 先获取账号信息，以便删除 geekez 环境
         settings = get_settings()
         acc = find_account(settings, account_id)
-        
-        # 尝试删除 geekez 环境（如果存在）
+
+        # 删除 geekez 环境（如果存在）。若确认删除失败，则阻断账号删除，避免残留脏环境。
         if isinstance(acc, dict):
             email = str(acc.get("email") or "").strip()
             if email:
                 try:
-                    from apps.integrations.browser_base import BrowserType, get_browser_manager
+                    from apps.integrations.browser_base import (
+                        BrowserType,
+                        get_browser_manager,
+                    )
+
                     manager = get_browser_manager()
                     api = manager.get_api(BrowserType.GEEKEZ)
-                    if api.health_check():
-                        profile_name_new = f"gpt_{email}"
-                        geekez_profile = acc.get("geekez_profile")
-                        delete_targets: list[str] = []
-                        if isinstance(geekez_profile, dict):
-                            saved_profile_id = str(geekez_profile.get("profile_id") or "").strip()
-                            saved_profile_name = str(geekez_profile.get("profile_name") or "").strip()
-                            if saved_profile_id:
-                                delete_targets.append(saved_profile_id)
-                            if saved_profile_name:
-                                delete_targets.append(saved_profile_name)
-                        delete_targets.extend([profile_name_new, email])
-                        seen: set[str] = set()
-                        for target in delete_targets:
-                            t = str(target or "").strip()
-                            if not t or t in seen:
+                    if not api.health_check():
+                        return Response(
+                            {
+                                "detail": "GeekezBrowser 服务不在线，无法安全删除对应环境"
+                            },
+                            status=status.HTTP_503_SERVICE_UNAVAILABLE,
+                        )
+
+                    profile_name_new = f"gpt_{email}"
+                    geekez_profile = acc.get("geekez_profile")
+                    delete_targets: list[str] = []
+                    if isinstance(geekez_profile, dict):
+                        saved_profile_id = str(
+                            geekez_profile.get("profile_id") or ""
+                        ).strip()
+                        saved_profile_name = str(
+                            geekez_profile.get("profile_name") or ""
+                        ).strip()
+                        if saved_profile_id:
+                            delete_targets.append(saved_profile_id)
+                        if saved_profile_name:
+                            delete_targets.append(saved_profile_name)
+                    delete_targets.extend([profile_name_new, email])
+
+                    seen: set[str] = set()
+                    deleted_any = False
+                    for target in delete_targets:
+                        t = str(target or "").strip()
+                        if not t or t in seen:
+                            continue
+                        seen.add(t)
+                        try:
+                            api.close_profile(t)
+                        except Exception:
+                            pass
+                        try:
+                            if api.delete_profile(t):
+                                deleted_any = True
+                        except Exception:
+                            continue
+
+                    if not deleted_any:
+                        still_exists = False
+                        for candidate in [profile_name_new, email]:
+                            c = str(candidate or "").strip()
+                            if not c:
                                 continue
-                            seen.add(t)
-                            api.delete_profile(t)
-                except Exception:
-                    pass  # 静默失败，不阻止账号删除
-        
+                            try:
+                                if api.get_profile_by_name(c):
+                                    still_exists = True
+                                    break
+                            except Exception:
+                                continue
+
+                        if still_exists:
+                            return Response(
+                                {"detail": "删除账号失败：对应 Geek 环境删除失败"},
+                                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                            )
+                except Exception as exc:
+                    return Response(
+                        {"detail": f"删除账号失败：清理 Geek 环境异常: {exc}"},
+                        status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    )
+
         ok = delete_account(account_id)
         if not ok:
             return Response({"detail": "Not found"}, status=status.HTTP_404_NOT_FOUND)
@@ -1127,10 +1297,10 @@ class AccountsViewSet(ViewSet):
     def launch_geekez(self, request, pk=None):
         """
         启动浏览器环境
-        
+
         支持两种模式:
         - geekez (默认): 启动远程 GeekezBrowser
-        - local: 本地浏览器无痕模式，直接打开目标 URL
+        - local: 通过 Geekez 显式无痕参数启动
         """
         settings = get_settings()
         acc_raw = find_account(settings, str(pk))
@@ -1141,33 +1311,84 @@ class AccountsViewSet(ViewSet):
 
         email = str(acc.get("email") or "").strip()
         if not email:
-            return Response({"detail": "Email missing"}, status=status.HTTP_400_BAD_REQUEST)
+            return Response(
+                {"detail": "Email missing"}, status=status.HTTP_400_BAD_REQUEST
+            )
 
         # 获取启动模式，默认为 geekez
         launch_type = str(request.data.get("launch_type", "geekez")).lower()
-        
-        # 本地无痕模式：直接返回 URL 让前端打开
+
+        # local 模式：仍使用 Geekez，但显式带 --incognito 启动
         if launch_type == "local":
-            # 确定目标 URL（根据账号类型）
-            account_type = str(acc.get("type", "mother"))
-            if account_type == "mother":
-                # 母号直接打开 ChatGPT
-                target_url = "https://chatgpt.com/"
-            else:
-                # 子号打开团队邀请链接或 ChatGPT
-                team_account_id = acc.get("team_account_id")
-                if team_account_id:
-                    target_url = f"https://chatgpt.com/g/{team_account_id}"
-                else:
-                    target_url = "https://chatgpt.com/"
-            
-            return Response({
-                "success": True,
-                "launch_type": "local",
-                "browser_type": "local",
-                "target_url": target_url,
-                "email": email,
-            })
+            from apps.integrations.browser_base import BrowserType, get_browser_manager
+
+            manager = get_browser_manager()
+            try:
+                api = manager.get_api(BrowserType.GEEKEZ)
+            except Exception:
+                return Response(
+                    {"detail": "GeekezBrowser 未配置或不可用"},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            if not api.health_check():
+                return Response(
+                    {"detail": "GeekezBrowser 服务不在线"},
+                    status=status.HTTP_503_SERVICE_UNAVAILABLE,
+                )
+
+            profile_name_new = f"gpt_{email}"
+            created_profile = False
+            profile = api.get_profile_by_name(profile_name_new)
+            if not profile:
+                profile = api.get_profile_by_name(email)
+            if not profile:
+                created_profile = True
+                profile = api.create_or_update_profile(
+                    name=profile_name_new,
+                    proxy=None,
+                    metadata={"account": {"email": email}},
+                )
+
+            launch_info = api.launch_profile(profile.id, incognito=True)
+            if not launch_info:
+                return Response(
+                    {"detail": "启动无痕 Geekez profile 失败"},
+                    status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                )
+
+            now = timezone.now().isoformat()
+            patch_account(
+                str(pk),
+                {
+                    "geekez_env": {
+                        "browser_type": BrowserType.GEEKEZ.value,
+                        "launch_type": "local",
+                        "profile_id": launch_info.profile_id,
+                        "debug_port": launch_info.debug_port,
+                        "cdp_endpoint": launch_info.cdp_endpoint,
+                        "ws_endpoint": launch_info.ws_endpoint,
+                        "pid": launch_info.pid,
+                        "launched_at": now,
+                    },
+                    "updated_at": now,
+                },
+            )
+
+            return Response(
+                {
+                    "success": True,
+                    "launch_type": "local",
+                    "created_profile": created_profile,
+                    "browser_type": BrowserType.GEEKEZ.value,
+                    "profile_id": launch_info.profile_id,
+                    "debug_port": launch_info.debug_port,
+                    "cdp_endpoint": launch_info.cdp_endpoint,
+                    "ws_endpoint": launch_info.ws_endpoint,
+                    "pid": launch_info.pid,
+                    "email": email,
+                }
+            )
 
         # 远程 GeekezBrowser 模式
         from apps.integrations.browser_base import BrowserType, get_browser_manager
@@ -1176,10 +1397,16 @@ class AccountsViewSet(ViewSet):
         try:
             api = manager.get_api(BrowserType.GEEKEZ)
         except Exception:
-            return Response({"detail": "GeekezBrowser 未配置或不可用"}, status=status.HTTP_400_BAD_REQUEST)
+            return Response(
+                {"detail": "GeekezBrowser 未配置或不可用"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
         if not api.health_check():
-            return Response({"detail": "GeekezBrowser 服务不在线"}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
+            return Response(
+                {"detail": "GeekezBrowser 服务不在线"},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
 
         profile_name_new = f"gpt_{email}"
 
@@ -1199,7 +1426,10 @@ class AccountsViewSet(ViewSet):
 
         launch_info = api.launch_profile(profile.id)
         if not launch_info:
-            return Response({"detail": "启动 Geekez profile 失败"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            return Response(
+                {"detail": "启动 Geekez profile 失败"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
 
         now = timezone.now().isoformat()
         existing_profile_value = acc.get("geekez_profile")
@@ -1247,42 +1477,69 @@ class AccountsViewSet(ViewSet):
         settings = get_settings()
         acc = find_account(settings, str(pk))
         if not isinstance(acc, dict) or str(acc.get("type")) != "mother":
-            return Response({"detail": "Mother account not found"}, status=status.HTTP_400_BAD_REQUEST)
+            return Response(
+                {"detail": "Mother account not found"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
-        card_mode, selected_card_id, card_error = _parse_self_register_card_options(request.data)
+        card_mode, selected_card_id, card_error = _parse_self_register_card_options(
+            request.data
+        )
         if card_error:
             return Response({"detail": card_error}, status=status.HTTP_400_BAD_REQUEST)
+        launch_type, launch_type_error = _parse_self_register_launch_type(request.data)
+        if launch_type_error:
+            return Response(
+                {"detail": launch_type_error}, status=status.HTTP_400_BAD_REQUEST
+            )
         keep_profile_on_fail = _parse_keep_profile_on_fail(request.data)
 
         record_id = uuid.uuid4().hex
         now = timezone.now().isoformat()
-        add_task({
-            "id": record_id,
-            "type": "self_register",
-            "mother_id": str(pk),
-            "card_mode": card_mode,
-            "selected_card_id": selected_card_id,
-            "keep_profile_on_fail": keep_profile_on_fail,
-            "status": "pending",
-            "progress_current": 0,
-            "progress_total": 3,
-            "progress_percent": 0,
-            "progress_label": "",
-            "created_at": now,
-        })
+        add_task(
+            {
+                "id": record_id,
+                "type": "self_register",
+                "mother_id": str(pk),
+                "card_mode": card_mode,
+                "selected_card_id": selected_card_id,
+                "launch_type": launch_type,
+                "keep_profile_on_fail": keep_profile_on_fail,
+                "status": "pending",
+                "progress_current": 0,
+                "progress_total": 3,
+                "progress_percent": 0,
+                "progress_label": "",
+                "created_at": now,
+            }
+        )
 
         async_result = self_register_task.delay(record_id)
-        return Response({"message": "已启动：自动开通", "task_id": async_result.id, "record_id": record_id})
+        return Response(
+            {
+                "message": "已启动：自动开通",
+                "task_id": async_result.id,
+                "record_id": record_id,
+            }
+        )
 
     @action(detail=True, methods=["post"], url_path="auto_invite")
     def auto_invite(self, request, pk=None):
         settings = get_settings()
         acc = find_account(settings, str(pk))
         if not isinstance(acc, dict) or str(acc.get("type")) != "mother":
-            return Response({"detail": "Mother account not found"}, status=status.HTTP_400_BAD_REQUEST)
+            return Response(
+                {"detail": "Mother account not found"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
-        target_key = str(request.data.get("target_key") or request.data.get("s2a_target_key") or "").strip()
-        mode = str(request.data.get("mode") or request.data.get("pool_mode") or "").strip() or "s2a_oauth"
+        target_key = str(
+            request.data.get("target_key") or request.data.get("s2a_target_key") or ""
+        ).strip()
+        mode = (
+            str(request.data.get("mode") or request.data.get("pool_mode") or "").strip()
+            or "s2a_oauth"
+        )
 
         mother_id = str(pk)
         seat_total = int(acc.get("seat_total") or 0)
@@ -1311,23 +1568,27 @@ class AccountsViewSet(ViewSet):
                 if child_email:
                     pending_children.append(child_email)
             if not pending_children:
-                return Response({"message": "全部子号已入队，无需邀请", "skipped": True})
+                return Response(
+                    {"message": "全部子号已入队，无需邀请", "skipped": True}
+                )
 
         record_id = uuid.uuid4().hex
         now = timezone.now().isoformat()
-        add_task({
-            "id": record_id,
-            "type": "auto_invite",
-            "mother_id": mother_id,
-            "s2a_target_key": target_key,
-            "pool_mode": mode,
-            "status": "pending",
-            "progress_current": 0,
-            "progress_total": 3,
-            "progress_percent": 0,
-            "progress_label": "",
-            "created_at": now,
-        })
+        add_task(
+            {
+                "id": record_id,
+                "type": "auto_invite",
+                "mother_id": mother_id,
+                "s2a_target_key": target_key,
+                "pool_mode": mode,
+                "status": "pending",
+                "progress_current": 0,
+                "progress_total": 3,
+                "progress_percent": 0,
+                "progress_label": "",
+                "created_at": now,
+            }
+        )
 
         async_result = auto_invite_task.delay(record_id)
         return Response(
@@ -1345,26 +1606,36 @@ class AccountsViewSet(ViewSet):
         settings = get_settings()
         acc = find_account(settings, str(pk))
         if not isinstance(acc, dict) or str(acc.get("type")) != "mother":
-            return Response({"detail": "Mother account not found"}, status=status.HTTP_400_BAD_REQUEST)
+            return Response(
+                {"detail": "Mother account not found"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
-        target_key = str(request.data.get("target_key") or request.data.get("s2a_target_key") or "").strip()
-        mode = str(request.data.get("mode") or request.data.get("pool_mode") or "").strip() or "crs_sync"
+        target_key = str(
+            request.data.get("target_key") or request.data.get("s2a_target_key") or ""
+        ).strip()
+        mode = (
+            str(request.data.get("mode") or request.data.get("pool_mode") or "").strip()
+            or "crs_sync"
+        )
 
         record_id = uuid.uuid4().hex
         now = timezone.now().isoformat()
-        add_task({
-            "id": record_id,
-            "type": "sub2api_sink",
-            "mother_id": str(pk),
-            "s2a_target_key": target_key,
-            "pool_mode": mode,
-            "status": "pending",
-            "progress_current": 0,
-            "progress_total": 3,
-            "progress_percent": 0,
-            "progress_label": "",
-            "created_at": now,
-        })
+        add_task(
+            {
+                "id": record_id,
+                "type": "sub2api_sink",
+                "mother_id": str(pk),
+                "s2a_target_key": target_key,
+                "pool_mode": mode,
+                "status": "pending",
+                "progress_current": 0,
+                "progress_total": 3,
+                "progress_percent": 0,
+                "progress_label": "",
+                "created_at": now,
+            }
+        )
 
         async_result = sub2api_sink_task.delay(record_id)
         return Response(
@@ -1383,7 +1654,10 @@ class AccountsViewSet(ViewSet):
         settings = get_settings()
         acc = find_account(settings, str(pk))
         if not isinstance(acc, dict) or str(acc.get("type")) != "mother":
-            return Response({"detail": "Mother account not found"}, status=status.HTTP_400_BAD_REQUEST)
+            return Response(
+                {"detail": "Mother account not found"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
         target_url = str(request.data.get("target_url") or "").strip()
         admin_password = str(request.data.get("password") or "").strip()
@@ -1392,42 +1666,69 @@ class AccountsViewSet(ViewSet):
         note = str(request.data.get("note") or "").strip()
 
         if not target_url:
-            return Response({"detail": "target_url is required"}, status=status.HTTP_400_BAD_REQUEST)
+            return Response(
+                {"detail": "target_url is required"}, status=status.HTTP_400_BAD_REQUEST
+            )
         if not admin_password:
-            return Response({"detail": "password is required"}, status=status.HTTP_400_BAD_REQUEST)
+            return Response(
+                {"detail": "password is required"}, status=status.HTTP_400_BAD_REQUEST
+            )
 
         record_id = uuid.uuid4().hex
         now = timezone.now().isoformat()
-        add_task({
-            "id": record_id,
-            "type": "team_push",
-            "mother_id": str(pk),
-            "target_url": target_url,
-            "status": "pending",
-            "progress_current": 0,
-            "progress_total": 3,
-            "progress_percent": 0,
-            "progress_label": "",
-            "created_at": now,
-        })
+        add_task(
+            {
+                "id": record_id,
+                "type": "team_push",
+                "mother_id": str(pk),
+                "target_url": target_url,
+                "status": "pending",
+                "progress_current": 0,
+                "progress_total": 3,
+                "progress_percent": 0,
+                "progress_label": "",
+                "created_at": now,
+            }
+        )
 
-        async_result = team_push_task.delay(record_id, str(pk), target_url, admin_password, is_warranty, seat_total, note)
-        return Response({
-            "message": "已启动：推送到兑换系统",
-            "task_id": async_result.id,
-            "record_id": record_id,
-        })
+        async_result = team_push_task.delay(
+            record_id,
+            str(pk),
+            target_url,
+            admin_password,
+            is_warranty,
+            seat_total,
+            note,
+        )
+        return Response(
+            {
+                "message": "已启动：推送到兑换系统",
+                "task_id": async_result.id,
+                "record_id": record_id,
+            }
+        )
 
     @action(detail=False, methods=["post"], url_path="batch/self_register")
     def batch_self_register(self, request):
         settings = get_settings()
-        mother_ids = _normalize_id_list(request.data.get("mother_ids") or request.data.get("ids"))
+        mother_ids = _normalize_id_list(
+            request.data.get("mother_ids") or request.data.get("ids")
+        )
         if not mother_ids:
-            return Response({"detail": "mother_ids is required"}, status=status.HTTP_400_BAD_REQUEST)
+            return Response(
+                {"detail": "mother_ids is required"}, status=status.HTTP_400_BAD_REQUEST
+            )
 
-        card_mode, selected_card_id, card_error = _parse_self_register_card_options(request.data)
+        card_mode, selected_card_id, card_error = _parse_self_register_card_options(
+            request.data
+        )
         if card_error:
             return Response({"detail": card_error}, status=status.HTTP_400_BAD_REQUEST)
+        launch_type, launch_type_error = _parse_self_register_launch_type(request.data)
+        if launch_type_error:
+            return Response(
+                {"detail": launch_type_error}, status=status.HTTP_400_BAD_REQUEST
+            )
         keep_profile_on_fail = _parse_keep_profile_on_fail(request.data)
 
         concurrency = int(request.data.get("concurrency") or 5)
@@ -1438,56 +1739,84 @@ class AccountsViewSet(ViewSet):
         for idx, mother_id in enumerate(mother_ids):
             acc = find_account(settings, str(mother_id))
             if not isinstance(acc, dict) or str(acc.get("type")) != "mother":
-                results.append({"mother_id": mother_id, "skipped": True, "message": "Mother account not found"})
+                results.append(
+                    {
+                        "mother_id": mother_id,
+                        "skipped": True,
+                        "message": "Mother account not found",
+                    }
+                )
                 continue
 
             delay_seconds = _batch_countdown(idx, concurrency)
 
             record_id = uuid.uuid4().hex
             now = timezone.now().isoformat()
-            add_task({
-                "id": record_id,
-                "type": "self_register",
-                "mother_id": str(mother_id),
-                "card_mode": card_mode,
-                "selected_card_id": selected_card_id,
-                "keep_profile_on_fail": keep_profile_on_fail,
-                "status": "pending",
-                "progress_current": 0,
-                "progress_total": 3,
-                "progress_percent": 0,
-                "progress_label": "",
-                "created_at": now,
-            })
+            add_task(
+                {
+                    "id": record_id,
+                    "type": "self_register",
+                    "mother_id": str(mother_id),
+                    "card_mode": card_mode,
+                    "selected_card_id": selected_card_id,
+                    "launch_type": launch_type,
+                    "keep_profile_on_fail": keep_profile_on_fail,
+                    "status": "pending",
+                    "progress_current": 0,
+                    "progress_total": 3,
+                    "progress_percent": 0,
+                    "progress_label": "",
+                    "created_at": now,
+                }
+            )
 
-            async_result = self_register_task.apply_async(args=[record_id], countdown=delay_seconds)
-            results.append({
-                "mother_id": mother_id,
-                "record_id": record_id,
-                "task_id": async_result.id,
-            })
+            async_result = self_register_task.apply_async(
+                args=[record_id], countdown=delay_seconds
+            )
+            results.append(
+                {
+                    "mother_id": mother_id,
+                    "record_id": record_id,
+                    "task_id": async_result.id,
+                }
+            )
 
         return Response({"message": "已启动：批量自动开通", "results": results})
 
     @action(detail=False, methods=["post"], url_path="batch/auto_invite")
     def batch_auto_invite(self, request):
         settings = get_settings()
-        mother_ids = _normalize_id_list(request.data.get("mother_ids") or request.data.get("ids"))
+        mother_ids = _normalize_id_list(
+            request.data.get("mother_ids") or request.data.get("ids")
+        )
         if not mother_ids:
-            return Response({"detail": "mother_ids is required"}, status=status.HTTP_400_BAD_REQUEST)
+            return Response(
+                {"detail": "mother_ids is required"}, status=status.HTTP_400_BAD_REQUEST
+            )
 
         concurrency = int(request.data.get("concurrency") or 5)
         # open_geekez 参数已废弃，auto_invite_task 内部会自动启动浏览器
         # 不再单独调用 launch_geekez_task，避免并发冲突
-        target_key = str(request.data.get("target_key") or request.data.get("s2a_target_key") or "").strip()
-        mode = str(request.data.get("mode") or request.data.get("pool_mode") or "").strip() or "s2a_oauth"
+        target_key = str(
+            request.data.get("target_key") or request.data.get("s2a_target_key") or ""
+        ).strip()
+        mode = (
+            str(request.data.get("mode") or request.data.get("pool_mode") or "").strip()
+            or "s2a_oauth"
+        )
         accounts = list_accounts(settings)
 
         results: list[dict[str, Any]] = []
         for idx, mother_id in enumerate(mother_ids):
             acc = find_account(settings, str(mother_id))
             if not isinstance(acc, dict) or str(acc.get("type")) != "mother":
-                results.append({"mother_id": mother_id, "skipped": True, "message": "Mother account not found"})
+                results.append(
+                    {
+                        "mother_id": mother_id,
+                        "skipped": True,
+                        "message": "Mother account not found",
+                    }
+                )
                 continue
 
             seat_total = int(acc.get("seat_total") or 0)
@@ -1500,98 +1829,139 @@ class AccountsViewSet(ViewSet):
             ]
 
             if seat_total <= 0 and not children:
-                results.append({"mother_id": mother_id, "skipped": True, "message": "该母号暂无子号"})
+                results.append(
+                    {
+                        "mother_id": mother_id,
+                        "skipped": True,
+                        "message": "该母号暂无子号",
+                    }
+                )
                 continue
 
             if seat_total <= 0 or len(children) >= seat_total:
                 pending_children: list[str] = []
                 for child in children:
                     join_status = str(child.get("team_join_status") or "").strip()
-                    team_account_id_saved = str(child.get("team_account_id") or "").strip()
+                    team_account_id_saved = str(
+                        child.get("team_account_id") or ""
+                    ).strip()
                     if join_status == "success" or team_account_id_saved:
                         continue
                     child_email = str(child.get("email") or "").strip()
                     if child_email:
                         pending_children.append(child_email)
                 if not pending_children:
-                    results.append({"mother_id": mother_id, "skipped": True, "message": "全部子号已入队"})
+                    results.append(
+                        {
+                            "mother_id": mother_id,
+                            "skipped": True,
+                            "message": "全部子号已入队",
+                        }
+                    )
                     continue
 
             delay_seconds = _batch_countdown(idx, concurrency)
 
             record_id = uuid.uuid4().hex
             now = timezone.now().isoformat()
-            add_task({
-                "id": record_id,
-                "type": "auto_invite",
-                "mother_id": str(mother_id),
-                "s2a_target_key": target_key,
-                "pool_mode": mode,
-                "status": "pending",
-                "progress_current": 0,
-                "progress_total": 3,
-                "progress_percent": 0,
-                "progress_label": "",
-                "created_at": now,
-            })
+            add_task(
+                {
+                    "id": record_id,
+                    "type": "auto_invite",
+                    "mother_id": str(mother_id),
+                    "s2a_target_key": target_key,
+                    "pool_mode": mode,
+                    "status": "pending",
+                    "progress_current": 0,
+                    "progress_total": 3,
+                    "progress_percent": 0,
+                    "progress_label": "",
+                    "created_at": now,
+                }
+            )
 
-            async_result = auto_invite_task.apply_async(args=[record_id], countdown=delay_seconds)
-            results.append({
-                "mother_id": mother_id,
-                "record_id": record_id,
-                "task_id": async_result.id,
-                "target_key": target_key,
-                "mode": mode,
-            })
+            async_result = auto_invite_task.apply_async(
+                args=[record_id], countdown=delay_seconds
+            )
+            results.append(
+                {
+                    "mother_id": mother_id,
+                    "record_id": record_id,
+                    "task_id": async_result.id,
+                    "target_key": target_key,
+                    "mode": mode,
+                }
+            )
 
         return Response({"message": "已启动：批量自动邀请", "results": results})
 
     @action(detail=False, methods=["post"], url_path="batch/sub2api_sink")
     def batch_sub2api_sink(self, request):
         settings = get_settings()
-        mother_ids = _normalize_id_list(request.data.get("mother_ids") or request.data.get("ids"))
+        mother_ids = _normalize_id_list(
+            request.data.get("mother_ids") or request.data.get("ids")
+        )
         if not mother_ids:
-            return Response({"detail": "mother_ids is required"}, status=status.HTTP_400_BAD_REQUEST)
+            return Response(
+                {"detail": "mother_ids is required"}, status=status.HTTP_400_BAD_REQUEST
+            )
 
         concurrency = int(request.data.get("concurrency") or 5)
         # open_geekez 参数已废弃，sub2api_sink_task 内部会自动启动浏览器
         # 不再单独调用 launch_geekez_task，避免并发冲突
-        target_key = str(request.data.get("target_key") or request.data.get("s2a_target_key") or "").strip()
-        mode = str(request.data.get("mode") or request.data.get("pool_mode") or "").strip() or "crs_sync"
+        target_key = str(
+            request.data.get("target_key") or request.data.get("s2a_target_key") or ""
+        ).strip()
+        mode = (
+            str(request.data.get("mode") or request.data.get("pool_mode") or "").strip()
+            or "crs_sync"
+        )
 
         results: list[dict[str, Any]] = []
         for idx, mother_id in enumerate(mother_ids):
             acc = find_account(settings, str(mother_id))
             if not isinstance(acc, dict) or str(acc.get("type")) != "mother":
-                results.append({"mother_id": mother_id, "skipped": True, "message": "Mother account not found"})
+                results.append(
+                    {
+                        "mother_id": mother_id,
+                        "skipped": True,
+                        "message": "Mother account not found",
+                    }
+                )
                 continue
 
             delay_seconds = _batch_countdown(idx, concurrency)
 
             record_id = uuid.uuid4().hex
             now = timezone.now().isoformat()
-            add_task({
-                "id": record_id,
-                "type": "sub2api_sink",
-                "mother_id": str(mother_id),
-                "s2a_target_key": target_key,
-                "pool_mode": mode,
-                "status": "pending",
-                "progress_current": 0,
-                "progress_total": 3,
-                "progress_percent": 0,
-                "progress_label": "",
-                "created_at": now,
-            })
+            add_task(
+                {
+                    "id": record_id,
+                    "type": "sub2api_sink",
+                    "mother_id": str(mother_id),
+                    "s2a_target_key": target_key,
+                    "pool_mode": mode,
+                    "status": "pending",
+                    "progress_current": 0,
+                    "progress_total": 3,
+                    "progress_percent": 0,
+                    "progress_label": "",
+                    "created_at": now,
+                }
+            )
 
-            async_result = sub2api_sink_task.apply_async(args=[record_id], countdown=delay_seconds)
-            results.append({
-                "mother_id": mother_id,
-                "record_id": record_id,
-                "task_id": async_result.id,
-                "target_key": target_key,
-                "mode": mode,
-            })
+            async_result = sub2api_sink_task.apply_async(
+                args=[record_id], countdown=delay_seconds
+            )
+            results.append(
+                {
+                    "mother_id": mother_id,
+                    "record_id": record_id,
+                    "task_id": async_result.id,
+                    "target_key": target_key,
+                    "mode": mode,
+                }
+            )
 
         return Response({"message": "已启动：批量自动入池", "results": results})
 
@@ -1600,10 +1970,15 @@ class AccountsViewSet(ViewSet):
         settings = get_settings()
         acc = find_account(settings, str(pk))
         if not isinstance(acc, dict):
-            return Response({"detail": "Account not found"}, status=status.HTTP_404_NOT_FOUND)
+            return Response(
+                {"detail": "Account not found"}, status=status.HTTP_404_NOT_FOUND
+            )
 
         session_data = acc.get("session")
-        has_session = bool(isinstance(session_data, dict) and str(session_data.get("accessToken") or "").strip())
+        has_session = bool(
+            isinstance(session_data, dict)
+            and str(session_data.get("accessToken") or "").strip()
+        )
 
         return Response(
             {
@@ -1650,7 +2025,9 @@ class CeleryTaskViewSet(ViewSet):
     @action(detail=True, methods=["get"], url_path="trace")
     def trace(self, request, pk=None):
         if not pk:
-            return Response({"error": "task_id required"}, status=status.HTTP_400_BAD_REQUEST)
+            return Response(
+                {"error": "task_id required"}, status=status.HTTP_400_BAD_REQUEST
+            )
 
         settings = get_settings()
         task_id = str(pk)
@@ -1661,11 +2038,15 @@ class CeleryTaskViewSet(ViewSet):
                 break
 
         if not matched_task:
-            return Response({"error": "task not found"}, status=status.HTTP_404_NOT_FOUND)
+            return Response(
+                {"error": "task not found"}, status=status.HTTP_404_NOT_FOUND
+            )
 
         record_id = str(matched_task.get("id") or "").strip()
         if not record_id:
-            return Response({"error": "task record missing"}, status=status.HTTP_404_NOT_FOUND)
+            return Response(
+                {"error": "task record missing"}, status=status.HTTP_404_NOT_FOUND
+            )
 
         filename = str(request.query_params.get("filename") or "run.log")
         email = (request.query_params.get("email") or "").strip()
@@ -1705,7 +2086,9 @@ class CeleryTaskViewSet(ViewSet):
         try:
             trace_abs.relative_to(trace_dir)
         except Exception:
-            return Response({"error": "invalid trace path"}, status=status.HTTP_400_BAD_REQUEST)
+            return Response(
+                {"error": "invalid trace path"}, status=status.HTTP_400_BAD_REQUEST
+            )
 
         file_path: Path | None = None
         trace_file = str(trace_rel)
@@ -1719,7 +2102,10 @@ class CeleryTaskViewSet(ViewSet):
                 try:
                     log_path.relative_to(media_root)
                 except Exception:
-                    return Response({"error": "invalid trace path"}, status=status.HTTP_400_BAD_REQUEST)
+                    return Response(
+                        {"error": "invalid trace path"},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
                 file_path = log_path
                 trace_file = str(Path("gpt_business") / "jobs" / record_id / filename)
             else:
@@ -1727,7 +2113,9 @@ class CeleryTaskViewSet(ViewSet):
                     {
                         "error": "trace file not found",
                         "trace_file": trace_file,
-                        "run_log": str(Path("gpt_business") / "jobs" / record_id / filename),
+                        "run_log": str(
+                            Path("gpt_business") / "jobs" / record_id / filename
+                        ),
                     },
                     status=status.HTTP_404_NOT_FOUND,
                 )

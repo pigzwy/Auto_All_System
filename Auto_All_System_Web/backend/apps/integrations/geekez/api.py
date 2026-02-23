@@ -45,8 +45,11 @@ class ProfileInfo:
 
 # 常用分辨率池
 _RESOLUTIONS = [
-    (1920, 1080), (2560, 1440), (1366, 768),
-    (1536, 864), (1440, 900),
+    (1920, 1080),
+    (2560, 1440),
+    (1366, 768),
+    (1536, 864),
+    (1440, 900),
 ]
 
 # 常用 Windows User-Agent 池 (Chrome 最新几个大版本)
@@ -180,7 +183,14 @@ class GeekezBrowserAPI:
         use_db_config: bool = True,
     ):
         db_cfg = None
-        if use_db_config and host is None and port is None and control_token is None and api_server_host is None and api_server_port is None:
+        if (
+            use_db_config
+            and host is None
+            and port is None
+            and control_token is None
+            and api_server_host is None
+            and api_server_port is None
+        ):
             try:
                 from .models import GeekezIntegrationConfig
 
@@ -254,10 +264,9 @@ class GeekezBrowserAPI:
         # Host-network detection:
         # - explicit flag: USE_HOST_NETWORK=1
         # - implicit: DB_HOST=127.0.0.1 (our linux.hostnet compose sets this)
-        use_hostnet = (
-            os.environ.get("USE_HOST_NETWORK") == "1"
-            or os.environ.get("DB_HOST") in ("127.0.0.1", "localhost")
-        )
+        use_hostnet = os.environ.get("USE_HOST_NETWORK") == "1" or os.environ.get(
+            "DB_HOST"
+        ) in ("127.0.0.1", "localhost")
 
         # Host network mode: prefer host-local endpoints first (dynamic CDP ports bind to localhost).
         if use_hostnet:
@@ -295,10 +304,9 @@ class GeekezBrowserAPI:
         urls = [self.api_server_url]
 
         is_docker = os.environ.get("DJANGO_ENVIRONMENT") == "docker"
-        use_hostnet = (
-            os.environ.get("USE_HOST_NETWORK") == "1"
-            or os.environ.get("DB_HOST") in ("127.0.0.1", "localhost")
-        )
+        use_hostnet = os.environ.get("USE_HOST_NETWORK") == "1" or os.environ.get(
+            "DB_HOST"
+        ) in ("127.0.0.1", "localhost")
 
         # Host network mode: API server can be accessed via localhost directly.
         if use_hostnet:
@@ -325,12 +333,16 @@ class GeekezBrowserAPI:
             out.append(u)
         return out
 
-    def _api_request_json(self, method: str, path: str, *, json_body: dict | None = None) -> dict | None:
+    def _api_request_json(
+        self, method: str, path: str, *, json_body: dict | None = None
+    ) -> dict | None:
         method = method.upper().strip()
         for base_url in self._api_base_urls():
             url = f"{base_url}{path}"
             try:
-                resp = requests.request(method, url, json=json_body, timeout=self.timeout)
+                resp = requests.request(
+                    method, url, json=json_body, timeout=self.timeout
+                )
                 if resp.status_code != 200:
                     continue
                 data = resp.json() if resp.content else {}
@@ -341,7 +353,12 @@ class GeekezBrowserAPI:
         return None
 
     def _control_request_json(
-        self, method: str, path: str, *, json_body: dict | None = None, timeout: int | None = None
+        self,
+        method: str,
+        path: str,
+        *,
+        json_body: dict | None = None,
+        timeout: int | None = None,
     ) -> dict | None:
         method = method.upper().strip()
         headers = self._control_headers()
@@ -574,7 +591,9 @@ class GeekezBrowserAPI:
 
         self._write_profiles_json(profiles_list)
 
-        return ProfileInfo(id=profile_id, name=name, proxy=proxy, metadata=metadata or {})
+        return ProfileInfo(
+            id=profile_id, name=name, proxy=proxy, metadata=metadata or {}
+        )
 
     def delete_profile(self, profile_id_or_name: str) -> bool:
         """删除 Profile。
@@ -629,7 +648,9 @@ class GeekezBrowserAPI:
 
     # ==================== 浏览器控制 ====================
 
-    def launch_profile(self, profile_id: str) -> Optional[LaunchInfo]:
+    def launch_profile(
+        self, profile_id: str, *, incognito: bool = False
+    ) -> Optional[LaunchInfo]:
         """
         启动浏览器 Profile
 
@@ -659,14 +680,15 @@ class GeekezBrowserAPI:
                 "--disable-blink-features=AutomationControlled",
             ],
         }
+        if incognito:
+            launch_payload["args"].append("--incognito")
 
         # Docker 非 host-network 场景：DevTools 如果只绑定 127.0.0.1 会导致容器内不可达。
         # Control Server 二开支持 remoteDebuggingAddress；上游若不支持则会忽略未知字段。
         is_docker = os.environ.get("DJANGO_ENVIRONMENT") == "docker"
-        use_hostnet = (
-            os.environ.get("USE_HOST_NETWORK") == "1"
-            or os.environ.get("DB_HOST") in ("127.0.0.1", "localhost")
-        )
+        use_hostnet = os.environ.get("USE_HOST_NETWORK") == "1" or os.environ.get(
+            "DB_HOST"
+        ) in ("127.0.0.1", "localhost")
         if is_docker and not use_hostnet:
             launch_payload["remoteDebuggingAddress"] = "0.0.0.0"
 
@@ -701,7 +723,9 @@ class GeekezBrowserAPI:
                     # If all candidates return 404, likely the current Geekez control server
                     # does not support /profiles/{uuid}/launch (newer Geekez versions expose
                     # only API server /api/open and /api/profiles).
-                    if last_status and all(code == 404 for code in last_status.values()):
+                    if last_status and all(
+                        code == 404 for code in last_status.values()
+                    ):
                         logger.error(
                             "Geekez control server does not support /profiles/{uuid}/launch (404). "
                             "Please enable Control Server or use a compatible Geekez version. "
@@ -725,7 +749,9 @@ class GeekezBrowserAPI:
 
                 # 优先直接使用 wsEndpoint（文档保证可用于 Playwright connect_over_cdp）。
                 if isinstance(raw_ws, str) and raw_ws.strip():
-                    ws_endpoint = self._rewrite_ws_endpoint_host(raw_ws.strip(), cdp_host, debug_port)
+                    ws_endpoint = self._rewrite_ws_endpoint_host(
+                        raw_ws.strip(), cdp_host, debug_port
+                    )
                     cdp_endpoint = f"http://{cdp_host}:{debug_port}"
                     return LaunchInfo(
                         profile_id=normalized_id,

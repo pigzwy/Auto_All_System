@@ -90,9 +90,11 @@ class GeekezBrowserAdapter(BaseBrowserAPI):
         """删除 Profile"""
         return self._get_api().delete_profile(profile_id)
 
-    def launch_profile(self, profile_id: str) -> Optional[LaunchInfo]:
+    def launch_profile(
+        self, profile_id: str, *, incognito: bool = False
+    ) -> Optional[LaunchInfo]:
         """启动浏览器 Profile"""
-        info = self._get_api().launch_profile(profile_id)
+        info = self._get_api().launch_profile(profile_id, incognito=incognito)
         if not info:
             return None
         return LaunchInfo(

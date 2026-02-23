@@ -80,8 +80,10 @@ export interface GptBusinessAccountSessionResponse {
 }
 
 export type SelfRegisterCardMode = 'selected' | 'random' | 'manual'
+export type SelfRegisterLaunchType = 'geekez' | 'local'
 
 export interface SelfRegisterOptions {
+  launch_type?: SelfRegisterLaunchType
   card_mode?: SelfRegisterCardMode
   selected_card_id?: number
   keep_profile_on_fail?: boolean
@@ -214,6 +216,7 @@ export const gptBusinessApi = {
     mother_ids: string[]
     concurrency?: number
     open_geekez?: boolean
+    launch_type?: SelfRegisterLaunchType
     card_mode?: SelfRegisterCardMode
     selected_card_id?: number
     keep_profile_on_fail?: boolean
@@ -271,21 +274,26 @@ export const gptBusinessApi = {
     ws_endpoint?: string
     pid?: number
     saved?: boolean
-    // 本地无痕模式
+    // 无痕模式
     launch_type?: string
-    target_url?: string
+    email?: string
   }> {
     return request.post(`/plugins/gpt-business/accounts/${accountId}/launch_geekez/`)
   },
 
   /**
-   * 本地无痕模式：直接打开目标 URL
+   * 启动 Geek 无痕模式
    */
   launchLocal(accountId: string): Promise<{
     success: boolean
     launch_type?: string
     browser_type?: string
-    target_url?: string
+    created_profile?: boolean
+    profile_id?: string
+    debug_port?: number
+    cdp_endpoint?: string
+    ws_endpoint?: string
+    pid?: number
     email?: string
   }> {
     return request.post(`/plugins/gpt-business/accounts/${accountId}/launch_geekez/`, {

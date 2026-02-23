@@ -22,7 +22,14 @@ from django.conf import settings as django_settings
 from django.utils import timezone
 
 from .legacy_runner import prepare_artifacts
-from .storage import add_account, find_account, get_settings, list_accounts, patch_account, patch_task
+from .storage import (
+    add_account,
+    find_account,
+    get_settings,
+    list_accounts,
+    patch_account,
+    patch_task,
+)
 from .trace_cleanup import cleanup_trace_files
 
 
@@ -72,7 +79,9 @@ class SensitiveDataFilter:
             r'secret="***"',
         ),
         (
-            re.compile(r'card_number["\']?\s*[:=]\s*["\']([^"\']+)["\']', re.IGNORECASE),
+            re.compile(
+                r'card_number["\']?\s*[:=]\s*["\']([^"\']+)["\']', re.IGNORECASE
+            ),
             r'card_number="****"',
         ),
         (
@@ -109,7 +118,9 @@ def _get_trace_file(celery_task_id: str | None, email: str | None) -> Path | Non
     return trace_dir / filename
 
 
-def _context_prefix(kind: str | None, celery_task_id: str | None, email: str | None) -> str:
+def _context_prefix(
+    kind: str | None, celery_task_id: str | None, email: str | None
+) -> str:
     parts: list[str] = []
     if kind:
         parts.append(kind)
@@ -165,7 +176,9 @@ def _append_trace_line(
         pass
 
 
-def _get_available_card_for_checkout(selected_card_id: int | None = None) -> dict[str, Any] | None:
+def _get_available_card_for_checkout(
+    selected_card_id: int | None = None,
+) -> dict[str, Any] | None:
     """从虚拟卡管理获取一张可用卡用于绑卡"""
     from apps.cards.models import Card
     from django.db.models import Q
@@ -176,18 +189,25 @@ def _get_available_card_for_checkout(selected_card_id: int | None = None) -> dic
             return None
     else:
         now = timezone.now()
-        card = Card.objects.filter(
-            status="available",
-        ).filter(
-            Q(key_expire_time__isnull=True) | Q(key_expire_time__gt=now)
-        ).order_by("?").first()
+        card = (
+            Card.objects.filter(
+                status="available",
+            )
+            .filter(Q(key_expire_time__isnull=True) | Q(key_expire_time__gt=now))
+            .order_by("?")
+            .first()
+        )
 
     if not card:
         return None
-    
+
     billing = card.billing_address or {}
-    expiry = f"{card.expiry_month:02d}/{str(card.expiry_year)[-2:]}" if card.expiry_month and card.expiry_year else ""
-    
+    expiry = (
+        f"{card.expiry_month:02d}/{str(card.expiry_year)[-2:]}"
+        if card.expiry_month and card.expiry_year
+        else ""
+    )
+
     return {
         "card_id": card.id,
         "card_number": card.card_number or "",
@@ -206,7 +226,7 @@ def _mark_card_as_used(card_id: int, account_id: str, purpose: str) -> None:
     """标记卡为已使用并记录日志"""
     from apps.cards.models import Card, CardUsageLog
     from django.utils import timezone
-    
+
     try:
         card = Card.objects.get(id=card_id)
         card.status = "in_use"
@@ -234,7 +254,9 @@ DEFAULT_USER_AGENT = (
 
 
 class GPTMailClient:
-    def __init__(self, api_base: str, api_key: str, *, timeout: int = DEFAULT_TIMEOUT_SECONDS):
+    def __init__(
+        self, api_base: str, api_key: str, *, timeout: int = DEFAULT_TIMEOUT_SECONDS
+    ):
         self.api_base = api_base.rstrip("/")
         self.headers = {
             "X-API-Key": api_key,
@@ -243,7 +265,9 @@ class GPTMailClient:
         self.timeout = timeout
         self.session = requests.Session()
 
-    def generate_email(self, *, prefix: str | None = None, domain: str | None = None) -> str:
+    def generate_email(
+        self, *, prefix: str | None = None, domain: str | None = None
+    ) -> str:
         url = f"{self.api_base}/api/generate-email"
         if prefix or domain:
             payload: dict[str, Any] = {}
@@ -251,7 +275,9 @@ class GPTMailClient:
                 payload["prefix"] = prefix
             if domain:
                 payload["domain"] = domain
-            resp = self.session.post(url, headers=self.headers, json=payload, timeout=self.timeout)
+            resp = self.session.post(
+                url, headers=self.headers, json=payload, timeout=self.timeout
+            )
         else:
             resp = self.session.get(url, headers=self.headers, timeout=self.timeout)
 
@@ -311,7 +337,9 @@ class ChatGPTTeamClient:
 
         return ""
 
-    def invite_emails(self, *, account_id: str, auth_token: str, emails: list[str]) -> dict[str, Any]:
+    def invite_emails(
+        self, *, account_id: str, auth_token: str, emails: list[str]
+    ) -> dict[str, Any]:
         token = self._normalize_token(auth_token)
         headers = {
             "accept": "*/*",
@@ -331,7 +359,9 @@ class ChatGPTTeamClient:
         }
 
         url = f"https://chatgpt.com/backend-api/accounts/{account_id}/invites"
-        resp = self.session.post(url, headers=headers, json=payload, timeout=self.timeout)
+        resp = self.session.post(
+            url, headers=headers, json=payload, timeout=self.timeout
+        )
 
         # chatgpt 接口通常会返回 200；非 200 直接报错并上抛给任务
         resp.raise_for_status()
@@ -349,7 +379,9 @@ class ChatGPTTeamClient:
             err_email = err.get("email")
             err_msg = err.get("error")
             if err_email:
-                failed.append({"email": str(err_email), "error": str(err_msg or "Unknown error")})
+                failed.append(
+                    {"email": str(err_email), "error": str(err_msg or "Unknown error")}
+                )
 
         # 没有明确字段时，按成功处理
         if not success and not failed:
@@ -380,10 +412,10 @@ def invite_only_task(self, record_id: str):
 
     try:
         settings = get_settings()
-        gptmail_cfg = (settings.get("gptmail") or {})
+        gptmail_cfg = settings.get("gptmail") or {}
         teams = settings.get("teams") or []
 
-        task_record = (settings.get("tasks") or [])
+        task_record = settings.get("tasks") or []
         # task_record 可能很大，这里不重复扫描；靠 views 传入的 record_id 已保存 team_name/count
 
         # 在 settings 中定位任务记录（用于读取参数）
@@ -591,6 +623,7 @@ def _cloudmail_email_config_from_account(acc: dict[str, Any]) -> dict[str, Any]:
         "web_url": "",
     }
 
+
 def _collect_workspace_hints(
     task_record: dict[str, Any] | None,
     account: dict[str, Any] | None,
@@ -726,7 +759,16 @@ def self_register_task(self, record_id: str):
             pass
 
         card_mode_raw = str(task_record.get("card_mode") or "random").strip().lower()
-        card_mode = card_mode_raw if card_mode_raw in {"selected", "random", "manual"} else "random"
+        card_mode = (
+            card_mode_raw
+            if card_mode_raw in {"selected", "random", "manual"}
+            else "random"
+        )
+
+        launch_type_raw = (
+            str(task_record.get("launch_type") or "geekez").strip().lower()
+        )
+        launch_type = "local" if launch_type_raw in {"local", "incognito"} else "geekez"
 
         keep_profile_raw = task_record.get("keep_profile_on_fail")
         if isinstance(keep_profile_raw, bool):
@@ -734,8 +776,16 @@ def self_register_task(self, record_id: str):
         elif isinstance(keep_profile_raw, (int, float)):
             keep_profile_on_fail = bool(keep_profile_raw)
         elif isinstance(keep_profile_raw, str):
-            keep_profile_on_fail = keep_profile_raw.strip().lower() in {"1", "true", "yes", "on"}
+            keep_profile_on_fail = keep_profile_raw.strip().lower() in {
+                "1",
+                "true",
+                "yes",
+                "on",
+            }
         else:
+            keep_profile_on_fail = False
+
+        if launch_type == "local":
             keep_profile_on_fail = False
 
         selected_card_raw = task_record.get("selected_card_id")
@@ -746,7 +796,9 @@ def self_register_task(self, record_id: str):
             except (TypeError, ValueError):
                 selected_card_id = None
 
-        card_info = _get_available_card_for_checkout(selected_card_id if card_mode == "selected" else None)
+        card_info = _get_available_card_for_checkout(
+            selected_card_id if card_mode == "selected" else None
+        )
         if not card_info:
             if card_mode == "manual":
                 _log("manual card mode: waiting for human card input on checkout")
@@ -761,6 +813,7 @@ def self_register_task(self, record_id: str):
 
         from apps.integrations.email.models import CloudMailConfig
         from apps.integrations.email.services.client import CloudMailClient
+
         cfg = CloudMailConfig.objects.filter(id=config_id, is_active=True).first()
         if not cfg:
             raise RuntimeError(f"CloudMailConfig not found: {config_id}")
@@ -793,7 +846,10 @@ def self_register_task(self, record_id: str):
             return None
 
         proxy_str = _proxy_to_str((settings.get("browser") or {}).get("proxy"))
-        profile_name = f"gpt_{email}"
+        incognito_mode = launch_type == "local"
+        profile_name = (
+            f"gpt_tmp_{record_id[:8]}_{email}" if incognito_mode else f"gpt_{email}"
+        )
 
         from apps.integrations.geekez.api import GeekezBrowserAPI
         from plugins.gpt_business.services.openai_register import (
@@ -804,21 +860,37 @@ def self_register_task(self, record_id: str):
         def _run_sync() -> dict[str, Any]:
             """同步执行注册流程（使用 DrissionPage）"""
             api = GeekezBrowserAPI()
-            
-            # 创建或获取 profile
+
+            if incognito_mode:
+                _log("launch mode=local (incognito): use one-time temporary profile")
+                profile = api.create_or_update_profile(
+                    name=profile_name, proxy=proxy_str
+                )
+                created_profile = True
+            else:
+                # 创建或获取 profile
+                created_profile = False
+                profile = api.get_profile_by_name(profile_name)
+                if not profile:
+                    profile = api.get_profile_by_name(email)
+                if not profile:
+                    profile = api.create_or_update_profile(
+                        name=profile_name, proxy=proxy_str
+                    )
+                    created_profile = True
+
             _log(f"creating/updating profile: {profile_name}")
-            profile = api.create_or_update_profile(name=profile_name, proxy=proxy_str)
             _log(f"profile ready: id={profile.id}, name={profile.name}")
-            
+
             # 启动浏览器
             _log(f"launching profile: {profile.id}")
-            launch = api.launch_profile(profile.id)
+            launch = api.launch_profile(profile.id, incognito=incognito_mode)
             if not launch:
                 raise RuntimeError(f"launch_profile failed: {profile.id}")
-            
+
             debug_port = launch.debug_port
             _log(f"browser launched, debug_port={debug_port}")
-            
+
             page = None
             register_ok = False
             checkout_ok: bool | None = None
@@ -826,7 +898,7 @@ def self_register_task(self, record_id: str):
                 # 用 DrissionPage 连接到 Geekez 浏览器
                 page = connect_to_browser(debug_port)
                 _log("DrissionPage connected to Geekez browser")
-                
+
                 # 截图回调
                 def shot_callback(name: str):
                     try:
@@ -834,15 +906,17 @@ def self_register_task(self, record_id: str):
                         page.get_screenshot(path=str(p), full_page=True)
                     except Exception:
                         pass
-                
+
                 # 验证码回调
                 def get_code_callback(email_addr: str) -> str | None:
-                    return mail_client.wait_for_verification_code(email_addr, timeout=120)
-                
+                    return mail_client.wait_for_verification_code(
+                        email_addr, timeout=120
+                    )
+
                 # 调用注册函数
                 _log("calling register_openai_account...")
                 print("[DEBUG] calling register_openai_account...", flush=True)
-                
+
                 try:
                     register_ok = register_openai_account(
                         page=page,
@@ -853,77 +927,101 @@ def self_register_task(self, record_id: str):
                         screenshot_callback=shot_callback,
                     )
                 except Exception as reg_err:
-                    print(f"[DEBUG] register_openai_account exception: {reg_err}", flush=True)
+                    print(
+                        f"[DEBUG] register_openai_account exception: {reg_err}",
+                        flush=True,
+                    )
                     _log(f"register exception: {reg_err}")
                     register_ok = False
-                
-                print(f"[DEBUG] register_openai_account returned: {register_ok}", flush=True)
+
+                print(
+                    f"[DEBUG] register_openai_account returned: {register_ok}",
+                    flush=True,
+                )
                 _log(f"register_openai_account returned: {register_ok}")
-                
+
                 # Team 开通逻辑
                 checkout_err = ""
                 session_data = {}
                 used_card_id: int | None = None
-                
-                print(f"[DEBUG] register_ok={register_ok}, starting card check mode={card_mode}...", flush=True)
+
+                print(
+                    f"[DEBUG] register_ok={register_ok}, starting card check mode={card_mode}...",
+                    flush=True,
+                )
                 _log(f"register_ok={register_ok}, starting team onboarding check...")
-                
+
                 if register_ok:
                     print("[DEBUG] starting onboarding...", flush=True)
-                    
+
                     try:
                         _log("start team onboarding flow")
-                        
+
                         from plugins.gpt_business.services.onboarding_flow import (
                             run_onboarding_flow,
                             set_log_callback,
                         )
-                        
+
                         set_log_callback(_log)
-                        
+
                         def get_checkout_card() -> dict[str, Any] | None:
                             nonlocal used_card_id
-                            payload = _get_available_card_for_checkout(selected_card_id if card_mode == "selected" else None)
+                            payload = _get_available_card_for_checkout(
+                                selected_card_id if card_mode == "selected" else None
+                            )
                             if payload:
                                 card_id = payload.get("card_id")
                                 try:
-                                    used_card_id = int(card_id) if card_id is not None else None
+                                    used_card_id = (
+                                        int(card_id) if card_id is not None else None
+                                    )
                                 except (TypeError, ValueError):
                                     used_card_id = None
                             return payload
 
                         skip_checkout = card_mode == "manual"
 
-                        print(f"[DEBUG] calling run_onboarding_flow mode={card_mode}...", flush=True)
+                        print(
+                            f"[DEBUG] calling run_onboarding_flow mode={card_mode}...",
+                            flush=True,
+                        )
                         success, session_data = run_onboarding_flow(
                             page=page,
                             email=email,
                             skip_checkout=skip_checkout,
-                            get_card_callback=None if skip_checkout else get_checkout_card,
+                            get_card_callback=None
+                            if skip_checkout
+                            else get_checkout_card,
                             card_wait_timeout=300,
                         )
-                        print(f"[DEBUG] run_onboarding_flow returned: {success}", flush=True)
-                        
+                        print(
+                            f"[DEBUG] run_onboarding_flow returned: {success}",
+                            flush=True,
+                        )
+
                         checkout_ok = success
                         if success:
                             _log("team onboarding completed successfully")
                         else:
                             checkout_err = "onboarding flow failed"
                             _log("team onboarding failed")
-                        
+
                         shot_callback("checkout_done.png")
-                        
+
                     except Exception as e:
                         print(f"[DEBUG] checkout exception: {e}", flush=True)
                         checkout_err = str(e)
                         _log(f"checkout error: {e}")
                         shot_callback("checkout_error.png")
                         checkout_ok = False
-                
-                profile_kept_open = keep_profile_on_fail and (not register_ok or checkout_ok is False)
+
+                profile_kept_open = keep_profile_on_fail and (
+                    not register_ok or checkout_ok is False
+                )
                 return {
                     "profile_id": profile.id,
                     "profile_name": profile.name,
+                    "launch_type": launch_type,
                     "register_ok": register_ok,
                     "checkout_ok": checkout_ok,
                     "checkout_error": checkout_err,
@@ -933,7 +1031,9 @@ def self_register_task(self, record_id: str):
                     "keep_profile_on_fail": keep_profile_on_fail,
                 }
             finally:
-                profile_kept_open = keep_profile_on_fail and (not register_ok or checkout_ok is False)
+                profile_kept_open = keep_profile_on_fail and (
+                    not register_ok or checkout_ok is False
+                )
                 if profile_kept_open:
                     _log(
                         f"debug keep-profile enabled: skip closing profile {profile.id} (register_ok={register_ok}, checkout_ok={checkout_ok})"
@@ -954,13 +1054,19 @@ def self_register_task(self, record_id: str):
                         _log(f"closed profile: {profile.id}")
                     except Exception as e:
                         _log(f"failed to close profile: {e}")
+                    if incognito_mode:
+                        try:
+                            api.delete_profile(profile.id)
+                            _log(f"deleted temp profile: {profile.id}")
+                        except Exception as e:
+                            _log(f"failed to delete temp profile: {e}")
 
         flow_result = _run_sync()
         _set_task_progress(record_id, 2, 3, "初始化环境")
         register_ok = bool(flow_result.get("register_ok"))
         checkout_ok = flow_result.get("checkout_ok")
         used_card_id = flow_result.get("used_card_id")
-        
+
         # 开通成功：注册成功且开通成功
         # 未开通：注册成功但开通未进行或失败
         if checkout_ok:
@@ -969,13 +1075,15 @@ def self_register_task(self, record_id: str):
             open_status = "registered"  # 已注册未开通
         else:
             open_status = "failed"  # 失败
-        
+
         success = register_ok and (checkout_ok in (None, True))
 
-        _log(f"done register_ok={register_ok} checkout_ok={checkout_ok} open_status={open_status}")
-        
+        _log(
+            f"done register_ok={register_ok} checkout_ok={checkout_ok} open_status={open_status}"
+        )
+
         now = timezone.now().isoformat()
-        
+
         # 保存 session 数据到账号，并校验是否具备 Team 权限
         session_data = flow_result.get("session_data")
         team_status = "not_started"
@@ -1001,7 +1109,9 @@ def self_register_task(self, record_id: str):
                     team_account_id = team_client.fetch_account_id(session_token)
                     if team_account_id:
                         team_status = "success"
-                        _log(f"session team permission verified account_id={team_account_id}")
+                        _log(
+                            f"session team permission verified account_id={team_account_id}"
+                        )
                     else:
                         team_status = "failed"
                         _log("session team permission check failed: account_id empty")
@@ -1039,7 +1149,15 @@ def self_register_task(self, record_id: str):
                 "status": "completed" if success else "failed",
                 "finished_at": timezone.now().isoformat(),
                 "result": result,
-                **({} if success else {"error": str(flow_result.get("checkout_error") or "self_register failed")}),
+                **(
+                    {}
+                    if success
+                    else {
+                        "error": str(
+                            flow_result.get("checkout_error") or "self_register failed"
+                        )
+                    }
+                ),
             },
         )
 
@@ -1257,7 +1375,9 @@ def auto_invite_task(self, record_id: str):
         children = [
             a
             for a in list_accounts(settings)
-            if isinstance(a, dict) and str(a.get("type")) == "child" and str(a.get("parent_id")) == mother_id
+            if isinstance(a, dict)
+            and str(a.get("type")) == "child"
+            and str(a.get("parent_id")) == mother_id
         ]
         seat_total = int(mother.get("seat_total") or 0)
         need_fill = 0
@@ -1265,7 +1385,9 @@ def auto_invite_task(self, record_id: str):
             need_fill = seat_total - len(children)
 
         if need_fill > 0:
-            _append_log(f"auto-fill children by seat_total: seat_total={seat_total} existing={len(children)} fill={need_fill}")
+            _append_log(
+                f"auto-fill children by seat_total: seat_total={seat_total} existing={len(children)} fill={need_fill}"
+            )
 
             email_cfg = _cloudmail_email_config_from_account(mother)
             from apps.integrations.email.services.client import CloudMailClient
@@ -1284,10 +1406,14 @@ def auto_invite_task(self, record_id: str):
             now_iso = timezone.now().isoformat()
             created_children: list[dict[str, Any]] = []
             for i in range(need_fill):
-                email_child, email_password = mail_client.create_random_user(domain=preferred_domain)
+                email_child, email_password = mail_client.create_random_user(
+                    domain=preferred_domain
+                )
                 child_id = uuid.uuid4().hex
                 account_password = _generate_account_password()
-                actual_domain = email_child.split("@", 1)[1] if "@" in email_child else ""
+                actual_domain = (
+                    email_child.split("@", 1)[1] if "@" in email_child else ""
+                )
 
                 record = {
                     "id": child_id,
@@ -1319,7 +1445,9 @@ def auto_invite_task(self, record_id: str):
             children = [
                 a
                 for a in list_accounts(settings)
-                if isinstance(a, dict) and str(a.get("type")) == "child" and str(a.get("parent_id")) == mother_id
+                if isinstance(a, dict)
+                and str(a.get("type")) == "child"
+                and str(a.get("parent_id")) == mother_id
             ]
             _append_log(f"auto-fill done children_total={len(children)}")
 
@@ -1374,7 +1502,10 @@ def auto_invite_task(self, record_id: str):
         # NOTE: 这里必须走浏览器内的 fetch（见 chatgpt_backend_api.py）
         # 因为 Celery 容器内 requests 可能无法直连 chatgpt.com（例如 Errno 101 Network is unreachable）。
         from .services.browser_service import BrowserService
-        from .services.chatgpt_backend_api import browser_fetch_account_id, browser_invite_emails
+        from .services.chatgpt_backend_api import (
+            browser_fetch_account_id,
+            browser_invite_emails,
+        )
 
         def _safe_name(raw: str) -> str:
             s = (raw or "").strip()
@@ -1406,7 +1537,9 @@ def auto_invite_task(self, record_id: str):
             for u in urls:
                 lu = u.lower()
                 if "chatgpt.com" in lu or "openai.com" in lu:
-                    if any(k in lu for k in ["invite", "invitation", "join", "workspace"]):
+                    if any(
+                        k in lu for k in ["invite", "invitation", "join", "workspace"]
+                    ):
                         return u
             for u in urls:
                 lu = u.lower()
@@ -1414,18 +1547,26 @@ def auto_invite_task(self, record_id: str):
                     return u
             return urls[0] if urls else ""
 
-        def _wait_invite_link(mail_client, to_email: str, timeout_sec: int = 180) -> str:
+        def _wait_invite_link(
+            mail_client, to_email: str, timeout_sec: int = 180
+        ) -> str:
             start = timezone.now().timestamp()
             _append_log(f"wait invite email start to={to_email} timeout={timeout_sec}s")
             while timezone.now().timestamp() - start < timeout_sec:
                 try:
-                    emails = mail_client.list_emails(to_email=to_email, size=10, time_sort="desc")
+                    emails = mail_client.list_emails(
+                        to_email=to_email, size=10, time_sort="desc"
+                    )
                     for em in emails:
-                        text = f"{em.subject or ''}\n{em.text or ''}\n{em.content or ''}"
+                        text = (
+                            f"{em.subject or ''}\n{em.text or ''}\n{em.content or ''}"
+                        )
                         urls = _extract_urls(text)
                         invite_url = _pick_invite_url(urls)
                         if invite_url:
-                            _append_log(f"invite email found subject={em.subject!r} url={invite_url}")
+                            _append_log(
+                                f"invite email found subject={em.subject!r} url={invite_url}"
+                            )
                             return invite_url
                 except Exception as e:
                     _append_log(f"wait invite email poll error: {e}")
@@ -1436,7 +1577,11 @@ def auto_invite_task(self, record_id: str):
         def _try_accept_invite_ui(page, *, log_prefix: str, shot_cb) -> bool:
             # 只做轻量点击：优先按文案点击；避免误点 submit。
             try:
-                from .services.openai_register import wait_for_page_stable, wait_for_element, human_delay
+                from .services.openai_register import (
+                    wait_for_page_stable,
+                    wait_for_element,
+                    human_delay,
+                )
             except Exception:
                 return False
 
@@ -1494,7 +1639,9 @@ def auto_invite_task(self, record_id: str):
                     if not account_id:
                         raise RuntimeError("session invite failed: missing account_id")
 
-                    _append_log(f"session invite start count={len(child_emails_to_invite)}")
+                    _append_log(
+                        f"session invite start count={len(child_emails_to_invite)}"
+                    )
                     invite_response = team_client.invite_emails(
                         account_id=account_id,
                         auth_token=token,
@@ -1503,11 +1650,15 @@ def auto_invite_task(self, record_id: str):
                     invited_via_session = True
                     _append_log("session invite completed")
                 except Exception as invite_err:
-                    _append_log(f"session invite failed, fallback browser: {invite_err}")
+                    _append_log(
+                        f"session invite failed, fallback browser: {invite_err}"
+                    )
 
             if not invited_via_session:
                 with BrowserService(profile_name=f"gpt_{email}") as browser:
-                    _append_log(f"browser launched profile={getattr(browser, '_launched_profile_id', None)}")
+                    _append_log(
+                        f"browser launched profile={getattr(browser, '_launched_profile_id', None)}"
+                    )
                     if not browser.page:
                         raise RuntimeError("Browser page is not available")
 
@@ -1522,7 +1673,9 @@ def auto_invite_task(self, record_id: str):
                     _get_code_mother_cb: Callable[[str], str | None] | None = None
                     try:
                         email_cfg = _cloudmail_email_config_from_account(mother)
-                        from apps.integrations.email.services.client import CloudMailClient
+                        from apps.integrations.email.services.client import (
+                            CloudMailClient,
+                        )
 
                         _mail_client_mother = CloudMailClient(
                             api_base=str(email_cfg.get("api_base") or ""),
@@ -1546,12 +1699,16 @@ def auto_invite_task(self, record_id: str):
 
                         _append_log("已配置 CloudMail 验证码回调")
                     except Exception as mail_err:
-                        _append_log(f"CloudMail 未配置或不可用: {mail_err}（如遇验证码页面将无法自动处理）")
+                        _append_log(
+                            f"CloudMail 未配置或不可用: {mail_err}（如遇验证码页面将无法自动处理）"
+                        )
 
                     if token:
                         _append_log("reuse existing auth_token")
                     else:
-                        _append_log("auth_token missing, login via Geekez + /api/auth/session")
+                        _append_log(
+                            "auth_token missing, login via Geekez + /api/auth/session"
+                        )
                         token, _session = _ensure_access_token_via_login(
                             page=browser.page,
                             email=email,
@@ -1570,7 +1727,9 @@ def auto_invite_task(self, record_id: str):
                     _append_log(f"auth_token ok len={len(token)}")
 
                     if not account_id:
-                        _append_log("account_id missing, fetch via browser /backend-api/accounts/check")
+                        _append_log(
+                            "account_id missing, fetch via browser /backend-api/accounts/check"
+                        )
                         try:
                             account_id = browser_fetch_account_id(
                                 browser.page,
@@ -1619,7 +1778,9 @@ def auto_invite_task(self, record_id: str):
         has_failed = isinstance(failed_list, list) and len(failed_list) > 0
 
         try:
-            _append_log(f"invite done success={len(success_list) if isinstance(success_list, list) else 0} failed={len(failed_list) if isinstance(failed_list, list) else 0}")
+            _append_log(
+                f"invite done success={len(success_list) if isinstance(success_list, list) else 0} failed={len(failed_list) if isinstance(failed_list, list) else 0}"
+            )
             if isinstance(failed_list, list) and failed_list:
                 # 失败邮箱可能含原因对象，这里只尽量提取 email 字段
                 failed_emails: list[str] = []
@@ -1740,7 +1901,11 @@ def auto_invite_task(self, record_id: str):
                                     api_base=sub2api_api_base,
                                     admin_key=sub2api_admin_api_key,
                                     admin_token=sub2api_admin_jwt,
-                                    group_names=[str(x or "").strip() for x in group_names if str(x or "").strip()],
+                                    group_names=[
+                                        str(x or "").strip()
+                                        for x in group_names
+                                        if str(x or "").strip()
+                                    ],
                                     timeout=min(pool_timeout, 20),
                                 )
                             except Exception:
@@ -1801,7 +1966,10 @@ def auto_invite_task(self, record_id: str):
             log_prefix: str,
         ) -> dict[str, Any]:
             if not sub2_cfg:
-                return {"status": "skipped", "reason": auto_pool_disabled_reason or "auto_pool_disabled"}
+                return {
+                    "status": "skipped",
+                    "reason": auto_pool_disabled_reason or "auto_pool_disabled",
+                }
             if not child_id:
                 return {"status": "failed", "reason": "missing_child_id"}
             if not child_pwd:
@@ -1811,7 +1979,9 @@ def auto_invite_task(self, record_id: str):
             _mark_child_pool_status(child_id, "running")
 
             try:
-                existing = sub2api_find_openai_oauth_account(sub2_cfg, child_email, timeout=pool_timeout)
+                existing = sub2api_find_openai_oauth_account(
+                    sub2_cfg, child_email, timeout=pool_timeout
+                )
                 if existing:
                     _mark_child_pool_status(child_id, "success")
                     _append_log(log_prefix + "pool skip: already exists in sub2")
@@ -1822,7 +1992,10 @@ def auto_invite_task(self, record_id: str):
             page = child_browser.page
             if page is None:
                 _mark_child_pool_status(child_id, "failed")
-                return {"status": "failed", "reason": "child_browser_page_not_available"}
+                return {
+                    "status": "failed",
+                    "reason": "child_browser_page_not_available",
+                }
 
             email_selector = (
                 'css:input[type="email"], input[name="email"], input[id="email"], '
@@ -1887,7 +2060,9 @@ def auto_invite_task(self, record_id: str):
                         pass
 
                 time.sleep(0.6)
-                submit_btn = wait_for_element(page, 'css:button[type="submit"]', timeout=10)
+                submit_btn = wait_for_element(
+                    page, 'css:button[type="submit"]', timeout=10
+                )
                 if submit_btn:
                     try:
                         submit_btn.click()
@@ -1897,7 +2072,9 @@ def auto_invite_task(self, record_id: str):
                 return True
 
             def _click_submit_if_any(timeout_sec: int) -> bool:
-                btn = wait_for_element(page, 'css:button[type="submit"]', timeout=timeout_sec)
+                btn = wait_for_element(
+                    page, 'css:button[type="submit"]', timeout=timeout_sec
+                )
                 if not btn:
                     return False
                 old_url = str(child_browser.current_url() or "")
@@ -1915,11 +2092,15 @@ def auto_invite_task(self, record_id: str):
                 session_id = ""
                 for attempt in range(1, max_attempts + 1):
                     try:
-                        auth = sub2api_openai_generate_auth_url(sub2_cfg, email=child_email, timeout=pool_timeout)
+                        auth = sub2api_openai_generate_auth_url(
+                            sub2_cfg, email=child_email, timeout=pool_timeout
+                        )
                         auth_url = str(auth.get("auth_url") or "").strip()
                         session_id = str(auth.get("session_id") or "").strip()
                         if not auth_url or not session_id:
-                            raise RuntimeError("generate-auth-url returned empty auth_url/session_id")
+                            raise RuntimeError(
+                                "generate-auth-url returned empty auth_url/session_id"
+                            )
 
                         page.get(auth_url)
                         time.sleep(2)
@@ -1929,7 +2110,9 @@ def auto_invite_task(self, record_id: str):
                             if "code=" in cur_url:
                                 break
 
-                            email_input = wait_for_element(page, email_selector, timeout=1)
+                            email_input = wait_for_element(
+                                page, email_selector, timeout=1
+                            )
                             if email_input:
                                 human_delay()
                                 type_slowly(page, email_input, child_email)
@@ -1938,7 +2121,9 @@ def auto_invite_task(self, record_id: str):
                                 time.sleep(1)
                                 continue
 
-                            password_input = wait_for_element(page, password_selector, timeout=1)
+                            password_input = wait_for_element(
+                                page, password_selector, timeout=1
+                            )
                             if password_input:
                                 human_delay()
                                 type_slowly(page, password_input, str(child_pwd))
@@ -2005,7 +2190,10 @@ def auto_invite_task(self, record_id: str):
                             time.sleep(0.5)
 
                     except Exception as attempt_exc:
-                        _append_log(log_prefix + f"pool oauth attempt {attempt} failed: {attempt_exc}")
+                        _append_log(
+                            log_prefix
+                            + f"pool oauth attempt {attempt} failed: {attempt_exc}"
+                        )
                         if attempt < max_attempts:
                             time.sleep(2)
                             continue
@@ -2059,8 +2247,12 @@ def auto_invite_task(self, record_id: str):
                             or ""
                         ).strip()
 
-                        expires_in_val = token_info.get("expires_in") or token_info.get("expiresIn")
-                        expires_at_val = token_info.get("expires_at") or token_info.get("expiresAt")
+                        expires_in_val = token_info.get("expires_in") or token_info.get(
+                            "expiresIn"
+                        )
+                        expires_at_val = token_info.get("expires_at") or token_info.get(
+                            "expiresAt"
+                        )
                         if isinstance(expires_in_val, int):
                             expires_in = expires_in_val
                         elif isinstance(expires_in_val, str) and expires_in_val.strip():
@@ -2088,7 +2280,9 @@ def auto_invite_task(self, record_id: str):
                     )
                     created = bool(created2)
                     if not created and msg2:
-                        raise RuntimeError(f"exchange-code/create-account failed: {msg2}")
+                        raise RuntimeError(
+                            f"exchange-code/create-account failed: {msg2}"
+                        )
 
                 if created:
                     _mark_child_pool_status(child_id, "success")
@@ -2112,7 +2306,9 @@ def auto_invite_task(self, record_id: str):
             child_id = str(child.get("id") or "").strip()
             child_pwd = str(child.get("account_password") or "").strip()
             child_join_status = str(child.get("team_join_status") or "").strip()
-            child_team_account_id_saved = str(child.get("team_account_id") or "").strip()
+            child_team_account_id_saved = str(
+                child.get("team_account_id") or ""
+            ).strip()
             child_login_status = str(child.get("login_status") or "").strip()
             child_pool_status = str(child.get("pool_status") or "").strip()
 
@@ -2122,7 +2318,9 @@ def auto_invite_task(self, record_id: str):
 
             _append_log(log_prefix + "start")
 
-            child_is_joined = child_join_status == "success" or bool(child_team_account_id_saved)
+            child_is_joined = child_join_status == "success" or bool(
+                child_team_account_id_saved
+            )
             child_is_pooled = child_pool_status == "success"
 
             # 已入队且已入池：直接跳过（避免重复登录/重复点邀请）
@@ -2142,7 +2340,13 @@ def auto_invite_task(self, record_id: str):
                 continue
 
             if not child_pwd and not child_is_joined:
-                children_results.append({"email": child_email, "joined": False, "error": "missing account_password"})
+                children_results.append(
+                    {
+                        "email": child_email,
+                        "joined": False,
+                        "error": "missing account_password",
+                    }
+                )
                 join_failed.append(child_email)
                 continue
 
@@ -2177,12 +2381,18 @@ def auto_invite_task(self, record_id: str):
             try:
                 for attempt in range(2):
                     try:
-                        with BrowserService(profile_name=f"gpt_{child_email}") as child_browser:
+                        with BrowserService(
+                            profile_name=f"gpt_{child_email}"
+                        ) as child_browser:
                             if not child_browser.page:
-                                raise RuntimeError("child browser page is not available")
+                                raise RuntimeError(
+                                    "child browser page is not available"
+                                )
 
                             safe = _safe_name(child_email)
-                            child_shot = _make_shot(child_browser.page, prefix=f"child_{safe}_")
+                            child_shot = _make_shot(
+                                child_browser.page, prefix=f"child_{safe}_"
+                            )
 
                             try:
                                 child_browser.page.get("https://chatgpt.com/")
@@ -2192,11 +2402,19 @@ def auto_invite_task(self, record_id: str):
                             # 1) 登录（若不存在则注册）
                             child_token = ""
                             child_session_raw = child.get("session")
-                            child_session_data: dict[str, Any] = child_session_raw if isinstance(child_session_raw, dict) else {}
-                            persisted_child_token = str(child_session_data.get("accessToken") or "").strip()
+                            child_session_data: dict[str, Any] = (
+                                child_session_raw
+                                if isinstance(child_session_raw, dict)
+                                else {}
+                            )
+                            persisted_child_token = str(
+                                child_session_data.get("accessToken") or ""
+                            ).strip()
                             if persisted_child_token:
                                 child_token = persisted_child_token
-                                _append_log(log_prefix + "reuse persisted session token")
+                                _append_log(
+                                    log_prefix + "reuse persisted session token"
+                                )
 
                             def _get_code_child(_email: str) -> str | None:
                                 _append_log(log_prefix + "wait verification code start")
@@ -2206,7 +2424,14 @@ def auto_invite_task(self, record_id: str):
                                     poll_interval=5,
                                     sender_contains=None,
                                 )
-                                _append_log(log_prefix + ("verification code received" if code else "verification code missing"))
+                                _append_log(
+                                    log_prefix
+                                    + (
+                                        "verification code received"
+                                        if code
+                                        else "verification code missing"
+                                    )
+                                )
                                 return code
 
                             try:
@@ -2221,38 +2446,66 @@ def auto_invite_task(self, record_id: str):
                                 except Exception:
                                     pass
                                 # 如果标记为已登录，则先尝试直接复用 session（避免重复跑完整登录流程）
-                                if (not child_token) and child_login_status == "success":
-                                    _append_log(log_prefix + "skip login: login_status=success, try session")
+                                if (
+                                    not child_token
+                                ) and child_login_status == "success":
+                                    _append_log(
+                                        log_prefix
+                                        + "skip login: login_status=success, try session"
+                                    )
                                     try:
-                                        from .services.chatgpt_session import fetch_auth_session
+                                        from .services.chatgpt_session import (
+                                            fetch_auth_session,
+                                        )
 
-                                        sess_data = fetch_auth_session(child_browser.page, timeout=7)
-                                        sess_user = sess_data.get("user") if isinstance(sess_data, dict) else None
+                                        sess_data = fetch_auth_session(
+                                            child_browser.page, timeout=7
+                                        )
+                                        sess_user = (
+                                            sess_data.get("user")
+                                            if isinstance(sess_data, dict)
+                                            else None
+                                        )
                                         sess_email = (
                                             str(sess_user.get("email") or "").strip()
                                             if isinstance(sess_user, dict)
                                             else ""
                                         )
                                         sess_token = (
-                                            str(sess_data.get("accessToken") or "").strip()
+                                            str(
+                                                sess_data.get("accessToken") or ""
+                                            ).strip()
                                             if isinstance(sess_data, dict)
                                             else ""
                                         )
-                                        if sess_token and sess_email and sess_email.lower() == child_email.lower():
+                                        if (
+                                            sess_token
+                                            and sess_email
+                                            and sess_email.lower()
+                                            == child_email.lower()
+                                        ):
                                             child_token = sess_token
-                                            child_session_data = sess_data if isinstance(sess_data, dict) else child_session_data
+                                            child_session_data = (
+                                                sess_data
+                                                if isinstance(sess_data, dict)
+                                                else child_session_data
+                                            )
                                     except Exception:
                                         child_token = ""
 
                                 if not child_token:
-                                    _append_log(log_prefix + "login via /api/auth/session")
+                                    _append_log(
+                                        log_prefix + "login via /api/auth/session"
+                                    )
                                     child_token, _sess = _ensure_access_token_via_login(
                                         page=child_browser.page,
                                         email=child_email,
                                         password=child_pwd,
                                         get_verification_code=_get_code_child,
                                         timeout=180,
-                                        log_callback=lambda m: _append_log(log_prefix + m),
+                                        log_callback=lambda m: _append_log(
+                                            log_prefix + m
+                                        ),
                                         screenshot_callback=child_shot,
                                         workspace_hints=workspace_hints,
                                         require_team_workspace=False,
@@ -2271,7 +2524,9 @@ def auto_invite_task(self, record_id: str):
                                 except Exception:
                                     pass
                             except Exception as e:
-                                _append_log(log_prefix + f"login failed: {e}; try register")
+                                _append_log(
+                                    log_prefix + f"login failed: {e}; try register"
+                                )
 
                                 try:
                                     patch_account(
@@ -2292,21 +2547,30 @@ def auto_invite_task(self, record_id: str):
                                     log_callback=lambda m: _append_log(log_prefix + m),
                                     screenshot_callback=child_shot,
                                 )
-                                _append_log(log_prefix + f"register result={register_ok}")
+                                _append_log(
+                                    log_prefix + f"register result={register_ok}"
+                                )
                                 if not register_ok:
                                     # 可能账号已创建但 session 没落地（会回到未登录首页）。尝试再登录一次兜底。
-                                    _append_log(log_prefix + "register returned False, try login anyway")
+                                    _append_log(
+                                        log_prefix
+                                        + "register returned False, try login anyway"
+                                    )
                                     try:
-                                        child_token, _sess = _ensure_access_token_via_login(
-                                            page=child_browser.page,
-                                            email=child_email,
-                                            password=child_pwd,
-                                            get_verification_code=_get_code_child,
-                                            timeout=180,
-                                            log_callback=lambda m: _append_log(log_prefix + m),
-                                            screenshot_callback=child_shot,
-                                            workspace_hints=workspace_hints,
-                                            require_team_workspace=False,
+                                        child_token, _sess = (
+                                            _ensure_access_token_via_login(
+                                                page=child_browser.page,
+                                                email=child_email,
+                                                password=child_pwd,
+                                                get_verification_code=_get_code_child,
+                                                timeout=180,
+                                                log_callback=lambda m: _append_log(
+                                                    log_prefix + m
+                                                ),
+                                                screenshot_callback=child_shot,
+                                                workspace_hints=workspace_hints,
+                                                require_team_workspace=False,
+                                            )
                                         )
                                         if isinstance(_sess, dict) and _sess:
                                             child_session_data = _sess
@@ -2322,7 +2586,9 @@ def auto_invite_task(self, record_id: str):
                                             )
                                         except Exception:
                                             pass
-                                        raise RuntimeError("register_openai_account failed")
+                                        raise RuntimeError(
+                                            "register_openai_account failed"
+                                        )
 
                                 try:
                                     patch_account(
@@ -2344,11 +2610,30 @@ def auto_invite_task(self, record_id: str):
                                 except Exception:
                                     pass
 
-                                sess_data = fetch_auth_session(child_browser.page, timeout=7)
-                                sess_user = sess_data.get("user") if isinstance(sess_data, dict) else None
-                                sess_email = str(sess_user.get("email") or "").strip() if isinstance(sess_user, dict) else ""
-                                sess_token = str(sess_data.get("accessToken") or "").strip() if isinstance(sess_data, dict) else ""
-                                if not child_token and sess_token and sess_email and sess_email.lower() == child_email.lower():
+                                sess_data = fetch_auth_session(
+                                    child_browser.page, timeout=7
+                                )
+                                sess_user = (
+                                    sess_data.get("user")
+                                    if isinstance(sess_data, dict)
+                                    else None
+                                )
+                                sess_email = (
+                                    str(sess_user.get("email") or "").strip()
+                                    if isinstance(sess_user, dict)
+                                    else ""
+                                )
+                                sess_token = (
+                                    str(sess_data.get("accessToken") or "").strip()
+                                    if isinstance(sess_data, dict)
+                                    else ""
+                                )
+                                if (
+                                    not child_token
+                                    and sess_token
+                                    and sess_email
+                                    and sess_email.lower() == child_email.lower()
+                                ):
                                     child_token = sess_token
                                 if isinstance(sess_data, dict) and sess_data:
                                     child_session_data = sess_data
@@ -2360,7 +2645,9 @@ def auto_invite_task(self, record_id: str):
                                         password=child_pwd,
                                         get_verification_code=_get_code_child,
                                         timeout=180,
-                                        log_callback=lambda m: _append_log(log_prefix + m),
+                                        log_callback=lambda m: _append_log(
+                                            log_prefix + m
+                                        ),
                                         screenshot_callback=child_shot,
                                         workspace_hints=workspace_hints,
                                         require_team_workspace=False,
@@ -2391,31 +2678,53 @@ def auto_invite_task(self, record_id: str):
                                     log_callback=lambda m: _append_log(log_prefix + m),
                                 )
                             except Exception as e:
-                                _append_log(log_prefix + f"check team account failed: {e}")
+                                _append_log(
+                                    log_prefix + f"check team account failed: {e}"
+                                )
 
                             if child_team_account_id:
-                                _append_log(log_prefix + f"already in team account_id={child_team_account_id}")
+                                _append_log(
+                                    log_prefix
+                                    + f"already in team account_id={child_team_account_id}"
+                                )
                                 child_result["joined"] = True
                                 child_result["team_account_id"] = child_team_account_id
                             else:
-                                _append_log(log_prefix + "not in team yet, try accept invite")
+                                _append_log(
+                                    log_prefix + "not in team yet, try accept invite"
+                                )
 
-                                invite_url = _wait_invite_link(mail_client_child, child_email, timeout_sec=180)
+                                invite_url = _wait_invite_link(
+                                    mail_client_child, child_email, timeout_sec=180
+                                )
                                 if invite_url:
                                     child_result["invite_url"] = invite_url
                                     _append_log(log_prefix + "open invite url")
                                     try:
                                         child_browser.page.get(invite_url)
                                     except Exception as e:
-                                        _append_log(log_prefix + f"open invite url failed: {e}")
-                                    _try_accept_invite_ui(child_browser.page, log_prefix=log_prefix, shot_cb=child_shot)
+                                        _append_log(
+                                            log_prefix + f"open invite url failed: {e}"
+                                        )
+                                    _try_accept_invite_ui(
+                                        child_browser.page,
+                                        log_prefix=log_prefix,
+                                        shot_cb=child_shot,
+                                    )
                                 else:
-                                    _append_log(log_prefix + "invite email not found, try in-app prompt")
+                                    _append_log(
+                                        log_prefix
+                                        + "invite email not found, try in-app prompt"
+                                    )
                                     try:
                                         child_browser.page.get("https://chatgpt.com/")
                                     except Exception:
                                         pass
-                                    _try_accept_invite_ui(child_browser.page, log_prefix=log_prefix, shot_cb=child_shot)
+                                    _try_accept_invite_ui(
+                                        child_browser.page,
+                                        log_prefix=log_prefix,
+                                        shot_cb=child_shot,
+                                    )
 
                                 # 3) 再次校验
                                 try:
@@ -2423,16 +2732,26 @@ def auto_invite_task(self, record_id: str):
                                         child_browser.page,
                                         auth_token=child_token,
                                         timeout_sec=20,
-                                        log_callback=lambda m: _append_log(log_prefix + m),
+                                        log_callback=lambda m: _append_log(
+                                            log_prefix + m
+                                        ),
                                     )
                                 except Exception as e:
-                                    _append_log(log_prefix + f"re-check team account failed: {e}")
+                                    _append_log(
+                                        log_prefix
+                                        + f"re-check team account failed: {e}"
+                                    )
                                     child_team_account_id = ""
 
                                 if child_team_account_id:
-                                    _append_log(log_prefix + f"joined team ok account_id={child_team_account_id}")
+                                    _append_log(
+                                        log_prefix
+                                        + f"joined team ok account_id={child_team_account_id}"
+                                    )
                                     child_result["joined"] = True
-                                    child_result["team_account_id"] = child_team_account_id
+                                    child_result["team_account_id"] = (
+                                        child_team_account_id
+                                    )
                                 else:
                                     _append_log(log_prefix + "join team failed")
                                     child_result["joined"] = False
@@ -2448,27 +2767,42 @@ def auto_invite_task(self, record_id: str):
                                     log_prefix=log_prefix,
                                 )
                                 child_result["pool"] = pool_info
-                                if str(pool_info.get("status") or "") == "failed" and child_email not in pool_failed:
+                                if (
+                                    str(pool_info.get("status") or "") == "failed"
+                                    and child_email not in pool_failed
+                                ):
                                     pool_failed.append(child_email)
                             else:
-                                child_result["pool"] = {"status": "skipped", "reason": "join_failed"}
+                                child_result["pool"] = {
+                                    "status": "skipped",
+                                    "reason": "join_failed",
+                                }
 
                             # 写回子号状态（不写 token/password）
                             try:
                                 patch_account(
                                     child_id,
                                     {
-                                        "team_join_status": "success" if child_result.get("joined") else "failed",
+                                        "team_join_status": "success"
+                                        if child_result.get("joined")
+                                        else "failed",
                                         "team_join_task": record_id,
                                         "team_join_updated_at": timezone.now().isoformat(),
                                         **(
                                             {"session": child_session_data}
                                             if isinstance(child_session_data, dict)
-                                            and str(child_session_data.get("accessToken") or "").strip()
+                                            and str(
+                                                child_session_data.get("accessToken")
+                                                or ""
+                                            ).strip()
                                             else {}
                                         ),
                                         **(
-                                            {"team_account_id": child_result.get("team_account_id")}
+                                            {
+                                                "team_account_id": child_result.get(
+                                                    "team_account_id"
+                                                )
+                                            }
                                             if child_result.get("team_account_id")
                                             else {}
                                         ),
@@ -2479,7 +2813,9 @@ def auto_invite_task(self, record_id: str):
 
                         break
                     except Exception as e:
-                        _append_log(log_prefix + f"attempt {attempt + 1} exception: {e}")
+                        _append_log(
+                            log_prefix + f"attempt {attempt + 1} exception: {e}"
+                        )
                         if attempt == 0 and "disconnected" in str(e).lower():
                             _append_log(log_prefix + "retry due to disconnected page")
                             time.sleep(2)
@@ -2512,7 +2848,9 @@ def auto_invite_task(self, record_id: str):
             f"children accept stage done join_failed={len(join_failed)} pool_failed={len(pool_failed)}"
         )
 
-        overall_ok = (not has_failed) and (len(join_failed) == 0) and (len(pool_failed) == 0)
+        overall_ok = (
+            (not has_failed) and (len(join_failed) == 0) and (len(pool_failed) == 0)
+        )
 
         result: dict[str, Any] = {
             "success": overall_ok,
@@ -2632,7 +2970,9 @@ def sub2api_sink_task(self, record_id: str):
         children_all = [
             a
             for a in list_accounts(settings)
-            if isinstance(a, dict) and str(a.get("type")) == "child" and str(a.get("parent_id")) == mother_id
+            if isinstance(a, dict)
+            and str(a.get("type")) == "child"
+            and str(a.get("parent_id")) == mother_id
         ]
         accounts_all = [mother, *children_all]
 
@@ -2650,7 +2990,10 @@ def sub2api_sink_task(self, record_id: str):
                 continue
             pool_status = str(account.get("pool_status") or "").strip()
             if pool_status == "success":
-                already_pooled[aemail] = {"status": "skipped", "reason": "pool_status_success"}
+                already_pooled[aemail] = {
+                    "status": "skipped",
+                    "reason": "pool_status_success",
+                }
                 continue
             accounts.append(account)
 
@@ -2705,7 +3048,9 @@ def sub2api_sink_task(self, record_id: str):
         sub2api_admin_jwt = str(s2a.get("admin_token") or "").strip()
 
         group_ids = s2a.get("group_ids") or []
-        group_ids_str = ",".join([str(int(x)) for x in group_ids if str(x).strip().isdigit()])
+        group_ids_str = ",".join(
+            [str(int(x)) for x in group_ids if str(x).strip().isdigit()]
+        )
 
         concurrency = int(s2a.get("concurrency") or 3)
         priority = int(s2a.get("priority") or 50)
@@ -2805,7 +3150,7 @@ def sub2api_sink_task(self, record_id: str):
             )
 
             group_ids: list[int] = []
-            for x in (s2a.get("group_ids") or []):
+            for x in s2a.get("group_ids") or []:
                 try:
                     group_ids.append(int(x))
                 except Exception:
@@ -2815,14 +3160,22 @@ def sub2api_sink_task(self, record_id: str):
                 group_names = s2a.get("group_names") or []
                 if isinstance(group_names, list) and group_names:
                     try:
-                        from .services.sub2api_sink_service import sub2api_resolve_group_ids
+                        from .services.sub2api_sink_service import (
+                            sub2api_resolve_group_ids,
+                        )
 
                         group_ids = sub2api_resolve_group_ids(
                             api_base=sub2api_api_base,
                             admin_key=sub2api_admin_api_key,
                             admin_token=sub2api_admin_jwt,
-                            group_names=[str(x or "").strip() for x in group_names if str(x or "").strip()],
-                            timeout=int((settings.get("request") or {}).get("timeout") or 30),
+                            group_names=[
+                                str(x or "").strip()
+                                for x in group_names
+                                if str(x or "").strip()
+                            ],
+                            timeout=int(
+                                (settings.get("request") or {}).get("timeout") or 30
+                            ),
                         )
                     except Exception:
                         group_ids = []
@@ -2856,7 +3209,9 @@ def sub2api_sink_task(self, record_id: str):
                     dry_run=False,
                 )
                 if already_pooled:
-                    sink_result["skip"] = int(sink_result.get("skip") or 0) + len(already_pooled)
+                    sink_result["skip"] = int(sink_result.get("skip") or 0) + len(
+                        already_pooled
+                    )
                     details = sink_result.get("details")
                     if isinstance(details, dict):
                         details.update(already_pooled)
@@ -2891,7 +3246,10 @@ def sub2api_sink_task(self, record_id: str):
                     _s2a_mail_client = None
                     try:
                         email_cfg = _cloudmail_email_config_from_account(c)
-                        from apps.integrations.email.services.client import CloudMailClient
+                        from apps.integrations.email.services.client import (
+                            CloudMailClient,
+                        )
+
                         _s2a_mail_client = CloudMailClient(
                             api_base=str(email_cfg.get("api_base") or ""),
                             api_token=str(email_cfg.get("api_auth") or ""),
@@ -2901,19 +3259,26 @@ def sub2api_sink_task(self, record_id: str):
                     except Exception:
                         pass
 
-                    def _s2a_handle_email_verification(page_ref, account_email: str) -> bool:
+                    def _s2a_handle_email_verification(
+                        page_ref, account_email: str
+                    ) -> bool:
                         """检测并处理 email-verification 页面，返回是否处理成功。"""
                         try:
                             cur = str(page_ref.url or "")
                         except Exception:
                             return False
-                        if "email-verification" not in cur or "auth.openai.com" not in cur:
+                        if (
+                            "email-verification" not in cur
+                            or "auth.openai.com" not in cur
+                        ):
                             return False
 
                         _log_line(f"[{account_email}] email-verification page detected")
 
                         if not _s2a_mail_client:
-                            _log_line(f"[{account_email}] no CloudMail client, cannot get verification code")
+                            _log_line(
+                                f"[{account_email}] no CloudMail client, cannot get verification code"
+                            )
                             return False
 
                         _log_line(f"[{account_email}] waiting for verification code...")
@@ -2924,10 +3289,14 @@ def sub2api_sink_task(self, record_id: str):
                             sender_contains=None,
                         )
                         if not vcode:
-                            _log_line(f"[{account_email}] verification code not received")
+                            _log_line(
+                                f"[{account_email}] verification code not received"
+                            )
                             return False
 
-                        _log_line(f"[{account_email}] got verification code len={len(vcode)}")
+                        _log_line(
+                            f"[{account_email}] got verification code len={len(vcode)}"
+                        )
 
                         # 填写验证码
                         code_inputs = page_ref.eles(
@@ -2937,7 +3306,9 @@ def sub2api_sink_task(self, record_id: str):
                         )
                         code_inputs = [x for x in (code_inputs or []) if x]
                         if not code_inputs:
-                            _log_line(f"[{account_email}] verification code input not found")
+                            _log_line(
+                                f"[{account_email}] verification code input not found"
+                            )
                             return False
 
                         digits = [ch for ch in vcode if ch.isdigit()]
@@ -2956,12 +3327,16 @@ def sub2api_sink_task(self, record_id: str):
                             except Exception:
                                 pass
                             try:
-                                type_slowly(page_ref, code_inputs[0], vcode, base_delay=0.08)
+                                type_slowly(
+                                    page_ref, code_inputs[0], vcode, base_delay=0.08
+                                )
                             except Exception:
                                 pass
 
                         time.sleep(0.6)
-                        submit_btn = wait_for_element(page_ref, 'css:button[type="submit"]', timeout=10)
+                        submit_btn = wait_for_element(
+                            page_ref, 'css:button[type="submit"]', timeout=10
+                        )
                         if submit_btn:
                             _log_line(f"[{account_email}] submit verification code")
                             submit_btn.click()
@@ -2971,10 +3346,15 @@ def sub2api_sink_task(self, record_id: str):
                         return True
 
                     try:
-                        existing = sub2api_find_openai_oauth_account(sub2_cfg, cemail, timeout=timeout)
+                        existing = sub2api_find_openai_oauth_account(
+                            sub2_cfg, cemail, timeout=timeout
+                        )
                         if existing:
                             sink_result["skip"] += 1
-                            sink_result["details"][cemail] = {"status": "skipped", "reason": "already_exists"}
+                            sink_result["details"][cemail] = {
+                                "status": "skipped",
+                                "reason": "already_exists",
+                            }
                             _log_line(f"[{cemail}] skipped: already_exists")
                             continue
                     except Exception:
@@ -2982,37 +3362,58 @@ def sub2api_sink_task(self, record_id: str):
 
                     if not cpwd:
                         sink_result["fail"] += 1
-                        sink_result["details"][cemail] = {"status": "failed", "reason": "missing account_password"}
+                        sink_result["details"][cemail] = {
+                            "status": "failed",
+                            "reason": "missing account_password",
+                        }
                         _log_line(f"[{cemail}] failed: missing account_password")
                         continue
 
                     try:
-                        safe_email = re.sub(r"[^a-zA-Z0-9]+", "_", cemail).strip("_") or "user"
+                        safe_email = (
+                            re.sub(r"[^a-zA-Z0-9]+", "_", cemail).strip("_") or "user"
+                        )
                         _log_line(f"[{cemail}] oauth start")
                         max_attempts = 2
                         code = ""
                         session_id = ""
                         for attempt in range(1, max_attempts + 1):
                             try:
-                                _log_line(f"[{cemail}] oauth attempt {attempt}/{max_attempts} start")
+                                _log_line(
+                                    f"[{cemail}] oauth attempt {attempt}/{max_attempts} start"
+                                )
 
-                                auth = sub2api_openai_generate_auth_url(sub2_cfg, email=cemail, timeout=timeout)
+                                auth = sub2api_openai_generate_auth_url(
+                                    sub2_cfg, email=cemail, timeout=timeout
+                                )
                                 auth_url = str(auth.get("auth_url") or "").strip()
                                 session_id = str(auth.get("session_id") or "").strip()
                                 if not auth_url or not session_id:
-                                    raise RuntimeError("generate-auth-url returned empty auth_url/session_id")
+                                    raise RuntimeError(
+                                        "generate-auth-url returned empty auth_url/session_id"
+                                    )
 
                                 try:
-                                    sid_tail = session_id[-8:] if len(session_id) >= 8 else session_id
-                                    _log_line(f"[{cemail}] generated auth_url session_id=...{sid_tail}")
+                                    sid_tail = (
+                                        session_id[-8:]
+                                        if len(session_id) >= 8
+                                        else session_id
+                                    )
+                                    _log_line(
+                                        f"[{cemail}] generated auth_url session_id=...{sid_tail}"
+                                    )
                                 except Exception:
                                     pass
 
                                 # browser authorize to get code
-                                with BrowserService(profile_name=f"gpt_{cemail}") as browser:
+                                with BrowserService(
+                                    profile_name=f"gpt_{cemail}"
+                                ) as browser:
                                     page = browser.page
                                     if page is None:
-                                        raise RuntimeError("Browser page is not available")
+                                        raise RuntimeError(
+                                            "Browser page is not available"
+                                        )
                                     assert page is not None
 
                                     # NOTE: This is for Codex/OpenAI OAuth authorization.
@@ -3022,7 +3423,9 @@ def sub2api_sink_task(self, record_id: str):
                                     time.sleep(2)
 
                                     try:
-                                        _log_line(f"[{cemail}] opened url={_sanitize_url(browser.current_url())}")
+                                        _log_line(
+                                            f"[{cemail}] opened url={_sanitize_url(browser.current_url())}"
+                                        )
                                     except Exception:
                                         pass
 
@@ -3044,7 +3447,11 @@ def sub2api_sink_task(self, record_id: str):
                                     )
 
                                     def _click_submit_if_any(timeout_sec: int) -> bool:
-                                        btn = wait_for_element(page, 'css:button[type="submit"]', timeout=timeout_sec)
+                                        btn = wait_for_element(
+                                            page,
+                                            'css:button[type="submit"]',
+                                            timeout=timeout_sec,
+                                        )
                                         if not btn:
                                             return False
                                         old_url = str(browser.current_url() or "")
@@ -3062,7 +3469,9 @@ def sub2api_sink_task(self, record_id: str):
                                         if "code=" in u:
                                             break
 
-                                        email_input = wait_for_element(page, email_selector, timeout=1)
+                                        email_input = wait_for_element(
+                                            page, email_selector, timeout=1
+                                        )
                                         if email_input:
                                             human_delay()
                                             type_slowly(page, email_input, cemail)
@@ -3072,7 +3481,9 @@ def sub2api_sink_task(self, record_id: str):
                                             time.sleep(1)
                                             continue
 
-                                        password_input = wait_for_element(page, password_selector, timeout=1)
+                                        password_input = wait_for_element(
+                                            page, password_selector, timeout=1
+                                        )
                                         if password_input:
                                             human_delay()
                                             type_slowly(page, password_input, str(cpwd))
@@ -3095,7 +3506,9 @@ def sub2api_sink_task(self, record_id: str):
                                         if "code=" in u:
                                             break
 
-                                        email_input = wait_for_element(page, email_selector, timeout=1)
+                                        email_input = wait_for_element(
+                                            page, email_selector, timeout=1
+                                        )
                                         if email_input:
                                             human_delay()
                                             type_slowly(page, email_input, cemail)
@@ -3105,7 +3518,9 @@ def sub2api_sink_task(self, record_id: str):
                                             time.sleep(1)
                                             continue
 
-                                        password_input = wait_for_element(page, password_selector, timeout=1)
+                                        password_input = wait_for_element(
+                                            page, password_selector, timeout=1
+                                        )
                                         if password_input:
                                             human_delay()
                                             type_slowly(page, password_input, str(cpwd))
@@ -3142,7 +3557,9 @@ def sub2api_sink_task(self, record_id: str):
                                             except Exception:
                                                 pass
                                             if btn_label:
-                                                _log_line(f"[{cemail}] clicked consent {btn_label}")
+                                                _log_line(
+                                                    f"[{cemail}] clicked consent {btn_label}"
+                                                )
                                             human_delay(0.8, 1.6)
                                             time.sleep(1)
                                             continue
@@ -3178,7 +3595,9 @@ def sub2api_sink_task(self, record_id: str):
                                             m = re.search(r"[?&]code=([^&]+)", u)
                                             if m:
                                                 code = unquote(m.group(1))
-                                                _log_line(f"[{cemail}] oauth callback reached")
+                                                _log_line(
+                                                    f"[{cemail}] oauth callback reached"
+                                                )
                                                 break
                                         time.sleep(0.5)
 
@@ -3196,7 +3615,9 @@ def sub2api_sink_task(self, record_id: str):
                                             pass
 
                             except Exception as attempt_e:
-                                _log_line(f"[{cemail}] oauth attempt {attempt} failed: {attempt_e}")
+                                _log_line(
+                                    f"[{cemail}] oauth attempt {attempt} failed: {attempt_e}"
+                                )
                                 _log_line(traceback.format_exc())
                                 if attempt < max_attempts:
                                     time.sleep(2)
@@ -3254,12 +3675,19 @@ def sub2api_sink_task(self, record_id: str):
                                         or ""
                                     ).strip()
 
-                                    expires_in_val = token_info.get("expires_in") or token_info.get("expiresIn")
-                                    expires_at_val = token_info.get("expires_at") or token_info.get("expiresAt")
+                                    expires_in_val = token_info.get(
+                                        "expires_in"
+                                    ) or token_info.get("expiresIn")
+                                    expires_at_val = token_info.get(
+                                        "expires_at"
+                                    ) or token_info.get("expiresAt")
 
                                     if isinstance(expires_in_val, int):
                                         expires_in = expires_in_val
-                                    elif isinstance(expires_in_val, str) and expires_in_val.strip():
+                                    elif (
+                                        isinstance(expires_in_val, str)
+                                        and expires_in_val.strip()
+                                    ):
                                         try:
                                             expires_in = int(expires_in_val)
                                         except Exception:
@@ -3288,7 +3716,9 @@ def sub2api_sink_task(self, record_id: str):
                             )
                             created = bool(created2)
                             if not created and msg2:
-                                raise RuntimeError(f"exchange-code/create-account failed: {msg2}")
+                                raise RuntimeError(
+                                    f"exchange-code/create-account failed: {msg2}"
+                                )
 
                         if created:
                             sink_result["ok"] += 1
@@ -3296,11 +3726,17 @@ def sub2api_sink_task(self, record_id: str):
                             _log_line(f"[{cemail}] ok")
                         else:
                             sink_result["fail"] += 1
-                            sink_result["details"][cemail] = {"status": "failed", "reason": "oauth create failed"}
+                            sink_result["details"][cemail] = {
+                                "status": "failed",
+                                "reason": "oauth create failed",
+                            }
                             _log_line(f"[{cemail}] failed: oauth create failed")
                     except Exception as e:
                         sink_result["fail"] += 1
-                        sink_result["details"][cemail] = {"status": "failed", "reason": str(e)}
+                        sink_result["details"][cemail] = {
+                            "status": "failed",
+                            "reason": str(e),
+                        }
                         _log_line(f"[{cemail}] failed: {e}")
                         _log_line(traceback.format_exc())
             else:
@@ -3309,12 +3745,26 @@ def sub2api_sink_task(self, record_id: str):
         return_code = 0 if int(sink_result.get("fail") or 0) == 0 else 1
 
         try:
-            ok_n = int(sink_result.get("ok") or 0) if isinstance(sink_result, dict) else 0
-            skip_n = int(sink_result.get("skip") or 0) if isinstance(sink_result, dict) else 0
-            fail_n = int(sink_result.get("fail") or 0) if isinstance(sink_result, dict) else 0
-            _log_line(f"sub2api_sink result: ok={ok_n} skip={skip_n} fail={fail_n} return_code={return_code}")
+            ok_n = (
+                int(sink_result.get("ok") or 0) if isinstance(sink_result, dict) else 0
+            )
+            skip_n = (
+                int(sink_result.get("skip") or 0)
+                if isinstance(sink_result, dict)
+                else 0
+            )
+            fail_n = (
+                int(sink_result.get("fail") or 0)
+                if isinstance(sink_result, dict)
+                else 0
+            )
+            _log_line(
+                f"sub2api_sink result: ok={ok_n} skip={skip_n} fail={fail_n} return_code={return_code}"
+            )
 
-            details_all = sink_result.get("details") if isinstance(sink_result, dict) else None
+            details_all = (
+                sink_result.get("details") if isinstance(sink_result, dict) else None
+            )
             details_lc_all: dict[str, Any] = {}
             if isinstance(details_all, dict):
                 for k, v in details_all.items():
@@ -3331,9 +3781,7 @@ def sub2api_sink_task(self, record_id: str):
                     )
                     continue
                 item = (
-                    details_all.get(aemail)
-                    if isinstance(details_all, dict)
-                    else None
+                    details_all.get(aemail) if isinstance(details_all, dict) else None
                 ) or details_lc_all.get(aemail.lower())
                 status = str(item.get("status") or "") if isinstance(item, dict) else ""
                 reason = str(item.get("reason") or "") if isinstance(item, dict) else ""
@@ -3417,9 +3865,15 @@ def sub2api_sink_task(self, record_id: str):
         }
 
         ok_n = int(sink_result.get("ok") or 0) if isinstance(sink_result, dict) else 0
-        skip_n = int(sink_result.get("skip") or 0) if isinstance(sink_result, dict) else 0
-        fail_n = int(sink_result.get("fail") or 0) if isinstance(sink_result, dict) else 0
-        error_msg = f"sub2api_sink failed: ok={ok_n} skip={skip_n} fail={fail_n} (see run.log)"
+        skip_n = (
+            int(sink_result.get("skip") or 0) if isinstance(sink_result, dict) else 0
+        )
+        fail_n = (
+            int(sink_result.get("fail") or 0) if isinstance(sink_result, dict) else 0
+        )
+        error_msg = (
+            f"sub2api_sink failed: ok={ok_n} skip={skip_n} fail={fail_n} (see run.log)"
+        )
 
         _set_task_progress(record_id, 3, 3, "完成处理")
         patch_task(
@@ -3537,7 +3991,9 @@ def team_push_task(
         except Exception:
             pass
         # 同时写入 trace 日志（使 Celery Trace Dialog 可以读取）
-        _append_trace_line(celery_task_id, trace_email, msg, step="team_push", action="log")
+        _append_trace_line(
+            celery_task_id, trace_email, msg, step="team_push", action="log"
+        )
 
     try:
         # 保存 celery_task_id 到任务记录（使前端能正确打开 Celery Trace Dialog）
@@ -3617,19 +4073,26 @@ def team_push_task(
                 try:
                     email_cfg = _cloudmail_email_config_from_account(mother)
                     from apps.integrations.email.services.client import CloudMailClient
+
                     _mail_client = CloudMailClient(
                         api_base=str(email_cfg.get("api_base") or ""),
                         api_token=str(email_cfg.get("api_auth") or ""),
                         domains=list(email_cfg.get("domains") or []),
                         default_role=str(email_cfg.get("role") or "user"),
                     )
+
                     def _get_code_cb_impl(email_addr: str) -> str | None:
                         _log(f"等待验证码 ({email_addr})...")
-                        return _mail_client.wait_for_verification_code(email_addr, timeout=120)
+                        return _mail_client.wait_for_verification_code(
+                            email_addr, timeout=120
+                        )
+
                     _get_code_cb_fn = _get_code_cb_impl
                     _log("已配置 CloudMail 验证码回调")
                 except Exception as mail_err:
-                    _log(f"CloudMail 未配置或不可用: {mail_err}（如遇验证码页面将无法自动处理）")
+                    _log(
+                        f"CloudMail 未配置或不可用: {mail_err}（如遇验证码页面将无法自动处理）"
+                    )
 
                 try:
                     _token, session_data = _ensure_access_token_via_login(
@@ -3650,7 +4113,9 @@ def team_push_task(
             if not session_data or not session_data.get("accessToken"):
                 raise RuntimeError("无法获取 accessToken，登录流程未能完成")
 
-            _log(f"成功获取 session, user: {session_data.get('user', {}).get('email', 'unknown')}")
+            _log(
+                f"成功获取 session, user: {session_data.get('user', {}).get('email', 'unknown')}"
+            )
 
         if not session_data:
             raise RuntimeError("获取 session 失败")

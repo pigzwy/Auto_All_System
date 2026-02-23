@@ -76,6 +76,22 @@
           </div>
 
           <div class="space-y-2">
+            <label class="text-sm font-medium text-foreground">浏览器模式</label>
+            <Select v-model="selfRegisterLaunchType">
+              <SelectTrigger>
+                <SelectValue placeholder="请选择浏览器模式" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="geekez">Geek 模式（复用环境）</SelectItem>
+                <SelectItem value="local">无痕模式（临时环境）</SelectItem>
+              </SelectContent>
+            </Select>
+            <p class="text-xs text-muted-foreground">
+              {{ selfRegisterLaunchType === 'local' ? '无痕模式会使用临时环境执行，任务结束后自动清理。' : 'Geek 模式会复用已有环境，启动更快。' }}
+            </p>
+          </div>
+
+          <div class="space-y-2">
             <label class="text-sm font-medium text-foreground">选卡方式</label>
             <Select v-model="selfRegisterCardMode">
               <SelectTrigger>
@@ -118,12 +134,15 @@
             <label class="flex cursor-pointer items-start gap-3">
               <Checkbox
                 :checked="selfRegisterKeepProfileOnFail"
+                :disabled="selfRegisterLaunchType === 'local'"
                 @update:checked="selfRegisterKeepProfileOnFail = Boolean($event)"
                 class="mt-0.5"
               />
               <span class="space-y-1">
                 <span class="block text-sm font-medium text-foreground">失败时保留 Geekez 环境（调试）</span>
-                <span class="block text-xs text-muted-foreground">开启后失败不会自动关闭环境，方便直接查看卡在哪一步。</span>
+                <span class="block text-xs text-muted-foreground">
+                  {{ selfRegisterLaunchType === 'local' ? '无痕模式不保留环境，该选项已自动关闭。' : '开启后失败不会自动关闭环境，方便直接查看卡在哪一步。' }}
+                </span>
               </span>
             </label>
           </div>
@@ -173,7 +192,8 @@ import { cardsApi } from '@/api/cards'
 import {
   gptBusinessApi,
   type GptBusinessAccount,
-  type SelfRegisterCardMode
+  type SelfRegisterCardMode,
+  type SelfRegisterLaunchType
 } from '@/api/gpt_business'
 import type { Card } from '@/types'
 import type { AcceptableValue } from 'reka-ui'
@@ -195,6 +215,7 @@ const selfRegisterSubmitting = ref(false)
 const availableCardsLoading = ref(false)
 const availableCards = ref<Card[]>([])
 const selfRegisterTargetIds = ref<string[]>([])
+const selfRegisterLaunchType = ref<SelfRegisterLaunchType>('geekez')
 const selfRegisterCardMode = ref<SelfRegisterCardMode>('selected')
 const selfRegisterSelectedCardId = ref<number | null>(null)
 const selfRegisterKeepProfileOnFail = ref(true)
@@ -256,6 +277,7 @@ const loadAvailableCards = async () => {
 
 const openSelfRegisterDialog = async (ids: string[]) => {
   selfRegisterTargetIds.value = [...ids]
+  selfRegisterLaunchType.value = 'geekez'
   selfRegisterCardMode.value = 'selected'
   selfRegisterSelectedCardId.value = null
   selfRegisterKeepProfileOnFail.value = true
@@ -269,6 +291,12 @@ const openSelfRegisterDialog = async (ids: string[]) => {
 watch(selfRegisterDialogOpen, (open) => {
   if (open) return
   selfRegisterSubmitting.value = false
+})
+
+watch(selfRegisterLaunchType, (launchType) => {
+  if (launchType === 'local') {
+    selfRegisterKeepProfileOnFail.value = false
+  }
 })
 
 const confirmRunSelfRegister = async () => {
@@ -285,17 +313,23 @@ const confirmRunSelfRegister = async () => {
       mother_ids: ids,
       concurrency: 5,
       open_geekez: true,
+      launch_type: selfRegisterLaunchType.value,
       card_mode: selfRegisterCardMode.value,
       selected_card_id: selfRegisterCardMode.value === 'selected' ? selfRegisterSelectedCardId.value || undefined : undefined,
-      keep_profile_on_fail: selfRegisterKeepProfileOnFail.value
+      keep_profile_on_fail: selfRegisterLaunchType.value === 'local' ? false : selfRegisterKeepProfileOnFail.value
     })
+    const launchText = selfRegisterLaunchType.value === 'local' ? '无痕模式' : 'Geek 模式'
     const modeText = selfRegisterCardMode.value === 'selected'
       ? '指定卡'
       : selfRegisterCardMode.value === 'random'
         ? '随机卡'
         : '手动输入'
-    const keepText = selfRegisterKeepProfileOnFail.value ? '失败保留环境' : '失败自动关闭环境'
-    ElMessage.success(`已启动 ${ids.length} 个母号的自动开通（${modeText}，${keepText}）`)
+    const keepText = selfRegisterLaunchType.value === 'local'
+      ? '任务结束自动清理'
+      : selfRegisterKeepProfileOnFail.value
+        ? '失败保留环境'
+        : '失败自动关闭环境'
+    ElMessage.success(`已启动 ${ids.length} 个母号的自动开通（${launchText}，${modeText}，${keepText}）`)
     selfRegisterDialogOpen.value = false
     refreshAccounts()
   } catch (e: any) {
