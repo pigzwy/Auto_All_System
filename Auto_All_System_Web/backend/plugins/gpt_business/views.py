@@ -113,11 +113,118 @@ def _parse_keep_profile_on_fail(data: Any) -> bool:
 
 def _parse_self_register_launch_type(data: Any) -> tuple[str, str | None]:
     launch_type = str((data or {}).get("launch_type") or "geekez").strip().lower()
-    if launch_type == "incognito":
-        launch_type = "local"
-    if launch_type not in {"geekez", "local"}:
-        return "", "launch_type must be one of: geekez, local"
+    if launch_type not in {"geekez"}:
+        return "", "launch_type must be one of: geekez"
     return launch_type, None
+
+
+def _parse_self_register_mode(data: Any) -> tuple[str, str | None]:
+    register_mode = str((data or {}).get("register_mode") or "browser").strip().lower()
+    if register_mode in {"http", "api"}:
+        register_mode = "protocol"
+    if register_mode not in {"browser", "protocol"}:
+        return "", "register_mode must be one of: browser, protocol"
+    return register_mode, None
+
+
+def _parse_self_register_auto_pool(
+    data: Any,
+) -> tuple[bool, dict[str, str] | None, str, str, str | None]:
+    raw_enabled = (data or {}).get("auto_pool_enabled")
+    auto_pool_enabled = False
+    if isinstance(raw_enabled, bool):
+        auto_pool_enabled = raw_enabled
+    elif isinstance(raw_enabled, (int, float)):
+        auto_pool_enabled = bool(raw_enabled)
+    elif isinstance(raw_enabled, str):
+        auto_pool_enabled = raw_enabled.strip().lower() in {"1", "true", "yes", "on"}
+
+    pool_mode_raw = str((data or {}).get("pool_mode") or "").strip().lower()
+    auto_pool_mode = (
+        pool_mode_raw if pool_mode_raw in {"s2a_oauth", "crs_sync"} else "s2a_oauth"
+    )
+
+    target_key = str(
+        (data or {}).get("target_key") or (data or {}).get("s2a_target_key") or ""
+    ).strip()
+
+    api_base = str((data or {}).get("s2a_api_base") or "").strip()
+    admin_key = str((data or {}).get("s2a_admin_key") or "").strip()
+    admin_token = str((data or {}).get("s2a_admin_token") or "").strip()
+
+    has_inline_hint = bool(api_base or admin_key or admin_token or target_key)
+    if pool_mode_raw in {"s2a_oauth", "crs_sync"}:
+        auto_pool_enabled = True
+    elif has_inline_hint:
+        auto_pool_enabled = True
+
+    if not auto_pool_enabled:
+        return False, None, target_key, "disabled", None
+
+    settings = get_settings()
+    s2a_settings = settings.get("s2a") if isinstance(settings.get("s2a"), dict) else {}
+    merged_api_base = api_base or str(s2a_settings.get("api_base") or "").strip()
+    merged_admin_key = admin_key or str(s2a_settings.get("admin_key") or "").strip()
+    merged_admin_token = (
+        admin_token or str(s2a_settings.get("admin_token") or "").strip()
+    )
+
+    if not merged_api_base:
+        return (
+            False,
+            None,
+            target_key,
+            auto_pool_mode,
+            "s2a_api_base is required when auto_pool_enabled=true",
+        )
+    if not merged_admin_key and not merged_admin_token:
+        return (
+            False,
+            None,
+            target_key,
+            auto_pool_mode,
+            "s2a_admin_key or s2a_admin_token is required when auto_pool_enabled=true",
+        )
+
+    return (
+        True,
+        {
+            "api_base": merged_api_base,
+            "admin_key": merged_admin_key,
+            "admin_token": merged_admin_token,
+        },
+        target_key,
+        auto_pool_mode,
+        None,
+    )
+
+
+def _parse_batch_concurrency(data: Any) -> tuple[int, str | None]:
+    raw = (data or {}).get("concurrency")
+    if raw in (None, ""):
+        return 5, None
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        return 0, "concurrency must be an integer"
+    if value <= 0:
+        return 0, "concurrency must be greater than 0"
+    if value > 100:
+        return 0, "concurrency must be less than or equal to 100"
+    return value, None
+
+
+def _parse_concurrency(data: Any, default: int = 5) -> tuple[int, str | None]:
+    raw = (data or {}).get("concurrency")
+    if raw in (None, ""):
+        return default, None
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        return 0, "concurrency must be an integer"
+    if value <= 0:
+        return 0, "concurrency must be greater than 0"
+    return value, None
 
 
 def _mask_secret(value: str) -> str:
@@ -127,6 +234,36 @@ def _mask_secret(value: str) -> str:
     if len(value) <= 8:
         return "***"
     return f"{value[:3]}***{value[-3:]}"
+
+
+def _sanitize_session_for_response(session_data: Any) -> dict[str, Any] | None:
+    if not isinstance(session_data, dict):
+        return None
+    access_token = str(session_data.get("accessToken") or "").strip()
+    user = (
+        session_data.get("user") if isinstance(session_data.get("user"), dict) else {}
+    )
+    return {
+        "has_access_token": bool(access_token),
+        "access_token_masked": _mask_secret(access_token),
+        "user": {
+            "email": str(user.get("email") or "").strip(),
+        },
+    }
+
+
+def _sanitize_token_artifact_for_response(token_artifact: Any) -> dict[str, Any] | None:
+    if not isinstance(token_artifact, dict):
+        return None
+    masked: dict[str, Any] = {
+        "has_tokens": bool(token_artifact),
+        "token_keys": sorted([str(k) for k in token_artifact.keys()]),
+    }
+    for key in ["access_token", "refresh_token", "id_token", "token"]:
+        raw = str(token_artifact.get(key) or "").strip()
+        if raw:
+            masked[key] = _mask_secret(raw)
+    return masked
 
 
 def _mask_settings(settings: dict[str, Any]) -> dict[str, Any]:
@@ -1298,9 +1435,7 @@ class AccountsViewSet(ViewSet):
         """
         启动浏览器环境
 
-        支持两种模式:
-        - geekez (默认): 启动远程 GeekezBrowser
-        - local: 通过 Geekez 显式无痕参数启动
+        使用 GeekezBrowser 启动远程浏览器
         """
         settings = get_settings()
         acc_raw = find_account(settings, str(pk))
@@ -1315,82 +1450,6 @@ class AccountsViewSet(ViewSet):
                 {"detail": "Email missing"}, status=status.HTTP_400_BAD_REQUEST
             )
 
-        # 获取启动模式，默认为 geekez
-        launch_type = str(request.data.get("launch_type", "geekez")).lower()
-
-        # local 模式：仍使用 Geekez，但显式带 --incognito 启动
-        if launch_type == "local":
-            from apps.integrations.browser_base import BrowserType, get_browser_manager
-
-            manager = get_browser_manager()
-            try:
-                api = manager.get_api(BrowserType.GEEKEZ)
-            except Exception:
-                return Response(
-                    {"detail": "GeekezBrowser 未配置或不可用"},
-                    status=status.HTTP_400_BAD_REQUEST,
-                )
-
-            if not api.health_check():
-                return Response(
-                    {"detail": "GeekezBrowser 服务不在线"},
-                    status=status.HTTP_503_SERVICE_UNAVAILABLE,
-                )
-
-            profile_name_new = f"gpt_{email}"
-            created_profile = False
-            profile = api.get_profile_by_name(profile_name_new)
-            if not profile:
-                profile = api.get_profile_by_name(email)
-            if not profile:
-                created_profile = True
-                profile = api.create_or_update_profile(
-                    name=profile_name_new,
-                    proxy=None,
-                    metadata={"account": {"email": email}},
-                )
-
-            launch_info = api.launch_profile(profile.id, incognito=True)
-            if not launch_info:
-                return Response(
-                    {"detail": "启动无痕 Geekez profile 失败"},
-                    status=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                )
-
-            now = timezone.now().isoformat()
-            patch_account(
-                str(pk),
-                {
-                    "geekez_env": {
-                        "browser_type": BrowserType.GEEKEZ.value,
-                        "launch_type": "local",
-                        "profile_id": launch_info.profile_id,
-                        "debug_port": launch_info.debug_port,
-                        "cdp_endpoint": launch_info.cdp_endpoint,
-                        "ws_endpoint": launch_info.ws_endpoint,
-                        "pid": launch_info.pid,
-                        "launched_at": now,
-                    },
-                    "updated_at": now,
-                },
-            )
-
-            return Response(
-                {
-                    "success": True,
-                    "launch_type": "local",
-                    "created_profile": created_profile,
-                    "browser_type": BrowserType.GEEKEZ.value,
-                    "profile_id": launch_info.profile_id,
-                    "debug_port": launch_info.debug_port,
-                    "cdp_endpoint": launch_info.cdp_endpoint,
-                    "ws_endpoint": launch_info.ws_endpoint,
-                    "pid": launch_info.pid,
-                    "email": email,
-                }
-            )
-
-        # 远程 GeekezBrowser 模式
         from apps.integrations.browser_base import BrowserType, get_browser_manager
 
         manager = get_browser_manager()
@@ -1492,7 +1551,23 @@ class AccountsViewSet(ViewSet):
             return Response(
                 {"detail": launch_type_error}, status=status.HTTP_400_BAD_REQUEST
             )
+        register_mode, register_mode_error = _parse_self_register_mode(request.data)
+        if register_mode_error:
+            return Response(
+                {"detail": register_mode_error}, status=status.HTTP_400_BAD_REQUEST
+            )
         keep_profile_on_fail = _parse_keep_profile_on_fail(request.data)
+        (
+            auto_pool_enabled,
+            s2a_inline,
+            auto_pool_target_key,
+            auto_pool_mode,
+            auto_pool_error,
+        ) = _parse_self_register_auto_pool(request.data)
+        if auto_pool_error:
+            return Response(
+                {"detail": auto_pool_error}, status=status.HTTP_400_BAD_REQUEST
+            )
 
         record_id = uuid.uuid4().hex
         now = timezone.now().isoformat()
@@ -1504,7 +1579,12 @@ class AccountsViewSet(ViewSet):
                 "card_mode": card_mode,
                 "selected_card_id": selected_card_id,
                 "launch_type": launch_type,
+                "register_mode": register_mode,
                 "keep_profile_on_fail": keep_profile_on_fail,
+                "auto_pool_enabled": auto_pool_enabled,
+                "s2a_inline": s2a_inline,
+                "s2a_target_key": auto_pool_target_key,
+                "pool_mode": auto_pool_mode if auto_pool_enabled else "disabled",
                 "status": "pending",
                 "progress_current": 0,
                 "progress_total": 3,
@@ -1729,9 +1809,29 @@ class AccountsViewSet(ViewSet):
             return Response(
                 {"detail": launch_type_error}, status=status.HTTP_400_BAD_REQUEST
             )
+        register_mode, register_mode_error = _parse_self_register_mode(request.data)
+        if register_mode_error:
+            return Response(
+                {"detail": register_mode_error}, status=status.HTTP_400_BAD_REQUEST
+            )
         keep_profile_on_fail = _parse_keep_profile_on_fail(request.data)
+        (
+            auto_pool_enabled,
+            s2a_inline,
+            auto_pool_target_key,
+            auto_pool_mode,
+            auto_pool_error,
+        ) = _parse_self_register_auto_pool(request.data)
+        if auto_pool_error:
+            return Response(
+                {"detail": auto_pool_error}, status=status.HTTP_400_BAD_REQUEST
+            )
 
-        concurrency = int(request.data.get("concurrency") or 5)
+        concurrency, concurrency_error = _parse_batch_concurrency(request.data)
+        if concurrency_error:
+            return Response(
+                {"detail": concurrency_error}, status=status.HTTP_400_BAD_REQUEST
+            )
         # open_geekez 参数已废弃，self_register_task 内部会自动启动浏览器
         # 不再单独调用 launch_geekez_task，避免并发冲突
 
@@ -1760,7 +1860,12 @@ class AccountsViewSet(ViewSet):
                     "card_mode": card_mode,
                     "selected_card_id": selected_card_id,
                     "launch_type": launch_type,
+                    "register_mode": register_mode,
                     "keep_profile_on_fail": keep_profile_on_fail,
+                    "auto_pool_enabled": auto_pool_enabled,
+                    "s2a_inline": s2a_inline,
+                    "s2a_target_key": auto_pool_target_key,
+                    "pool_mode": auto_pool_mode if auto_pool_enabled else "disabled",
                     "status": "pending",
                     "progress_current": 0,
                     "progress_total": 3,
@@ -1794,7 +1899,11 @@ class AccountsViewSet(ViewSet):
                 {"detail": "mother_ids is required"}, status=status.HTTP_400_BAD_REQUEST
             )
 
-        concurrency = int(request.data.get("concurrency") or 5)
+        concurrency, concurrency_error = _parse_batch_concurrency(request.data)
+        if concurrency_error:
+            return Response(
+                {"detail": concurrency_error}, status=status.HTTP_400_BAD_REQUEST
+            )
         # open_geekez 参数已废弃，auto_invite_task 内部会自动启动浏览器
         # 不再单独调用 launch_geekez_task，避免并发冲突
         target_key = str(
@@ -1906,7 +2015,11 @@ class AccountsViewSet(ViewSet):
                 {"detail": "mother_ids is required"}, status=status.HTTP_400_BAD_REQUEST
             )
 
-        concurrency = int(request.data.get("concurrency") or 5)
+        concurrency, concurrency_error = _parse_batch_concurrency(request.data)
+        if concurrency_error:
+            return Response(
+                {"detail": concurrency_error}, status=status.HTTP_400_BAD_REQUEST
+            )
         # open_geekez 参数已废弃，sub2api_sink_task 内部会自动启动浏览器
         # 不再单独调用 launch_geekez_task，避免并发冲突
         target_key = str(
@@ -1984,7 +2097,31 @@ class AccountsViewSet(ViewSet):
             {
                 "id": str(acc.get("id") or ""),
                 "has_session": has_session,
-                "session": session_data if has_session else None,
+                "session": _sanitize_session_for_response(session_data)
+                if has_session
+                else None,
+            },
+            headers={"Cache-Control": "no-store"},
+        )
+
+    @action(detail=True, methods=["get"], url_path="tokens")
+    def tokens(self, request, pk=None):
+        settings = get_settings()
+        acc = find_account(settings, str(pk))
+        if not isinstance(acc, dict):
+            return Response(
+                {"detail": "Account not found"}, status=status.HTTP_404_NOT_FOUND
+            )
+
+        token_artifact = acc.get("token_artifact")
+        has_tokens = bool(isinstance(token_artifact, dict) and token_artifact)
+        return Response(
+            {
+                "id": str(acc.get("id") or ""),
+                "has_tokens": has_tokens,
+                "token_artifact": _sanitize_token_artifact_for_response(token_artifact)
+                if has_tokens
+                else None,
             },
             headers={"Cache-Control": "no-store"},
         )

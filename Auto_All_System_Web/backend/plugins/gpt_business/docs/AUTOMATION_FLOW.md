@@ -524,7 +524,79 @@ trace 文件路径: `backend/logs/trace/trace_<celery_task_id>_<email>.log`
 
 ---
 
-## 六、参考项目
+## 六、协议注册（无浏览器）
+
+### 6.1 功能目标
+
+在 GPT 专区的自动开通弹窗增加 `register_mode=protocol`，走纯 HTTP 协议注册，不依赖 Geekez/DrissionPage 页面操作。
+
+实现文件：
+- `backend/plugins/gpt_business/services/protocol_register_service.py`
+- `backend/plugins/gpt_business/tasks.py`（`self_register_task`）
+- `backend/plugins/gpt_business/views.py`（`self_register` / `batch_self_register`）
+- `frontend/src/views/zones/GptBusinessZone.vue`
+
+### 6.2 参考脚本
+
+协议流程参考：`backend/plugins/gpt_business/services/protocol_keygen.py`
+
+核心思路：
+1. `ProtocolRegistrar` 完成无浏览器注册（authorize/continue -> register -> otp -> create_account）
+2. `perform_codex_oauth_login_http` 获取 OAuth token（`access_token/refresh_token/id_token`）
+3. 将 token 结构持久化到账号记录，供前端复制
+
+### 6.3 任务参数
+
+`self_register` / `batch_self_register` 增加：
+
+```json
+{
+  "register_mode": "browser | protocol"
+}
+```
+
+说明：
+- 默认 `browser`（保持历史行为）
+- `protocol` 时忽略浏览器启动配置（`launch_type`/卡片配置等）
+
+### 6.4 Token 持久化与复制
+
+协议注册成功后写入账号字段 `token_artifact`：
+
+```json
+{
+  "type": "codex",
+  "email": "xxx@example.com",
+  "expired": "2026-03-02T00:41:50+00:00",
+  "id_token": "...",
+  "account_id": "...",
+  "access_token": "...",
+  "last_refresh": "...",
+  "refresh_token": "..."
+}
+```
+
+新增后端接口：
+
+```text
+GET /api/v1/plugins/gpt-business/accounts/{id}/tokens/
+```
+
+返回：`{ id, has_tokens, token_artifact }`（`Cache-Control: no-store`）。
+
+前端在账号详情弹窗新增 Token 区域，支持：
+- 显示/隐藏 token JSON
+- 一键复制
+
+### 6.5 兼容性说明
+
+- 浏览器模式保留原逻辑，协议模式为新增分支
+- `register_mode` 不传时默认 `browser`
+- 协议模式成功后仍会写入 `session.accessToken`（用于下游邀请/状态判断）
+
+---
+
+## 七、参考项目
 
 本实现参考了 `oai-team-auto-provisioner` 项目：
 

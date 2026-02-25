@@ -12,21 +12,35 @@ logger = logging.getLogger(__name__)
 
 class Log:
     """简单的日志封装，兼容原代码"""
+
     def __init__(self, callback: Callable[[str], None] = None):
         self.callback = callback
-    
+
     def _log(self, msg: str):
         logger.info(msg)
         if self.callback:
             self.callback(msg)
-    
-    def info(self, msg): self._log(msg)
-    def success(self, msg): self._log(f"✓ {msg}")
-    def warning(self, msg): self._log(f"⚠ {msg}")
-    def error(self, msg): self._log(f"✗ {msg}")
-    def step(self, msg): self._log(f"→ {msg}")
-    def header(self, msg): self._log(f"=== {msg} ===")
-    def separator(self): self._log("-" * 40)
+
+    def info(self, msg):
+        self._log(msg)
+
+    def success(self, msg):
+        self._log(f"✓ {msg}")
+
+    def warning(self, msg):
+        self._log(f"⚠ {msg}")
+
+    def error(self, msg):
+        self._log(f"✗ {msg}")
+
+    def step(self, msg):
+        self._log(f"→ {msg}")
+
+    def header(self, msg):
+        self._log(f"=== {msg} ===")
+
+    def separator(self):
+        self._log("-" * 40)
 
 
 log = Log()
@@ -46,6 +60,7 @@ STEP_DELAY = (2, 3)
 
 
 # ==================== 鼠标行为模拟 ====================
+
 
 def _move_and_click(page, element) -> bool:
     """先把鼠标移动到元素上，再点击（模拟真人操作轨迹）
@@ -106,7 +121,7 @@ def _inject_stealth_to_all_frames(page):
     # 方法 2: 遍历所有 iframe，逐个注入
     try:
         frames = page.get_frames()
-        for frame in (frames or []):
+        for frame in frames or []:
             try:
                 frame_url = frame.url or ""
                 # 只对 stripe 相关 iframe 注入
@@ -117,6 +132,7 @@ def _inject_stealth_to_all_frames(page):
                 pass
     except Exception:
         pass
+
 
 # ==================== 测试数据 ====================
 TEST_CHECKOUT_DATA = {
@@ -234,10 +250,7 @@ def _wait_for_url(page, url_contains: str, timeout: int = 30) -> bool:
 
 def _is_checkout_url(current_url: str) -> bool:
     url = current_url or ""
-    return (
-        "chatgpt.com/checkout/openai_llc/" in url
-        or "pay.openai.com" in url
-    )
+    return "chatgpt.com/checkout/openai_llc/" in url or "pay.openai.com" in url
 
 
 def _wait_for_checkout_url(page, timeout: int = 30) -> bool:
@@ -255,11 +268,11 @@ def _wait_for_checkout_url(page, timeout: int = 30) -> bool:
 
 
 def _derive_cardholder_from_email(email: str) -> str:
-    local = (email or "").split("@", 1)[0].strip()
-    if not local:
+    email_local_part = (email or "").split("@", 1)[0].strip()
+    if not email_local_part:
         return ""
 
-    normalized = local.replace(".", " ").replace("_", " ").replace("-", " ")
+    normalized = email_local_part.replace(".", " ").replace("_", " ").replace("-", " ")
     parts = [part for part in normalized.split() if part]
     if not parts:
         return ""
@@ -295,15 +308,15 @@ def _locate_stripe_frame(page, frame_type: str = "payment", timeout: int = 12):
     if frame_type == "payment":
         # 优先匹配 elements-inner-payment iframe
         frame_matchers = [
-            '@src*=elements-inner-payment',
-            '@title=Secure payment input frame',
-            '@name*=privateStripeFrame',
+            "@src*=elements-inner-payment",
+            "@title=Secure payment input frame",
+            "@name*=privateStripeFrame",
         ]
     else:
         # address iframe
         frame_matchers = [
-            '@src*=elements-inner-address',
-            '@title=Secure address input frame',
+            "@src*=elements-inner-address",
+            "@title=Secure address input frame",
         ]
 
     start_time = time.time()
@@ -320,7 +333,7 @@ def _locate_stripe_frame(page, frame_type: str = "payment", timeout: int = 12):
     # 兜底：按索引遍历所有 iframe
     try:
         frames = page.get_frames()
-        for f in (frames or []):
+        for f in frames or []:
             try:
                 src = f.url or ""
                 if frame_type == "payment" and "elements-inner-payment" in src:
@@ -423,7 +436,7 @@ def _fill_address_fields(page, data: dict) -> bool:
             'css:input[name="name"]',
             'css:input[autocomplete="name"]',
             'css:input[name="billingName"]',
-            'css:#billingName',
+            "css:#billingName",
         ],
         timeout=5,
     )
@@ -459,8 +472,12 @@ def _fill_address_fields(page, data: dict) -> bool:
                 return 'not_found';
             })(arguments[0], arguments[1]);
             """.strip()
-            result = ctx_ref.run_js(js, select_el, value, timeout=3) if hasattr(ctx_ref, 'run_js') else None
-            if result == 'ok':
+            result = (
+                ctx_ref.run_js(js, select_el, value, timeout=3)
+                if hasattr(ctx_ref, "run_js")
+                else None
+            )
+            if result == "ok":
                 return True
         except Exception:
             pass
@@ -484,7 +501,7 @@ def _fill_address_fields(page, data: dict) -> bool:
             'css:select[name="countryCode"]',
             'css:select[autocomplete="country"]',
             'css:select[name="country"]',
-            'css:#billingCountry',
+            "css:#billingCountry",
         ],
         timeout=3,
     )
@@ -508,7 +525,7 @@ def _fill_address_fields(page, data: dict) -> bool:
             'css:input[name="addressLine1"]',
             'css:input[autocomplete="address-line1"]',
             'css:input[name="line1"]',
-            'css:#billingAddressLine1',
+            "css:#billingAddressLine1",
         ],
         timeout=5,
     )
@@ -530,7 +547,7 @@ def _fill_address_fields(page, data: dict) -> bool:
             'css:input[name="locality"]',
             'css:input[autocomplete="address-level2"]',
             'css:input[name="city"]',
-            'css:#billingLocality',
+            "css:#billingLocality",
         ],
         timeout=5,
     )
@@ -548,7 +565,7 @@ def _fill_address_fields(page, data: dict) -> bool:
             'css:select[name="administrativeArea"]',
             'css:select[autocomplete="address-level1"]',
             'css:select[name="state"]',
-            'css:#billingAdministrativeArea',
+            "css:#billingAdministrativeArea",
         ],
         timeout=5,
     )
@@ -569,7 +586,7 @@ def _fill_address_fields(page, data: dict) -> bool:
             'css:input[name="postalCode"]',
             'css:input[autocomplete="postal-code"]',
             'css:input[name="zip"]',
-            'css:#billingPostalCode',
+            "css:#billingPostalCode",
         ],
         timeout=5,
     )
@@ -635,19 +652,20 @@ def _type_slowly(element, text: str, base_delay: float = 0.08, page=None):
 # ==================== 配置加载 ====================
 def load_checkout_config(checkout_data: dict = None):
     """加载结算配置
-    
+
     Args:
         checkout_data: 外部传入的结算数据，如果提供则直接使用
     """
     default_data = TEST_CHECKOUT_DATA.copy()
-    
+
     if checkout_data:
         for key in default_data:
             if key in checkout_data:
                 default_data[key] = checkout_data[key]
         return default_data
-    
+
     return default_data
+
 
 # ==================== 引导页流程步骤 ====================
 
@@ -666,20 +684,20 @@ def _log_current_url(page, context: str = ""):
 
 def step_start_business_trial(page) -> bool:
     """步骤: 点击 '开始 Business 试用'
-    
+
     新版流程的第一步
     """
     log.step("查找 '开始 Business 试用' 按钮...")
     _log_current_url(page, "初始页面")
-    
+
     if _wait_and_click(page, "text:开始 Business 试用", timeout=5, required=False):
         log.success("已点击 '开始 Business 试用'")
         return True
-        
+
     if _wait_and_click(page, "text:Start Business trial", timeout=3, required=False):
         log.success("已点击 'Start Business trial'")
         return True
-        
+
     log.info("未找到试用按钮，继续下一步...")
     return False
 
@@ -688,15 +706,15 @@ def step_lets_go_popup(page) -> bool:
     """步骤: 点击 '开始吧' / 'Let's go' 弹窗"""
     log.step("检查 '开始吧' 弹窗...")
     time.sleep(1)
-    
+
     if _wait_and_click(page, "text:开始吧", timeout=3, required=False):
         log.success("已点击 '开始吧'")
         return True
-        
+
     if _wait_and_click(page, "text:Let's go", timeout=2, required=False):
         log.success("已点击 'Let's go'")
         return True
-        
+
     if _wait_and_click(page, "text:Get started", timeout=2, required=False):
         log.success("已点击 'Get started'")
         return True
@@ -839,7 +857,12 @@ def step_select_free_gift(page) -> bool:
             for btn in buttons:
                 if btn.states.is_displayed and btn.states.is_enabled:
                     btn_text = btn.text.strip().lower()
-                    if "免费" in btn_text or "free" in btn_text or "赠品" in btn_text or "gift" in btn_text:
+                    if (
+                        "免费" in btn_text
+                        or "free" in btn_text
+                        or "赠品" in btn_text
+                        or "gift" in btn_text
+                    ):
                         _human_delay()
                         btn.click()
                         log.success(f"  已选择免费赠品 (按钮遍历: {btn_text[:20]})")
@@ -847,7 +870,9 @@ def step_select_free_gift(page) -> bool:
         except Exception:
             pass
 
-        if _wait_and_click(page, "css:button.bg-transparent", timeout=2, required=False):
+        if _wait_and_click(
+            page, "css:button.bg-transparent", timeout=2, required=False
+        ):
             log.success("  已选择免费赠品 (bg-transparent)")
             return True
 
@@ -974,7 +999,7 @@ def step_fill_checkout_form(
     log.step("填写结算表单...")
 
     data = load_checkout_config()
-    
+
     if email_override:
         data["email"] = email_override
     if card_number_override:
@@ -996,7 +1021,9 @@ def step_fill_checkout_form(
 
     holder_name = str(data.get("cardholder_name") or "").strip()
     if not holder_name or holder_name.lower() == "test user":
-        fallback_holder = _derive_cardholder_from_email(email_override or data.get("email", ""))
+        fallback_holder = _derive_cardholder_from_email(
+            email_override or data.get("email", "")
+        )
         if fallback_holder:
             data["cardholder_name"] = fallback_holder
 
@@ -1071,11 +1098,11 @@ def step_fill_checkout_form(
 
     selectors = [
         'css:button[type="submit"]',
-        'css:button.SubmitButton',
-        'text:订阅',
-        'text:Subscribe',
-        'text:Pay',
-        'text:Start plan',
+        "css:button.SubmitButton",
+        "text:订阅",
+        "text:Subscribe",
+        "text:Pay",
+        "text:Start plan",
     ]
 
     for sel in selectors:
@@ -1102,20 +1129,20 @@ def step_fill_checkout_form(
 
 def step_payment_success_continue(page) -> bool:
     """步骤 9: 智能等待付款成功并点击继续
-    
+
     实时监听 URL 变化，一旦检测到成功页面立即响应
     """
     # 最大等待时间 (5分钟)
     MAX_WAIT = 300
     CHECK_INTERVAL = 1  # 每秒检查一次
-    
+
     log.step(f"等待付款成功页面 (最大超时: {MAX_WAIT}秒)...")
     log.info("请在此期间手动完成 3D 验证或人机验证...")
     _log_current_url(page, "等待付款前")
 
     start_time = time.time()
     success_detected = False
-    
+
     while time.time() - start_time < MAX_WAIT:
         try:
             current_url = page.url
@@ -1125,7 +1152,7 @@ def step_payment_success_continue(page) -> bool:
                 _log_current_url(page, "付款成功页")
                 success_detected = True
                 break
-                
+
             # 可选: 检测是否还在支付流程中
             if (
                 "chatgpt.com/checkout/openai_llc/" in current_url
@@ -1134,20 +1161,22 @@ def step_payment_success_continue(page) -> bool:
             ):
                 # 还在支付流程中，继续等待
                 pass
-            
+
             # 每 10 秒打印一次心跳，避免用户以为卡死
             elapsed = int(time.time() - start_time)
             if elapsed > 0 and elapsed % 10 == 0:
                 # 只在控制台显示，不记录到 log 文件以免刷屏 (如果 logger 支持的话)
-                pass 
-                
+                pass
+
         except Exception:
             pass
-            
+
         time.sleep(CHECK_INTERVAL)
 
     if not success_detected:
-        log.warning("等待超时，未检测到付款成功页面 (但这可能只是 URL 没变，尝试继续...)")
+        log.warning(
+            "等待超时，未检测到付款成功页面 (但这可能只是 URL 没变，尝试继续...)"
+        )
         _log_current_url(page, "超时后页面")
 
     _step_delay()
@@ -1225,7 +1254,13 @@ def step_get_session_data(page) -> dict:
         # 解析 JSON
         session_data = json.loads(page_text)
         log.success("已获取 session 数据")
-        log.info(f"Session 数据: {json.dumps(session_data, indent=2, ensure_ascii=False)}")
+        has_token = bool(str((session_data or {}).get("accessToken") or "").strip())
+        session_user = str(
+            ((session_data or {}).get("user") or {}).get("email") or ""
+        ).strip()
+        log.info(
+            f"Session 摘要: has_access_token={has_token}, user={session_user or 'unknown'}"
+        )
         return session_data
 
     except Exception as e:
@@ -1264,14 +1299,14 @@ def step_keep_browser_open(page):
 
 def step_inject_promo_checkout(page) -> bool:
     """步骤: 注入 JS 强制跳转到带优惠的结算页
-    
+
     使用 team-1-month-free 优惠码直接调用 API
     """
     log.step("注入优惠码并跳转结算页...")
 
     workspace_name = f"pigll{random.randint(0, 99999):05d}"
     log.info(f"本次工作区名称: {workspace_name}")
-    
+
     js_code = """
     (async function (){
         try {
@@ -1314,28 +1349,28 @@ def step_inject_promo_checkout(page) -> bool:
     """
 
     js_code = js_code.replace("__WORKSPACE_NAME__", workspace_name)
-    
+
     try:
         # 确保先加载主页以获取 context
         if "chatgpt.com" not in page.url:
             page.get("https://chatgpt.com")
             time.sleep(3)
-            
+
         result = page.run_js(js_code)
         log.info(f"JS 执行结果: {result}")
-        
+
         if result == "NO_TOKEN":
             log.warning("未检测到 accessToken，可能未登录")
             return False
-            
+
         # 等待跳转
         if _wait_for_checkout_url(page, timeout=25):
             log.success(f"成功跳转到结算页: {page.url}")
             return True
-            
+
         log.warning("未跳转到支付页面 (JS执行看似成功但URL未变)")
         return False
-        
+
     except Exception as e:
         log.error(f"注入 JS 失败: {e}")
         return False
@@ -1384,23 +1419,26 @@ def run_onboarding_flow(
         if not skip_checkout and get_card_callback:
             log.step(f"等待可用卡（最多 {card_wait_timeout} 秒）...")
             import time as time_module
+
             wait_start = time_module.time()
-            
+
             while time_module.time() - wait_start < card_wait_timeout:
                 try:
                     card_info = get_card_callback()
                 except Exception as e:
                     log.warning(f"获取卡失败: {e}")
                     card_info = None
-                
+
                 if card_info:
-                    log.success(f"获取到可用卡: ****{card_info.get('card_number', '')[-4:]}")
+                    log.success(
+                        f"获取到可用卡: ****{card_info.get('card_number', '')[-4:]}"
+                    )
                     break
-                
+
                 elapsed = int(time_module.time() - wait_start)
                 log.info(f"无可用卡，等待中... ({elapsed}s/{card_wait_timeout}s)")
                 time_module.sleep(10)
-            
+
             if not card_info:
                 log.error(f"等待 {card_wait_timeout} 秒后仍无可用卡，流程终止")
                 return False, {}
@@ -1410,7 +1448,9 @@ def run_onboarding_flow(
         if not skip_checkout:
             # 如果有卡信息，使用卡信息覆盖
             if card_info:
-                cardholder_value = card_info.get("cardholder_name", "") or cardholder_name
+                cardholder_value = (
+                    card_info.get("cardholder_name", "") or cardholder_name
+                )
                 step_fill_checkout_form(
                     page,
                     email_override=email,

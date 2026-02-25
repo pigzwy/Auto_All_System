@@ -26,7 +26,7 @@ STEALTH_JS = r"""
         configurable: true,
     });
 
-    // 2. 修复 navigator.plugins（无痕/自动化模式下为空数组）
+    // 2. 修复 navigator.plugins（自动化环境下可能为空数组）
     // Stripe 检测 plugins 长度为 0 视为可疑
     if (navigator.plugins.length === 0) {
         const fakePlugins = {

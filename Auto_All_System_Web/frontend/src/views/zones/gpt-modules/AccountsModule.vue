@@ -235,16 +235,7 @@
                         <ExternalLink class="h-3.5 w-3.5" />
                         {{ getGeekezActionLabel(mother) }}
                       </Button>
-                      <Button
-                        variant="ghost"
-                        size="xs"
-                        class="gap-1 text-indigo-600 hover:text-indigo-700 hover:bg-indigo-50 dark:text-indigo-400 dark:hover:bg-indigo-950"
-                        title="本地无痕模式"
-                        @click="launchLocal(mother)"
-                      >
-                        <Glasses class="h-3.5 w-3.5" />
-                        无痕
-                      </Button>
+
                       <Button
                         variant="ghost"
                         size="xs"
@@ -335,9 +326,7 @@
                                   <Button variant="ghost" size="xs" @click.stop="launchGeekez(child)">
                                     {{ getGeekezActionLabel(child) }}
                                   </Button>
-                                  <Button variant="ghost" size="xs" class="text-indigo-600 hover:text-indigo-700" title="本地无痕模式" @click.stop="launchLocal(child)">
-                                    <Glasses class="h-3.5 w-3.5" />
-                                  </Button>
+
                                   <Button variant="ghost" size="xs" class="text-destructive hover:text-destructive" @click.stop="removeAccount(child.id)">删除</Button>
                                 </div>
                               </TableCell>
@@ -709,6 +698,31 @@
             </div>
             <pre v-if="sessionVisible" class="max-h-48 overflow-auto rounded bg-muted p-3 text-xs leading-5 whitespace-pre-wrap break-all">{{ sessionText || '-' }}</pre>
           </div>
+
+          <div class="grid gap-2">
+            <label class="text-sm font-medium text-muted-foreground">Token</label>
+            <div class="flex items-center gap-2">
+              <Button variant="outline" size="sm" :disabled="tokenLoading" @click="toggleTokenVisible">
+                {{ tokenVisible ? '隐藏 Token' : '显示 Token' }}
+              </Button>
+              <Button v-if="tokenVisible && tokenText" variant="outline" size="sm" @click="copyText(tokenText)">
+                <Copy class="h-4 w-4" />
+              </Button>
+              <Button v-if="tokenVisible && tokenText" variant="outline" size="sm" @click="exportCurrentToken('json')">
+                导出JSON
+              </Button>
+              <Button v-if="tokenVisible && tokenArtifactData?.access_token" variant="outline" size="sm" @click="exportCurrentToken('access')">
+                导出AK
+              </Button>
+              <Button v-if="tokenVisible && tokenArtifactData?.refresh_token" variant="outline" size="sm" @click="exportCurrentToken('refresh')">
+                导出RK
+              </Button>
+              <Button v-if="tokenVisible && tokenArtifactData?.id_token" variant="outline" size="sm" @click="exportCurrentToken('id')">
+                导出ID
+              </Button>
+            </div>
+            <pre v-if="tokenVisible" class="max-h-48 overflow-auto rounded bg-muted p-3 text-xs leading-5 whitespace-pre-wrap break-all">{{ tokenText || '-' }}</pre>
+          </div>
         </div>
         <DialogFooter>
           <Button variant="outline" @click="accountDetailDialogVisible = false">关闭</Button>
@@ -943,7 +957,7 @@ import {
   Copy,
   ExternalLink,
   FileText,
-  Glasses,
+
   Loader2,
   Monitor,
   Plus,
@@ -1072,7 +1086,11 @@ const batchRunSelfRegister = async () => {
     await gptBusinessApi.batchSelfRegister({
       mother_ids: ids,
       concurrency: 5,
-      open_geekez: true
+      register_mode: 'browser',
+      open_geekez: true,
+      launch_type: 'geekez',
+      card_mode: 'random',
+      keep_profile_on_fail: true
     })
     ElMessage.success(`已启动 ${ids.length} 个母号的自动开通`)
     selectedIds.value.clear()
@@ -1457,12 +1475,20 @@ const accountDetailData = ref<GptBusinessAccount | null>(null)
 const sessionVisible = ref(false)
 const sessionLoading = ref(false)
 const sessionText = ref('')
+const tokenVisible = ref(false)
+const tokenLoading = ref(false)
+const tokenText = ref('')
+const tokenArtifactData = ref<Record<string, any> | null>(null)
 
 const openAccountDetail = (account: GptBusinessAccount) => {
   accountDetailData.value = account
   sessionVisible.value = false
   sessionLoading.value = false
   sessionText.value = ''
+  tokenVisible.value = false
+  tokenLoading.value = false
+  tokenText.value = ''
+  tokenArtifactData.value = null
   accountDetailDialogVisible.value = true
 }
 
@@ -1493,6 +1519,38 @@ const toggleSessionVisible = async () => {
     ElMessage.error(e?.response?.data?.detail || e?.message || '获取 Session 失败')
   } finally {
     sessionLoading.value = false
+  }
+}
+
+const toggleTokenVisible = async () => {
+  if (tokenVisible.value) {
+    tokenVisible.value = false
+    return
+  }
+  const accountId = accountDetailData.value?.id
+  if (!accountId) return
+
+  if (tokenText.value) {
+    tokenVisible.value = true
+    return
+  }
+
+  tokenLoading.value = true
+  try {
+    const res = await gptBusinessApi.getAccountTokens(accountId)
+    if (!res?.has_tokens || !res?.token_artifact) {
+      tokenText.value = ''
+      tokenArtifactData.value = null
+      ElMessage.warning('当前账号暂无可用 Token')
+      return
+    }
+    tokenArtifactData.value = res.token_artifact
+    tokenText.value = JSON.stringify(res.token_artifact, null, 2)
+    tokenVisible.value = true
+  } catch (e: any) {
+    ElMessage.error(e?.response?.data?.detail || e?.message || '获取 Token 失败')
+  } finally {
+    tokenLoading.value = false
   }
 }
 
@@ -1663,6 +1721,43 @@ const copyText = async (text: string) => {
   }
 }
 
+const downloadTextFile = (filename: string, content: string, mimeType = 'text/plain;charset=utf-8') => {
+  const blob = new Blob([content], { type: mimeType })
+  const href = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = href
+  a.download = filename
+  document.body.appendChild(a)
+  a.click()
+  document.body.removeChild(a)
+  URL.revokeObjectURL(href)
+}
+
+const exportCurrentToken = (mode: 'json' | 'access' | 'refresh' | 'id') => {
+  const artifact = tokenArtifactData.value
+  if (!artifact) {
+    ElMessage.warning('暂无可导出的 Token')
+    return
+  }
+
+  const email = String(accountDetailData.value?.email || artifact.email || 'token').replace(/[^a-zA-Z0-9._-]+/g, '_')
+  if (mode === 'json') {
+    downloadTextFile(`${email}-token.json`, JSON.stringify(artifact, null, 2), 'application/json;charset=utf-8')
+    ElMessage.success('Token JSON 已导出')
+    return
+  }
+
+  const field = mode === 'access' ? 'access_token' : mode === 'refresh' ? 'refresh_token' : 'id_token'
+  const token = String(artifact[field] || '').trim()
+  if (!token) {
+    ElMessage.warning(`${field} 为空，无法导出`)
+    return
+  }
+  const suffix = mode === 'access' ? 'ak' : mode === 'refresh' ? 'rk' : 'id'
+  downloadTextFile(`${email}-${suffix}.txt`, `${token}\n`)
+  ElMessage.success(`${field} 已导出`)
+}
+
 
 const removeAccount = async (accountId: string) => {
   try {
@@ -1704,7 +1799,7 @@ const getAccountStatusBadges = (account: any): StatusBadge[] => {
   const loginStatus = String(account?.login_status || 'not_started')
   const teamJoinStatus = String(account?.team_join_status || 'not_started')
   const poolStatus = String(account?.pool_status || 'not_started')
-  const teamStatus = String(account?.team_status || 'not_started')
+  const teamStatus = String(account?.team_push_status || 'not_started')
   
   const push = (key: string, text: string, cls: string) => {
     badges.push({ key, text, class: cls })
@@ -1739,7 +1834,7 @@ const getAccountStatusBadges = (account: any): StatusBadge[] => {
 
   // 6. 母号：team 状态
   if (isMother) {
-    mapStatus('team', teamStatus, 'Team')
+    mapStatus('team', teamStatus, 'Team推送')
   }
 
   return badges
@@ -1760,19 +1855,7 @@ const launchGeekez = async (account: GptBusinessAccount) => {
   }
 }
 
-const launchLocal = async (account: GptBusinessAccount) => {
-  try {
-    const res = await gptBusinessApi.launchLocal(account.id)
-    if (!res?.success) {
-      ElMessage.warning('启动失败')
-      return
-    }
-    ElMessage.success('已启动 Geek 无痕模式')
-    await refresh()
-  } catch (e: any) {
-    ElMessage.error(e?.response?.data?.detail || e?.message || '启动失败')
-  }
-}
+
 
 
 

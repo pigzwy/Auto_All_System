@@ -19,16 +19,19 @@ from typing import Any, Callable
 import requests
 from celery import shared_task
 from django.conf import settings as django_settings
+from django.db import transaction
 from django.utils import timezone
 
 from .legacy_runner import prepare_artifacts
 from .storage import (
+    add_task,
     add_account,
     find_account,
     get_settings,
     list_accounts,
     patch_account,
     patch_task,
+    update_settings,
 )
 from .trace_cleanup import cleanup_trace_files
 
@@ -88,6 +91,31 @@ class SensitiveDataFilter:
             re.compile(r'cvv["\']?\s*[:=]\s*["\']([^"\']+)["\']', re.IGNORECASE),
             r'cvv="***"',
         ),
+        (
+            re.compile(
+                r'accessToken["\']?\s*[:=]\s*["\']([^"\']+)["\']',
+                re.IGNORECASE,
+            ),
+            r'accessToken="***"',
+        ),
+        (
+            re.compile(
+                r'refreshToken["\']?\s*[:=]\s*["\']([^"\']+)["\']',
+                re.IGNORECASE,
+            ),
+            r'refreshToken="***"',
+        ),
+        (
+            re.compile(r'idToken["\']?\s*[:=]\s*["\']([^"\']+)["\']', re.IGNORECASE),
+            r'idToken="***"',
+        ),
+        (
+            re.compile(
+                r'auth_token["\']?\s*[:=]\s*["\']([^"\']+)["\']',
+                re.IGNORECASE,
+            ),
+            r'auth_token="***"',
+        ),
         (re.compile(r"\d{13,19}"), r"****-****-****-****"),
     ]
 
@@ -96,6 +124,28 @@ class SensitiveDataFilter:
         for pattern, replacement in SensitiveDataFilter.PATTERNS:
             message = pattern.sub(replacement, message)
         return message
+
+
+def _sanitize_task_flow_details(flow_result: dict[str, Any]) -> dict[str, Any]:
+    safe = dict(flow_result or {})
+
+    session_data = safe.get("session_data")
+    if isinstance(session_data, dict):
+        session_token = str(session_data.get("accessToken") or "").strip()
+        user_email = str(((session_data.get("user") or {}).get("email") or "")).strip()
+        safe["session_data"] = {
+            "has_access_token": bool(session_token),
+            "user_email": user_email,
+        }
+
+    token_artifact = safe.get("token_artifact")
+    if isinstance(token_artifact, dict):
+        safe["token_artifact"] = {
+            "has_tokens": bool(token_artifact),
+            "token_keys": sorted([str(k) for k in token_artifact.keys()]),
+        }
+
+    return safe
 
 
 def _get_trace_file(celery_task_id: str | None, email: str | None) -> Path | None:
@@ -183,43 +233,50 @@ def _get_available_card_for_checkout(
     from apps.cards.models import Card
     from django.db.models import Q
 
-    if selected_card_id:
-        card = Card.objects.filter(id=selected_card_id).first()
-        if not card or not card.is_available():
-            return None
-    else:
-        now = timezone.now()
-        card = (
-            Card.objects.filter(
-                status="available",
+    with transaction.atomic():
+        if selected_card_id:
+            card = Card.objects.select_for_update().filter(id=selected_card_id).first()
+            if not card or not card.is_available():
+                return None
+        else:
+            now = timezone.now()
+            card = (
+                Card.objects.select_for_update()
+                .filter(
+                    status="available",
+                )
+                .filter(Q(key_expire_time__isnull=True) | Q(key_expire_time__gt=now))
+                .order_by("use_count", "created_at")
+                .first()
             )
-            .filter(Q(key_expire_time__isnull=True) | Q(key_expire_time__gt=now))
-            .order_by("?")
-            .first()
+
+        if not card:
+            return None
+
+        card.status = "in_use"
+        card.save(update_fields=["status", "updated_at"])
+
+        billing = card.billing_address or {}
+        expiry = (
+            f"{card.expiry_month:02d}/{str(card.expiry_year)[-2:]}"
+            if card.expiry_month and card.expiry_year
+            else ""
         )
 
-    if not card:
-        return None
-
-    billing = card.billing_address or {}
-    expiry = (
-        f"{card.expiry_month:02d}/{str(card.expiry_year)[-2:]}"
-        if card.expiry_month and card.expiry_year
-        else ""
-    )
-
-    return {
-        "card_id": card.id,
-        "card_number": card.card_number or "",
-        "card_expiry": expiry,
-        "card_cvc": card.cvv or "",
-        "cardholder_name": card.card_holder or "",
-        "address_line1": billing.get("street") or billing.get("address_line1") or "",
-        "city": billing.get("city") or "",
-        "postal_code": billing.get("zip") or billing.get("postal_code") or "",
-        "state": billing.get("state") or "",
-        "country": billing.get("country") or "US",
-    }
+        return {
+            "card_id": card.id,
+            "card_number": card.card_number or "",
+            "card_expiry": expiry,
+            "card_cvc": card.cvv or "",
+            "cardholder_name": card.card_holder or "",
+            "address_line1": billing.get("street")
+            or billing.get("address_line1")
+            or "",
+            "city": billing.get("city") or "",
+            "postal_code": billing.get("zip") or billing.get("postal_code") or "",
+            "state": billing.get("state") or "",
+            "country": billing.get("country") or "US",
+        }
 
 
 def _mark_card_as_used(card_id: int, account_id: str, purpose: str) -> None:
@@ -228,16 +285,23 @@ def _mark_card_as_used(card_id: int, account_id: str, purpose: str) -> None:
     from django.utils import timezone
 
     try:
-        card = Card.objects.get(id=card_id)
-        card.status = "in_use"
-        card.use_count += 1
-        card.last_used_at = timezone.now()
-        card.save(update_fields=["status", "use_count", "last_used_at", "updated_at"])
-
-        card.metadata = card.metadata or {}
-        card.metadata["last_account_id"] = account_id
-        card.metadata["last_purpose"] = purpose
-        card.save(update_fields=["metadata"])
+        with transaction.atomic():
+            card = Card.objects.select_for_update().get(id=card_id)
+            card.status = "in_use"
+            card.use_count += 1
+            card.last_used_at = timezone.now()
+            card.metadata = card.metadata or {}
+            card.metadata["last_account_id"] = account_id
+            card.metadata["last_purpose"] = purpose
+            card.save(
+                update_fields=[
+                    "status",
+                    "use_count",
+                    "last_used_at",
+                    "metadata",
+                    "updated_at",
+                ]
+            )
 
     except Card.DoesNotExist:
         logger.warning(f"Card {card_id} not found when marking as used")
@@ -716,19 +780,6 @@ def self_register_task(self, record_id: str):
         job_dir = media_root / "gpt_business" / "jobs" / record_id
         artifacts = prepare_artifacts(job_dir)
 
-        # 状态：入池中
-        try:
-            patch_account(
-                mother_id,
-                {
-                    "pool_status": "running",
-                    "pool_last_task": record_id,
-                    "pool_updated_at": timezone.now().isoformat(),
-                },
-            )
-        except Exception:
-            pass
-
         def _log(line: str) -> None:
             ts = timezone.now().isoformat()
             artifacts.log_file.parent.mkdir(parents=True, exist_ok=True)
@@ -765,10 +816,53 @@ def self_register_task(self, record_id: str):
             else "random"
         )
 
-        launch_type_raw = (
-            str(task_record.get("launch_type") or "geekez").strip().lower()
+        launch_type = str(task_record.get("launch_type") or "geekez").strip().lower()
+        if launch_type not in {"geekez"}:
+            launch_type = "geekez"
+        register_mode_raw = (
+            str(task_record.get("register_mode") or "browser").strip().lower()
         )
-        launch_type = "local" if launch_type_raw in {"local", "incognito"} else "geekez"
+        register_mode = "protocol" if register_mode_raw == "protocol" else "browser"
+
+        auto_pool_raw = task_record.get("auto_pool_enabled")
+        auto_pool_mode_value = str(task_record.get("pool_mode") or "").strip().lower()
+        if isinstance(auto_pool_raw, bool):
+            auto_pool_enabled = auto_pool_raw
+        elif isinstance(auto_pool_raw, (int, float)):
+            auto_pool_enabled = bool(auto_pool_raw)
+        elif isinstance(auto_pool_raw, str):
+            auto_pool_enabled = auto_pool_raw.strip().lower() in {
+                "1",
+                "true",
+                "yes",
+                "on",
+            }
+        else:
+            auto_pool_enabled = False
+
+        if auto_pool_mode_value in {"crs_sync", "s2a_oauth"}:
+            auto_pool_enabled = True
+
+        auto_pool_mode_raw = auto_pool_mode_value or "s2a_oauth"
+        auto_pool_mode = (
+            auto_pool_mode_raw
+            if auto_pool_mode_raw in {"crs_sync", "s2a_oauth"}
+            else "s2a_oauth"
+        )
+        auto_pool_target_key = str(task_record.get("s2a_target_key") or "").strip()
+        s2a_inline_raw = task_record.get("s2a_inline")
+        s2a_inline = s2a_inline_raw if isinstance(s2a_inline_raw, dict) else {}
+        _log(
+            "auto_pool raw: "
+            f"auto_pool_enabled={auto_pool_raw!r} pool_mode={auto_pool_mode_value!r} "
+            f"target_key={auto_pool_target_key!r}"
+        )
+        _log(
+            "auto_pool parsed: "
+            f"enabled={auto_pool_enabled} mode={auto_pool_mode} "
+            f"target_key={'set' if auto_pool_target_key else 'empty'} "
+            f"inline_s2a={'set' if s2a_inline else 'empty'}"
+        )
 
         keep_profile_raw = task_record.get("keep_profile_on_fail")
         if isinstance(keep_profile_raw, bool):
@@ -783,9 +877,6 @@ def self_register_task(self, record_id: str):
                 "on",
             }
         else:
-            keep_profile_on_fail = False
-
-        if launch_type == "local":
             keep_profile_on_fail = False
 
         selected_card_raw = task_record.get("selected_card_id")
@@ -846,10 +937,7 @@ def self_register_task(self, record_id: str):
             return None
 
         proxy_str = _proxy_to_str((settings.get("browser") or {}).get("proxy"))
-        incognito_mode = launch_type == "local"
-        profile_name = (
-            f"gpt_tmp_{record_id[:8]}_{email}" if incognito_mode else f"gpt_{email}"
-        )
+        profile_name = f"gpt_{email}"
 
         from apps.integrations.geekez.api import GeekezBrowserAPI
         from plugins.gpt_business.services.openai_register import (
@@ -857,34 +945,57 @@ def self_register_task(self, record_id: str):
             register_openai_account,
         )
 
+        def _run_protocol() -> dict[str, Any]:
+            from plugins.gpt_business.services.protocol_register_service import (
+                ProtocolRegisterService,
+            )
+
+            _log("register_mode=protocol: start no-browser register flow")
+
+            def get_code_callback(email_addr: str) -> str | None:
+                return mail_client.wait_for_verification_code(email_addr, timeout=120)
+
+            protocol_result = ProtocolRegisterService().register_and_login(
+                email=email,
+                password=password,
+                get_verification_code=get_code_callback,
+            )
+            _log("register_mode=protocol: token login success")
+
+            return {
+                "launch_type": launch_type,
+                "register_mode": "protocol",
+                "register_ok": True,
+                "checkout_ok": None,
+                "checkout_error": "",
+                "session_data": protocol_result.get("session_data") or {},
+                "token_artifact": protocol_result.get("token_artifact") or {},
+                "used_card_id": None,
+                "profile_kept_open": False,
+                "keep_profile_on_fail": False,
+            }
+
         def _run_sync() -> dict[str, Any]:
             """同步执行注册流程（使用 DrissionPage）"""
             api = GeekezBrowserAPI()
 
-            if incognito_mode:
-                _log("launch mode=local (incognito): use one-time temporary profile")
+            # 创建或获取 profile
+            created_profile = False
+            profile = api.get_profile_by_name(profile_name)
+            if not profile:
+                profile = api.get_profile_by_name(email)
+            if not profile:
                 profile = api.create_or_update_profile(
                     name=profile_name, proxy=proxy_str
                 )
                 created_profile = True
-            else:
-                # 创建或获取 profile
-                created_profile = False
-                profile = api.get_profile_by_name(profile_name)
-                if not profile:
-                    profile = api.get_profile_by_name(email)
-                if not profile:
-                    profile = api.create_or_update_profile(
-                        name=profile_name, proxy=proxy_str
-                    )
-                    created_profile = True
 
             _log(f"creating/updating profile: {profile_name}")
             _log(f"profile ready: id={profile.id}, name={profile.name}")
 
             # 启动浏览器
             _log(f"launching profile: {profile.id}")
-            launch = api.launch_profile(profile.id, incognito=incognito_mode)
+            launch = api.launch_profile(profile.id)
             if not launch:
                 raise RuntimeError(f"launch_profile failed: {profile.id}")
 
@@ -1054,14 +1165,8 @@ def self_register_task(self, record_id: str):
                         _log(f"closed profile: {profile.id}")
                     except Exception as e:
                         _log(f"failed to close profile: {e}")
-                    if incognito_mode:
-                        try:
-                            api.delete_profile(profile.id)
-                            _log(f"deleted temp profile: {profile.id}")
-                        except Exception as e:
-                            _log(f"failed to delete temp profile: {e}")
 
-        flow_result = _run_sync()
+        flow_result = _run_protocol() if register_mode == "protocol" else _run_sync()
         _set_task_progress(record_id, 2, 3, "初始化环境")
         register_ok = bool(flow_result.get("register_ok"))
         checkout_ok = flow_result.get("checkout_ok")
@@ -1084,9 +1189,9 @@ def self_register_task(self, record_id: str):
 
         now = timezone.now().isoformat()
 
-        # 保存 session 数据到账号，并校验是否具备 Team 权限
+        # 保存 session 数据到账号，并校验是否具备 Team 权限（仅作诊断，不更新 Team 任务状态）
         session_data = flow_result.get("session_data")
-        team_status = "not_started"
+        team_permission_status = "not_started"
         team_account_id = ""
         account_update = {
             "open_status": open_status,
@@ -1104,23 +1209,29 @@ def self_register_task(self, record_id: str):
             session_token = str(session_data.get("accessToken") or "").strip()
             _log(f"session_data saved to account: {bool(session_token)}")
             if session_token:
+                account_update["auth_token"] = session_token
+            if session_token:
                 try:
                     team_client = ChatGPTTeamClient(timeout=20)
                     team_account_id = team_client.fetch_account_id(session_token)
                     if team_account_id:
-                        team_status = "success"
+                        team_permission_status = "success"
                         _log(
                             f"session team permission verified account_id={team_account_id}"
                         )
                     else:
-                        team_status = "failed"
+                        team_permission_status = "failed"
                         _log("session team permission check failed: account_id empty")
                 except Exception as team_err:
-                    team_status = "failed"
+                    team_permission_status = "failed"
                     _log(f"session team permission check error: {team_err}")
 
-        account_update["team_status"] = team_status
-        account_update["team_updated_at"] = now
+        token_artifact = flow_result.get("token_artifact")
+        if isinstance(token_artifact, dict) and token_artifact:
+            account_update["token_artifact"] = token_artifact
+
+        account_update["team_permission_status"] = team_permission_status
+        account_update["team_permission_updated_at"] = now
         if team_account_id:
             account_update["account_id"] = team_account_id
 
@@ -1134,8 +1245,93 @@ def self_register_task(self, record_id: str):
             "mother_id": mother_id,
             "email": email,
             "artifacts": _artifacts_list_from_job_dir(job_dir),
-            "details": flow_result,
+            "details": _sanitize_task_flow_details(flow_result),
         }
+
+        if success and auto_pool_enabled:
+            auto_pool_result: dict[str, Any] = {
+                "enabled": True,
+                "pool_mode": auto_pool_mode,
+                "target_key": auto_pool_target_key,
+            }
+            try:
+                api_base = str(s2a_inline.get("api_base") or "").strip()
+                admin_key = str(s2a_inline.get("admin_key") or "").strip()
+                admin_token = str(s2a_inline.get("admin_token") or "").strip()
+                if api_base and admin_key and admin_token:
+
+                    def _mutate_s2a_settings(current: dict[str, Any]) -> dict[str, Any]:
+                        next_settings = dict(current or {})
+                        s2a_value = next_settings.get("s2a")
+                        s2a_settings = (
+                            dict(s2a_value) if isinstance(s2a_value, dict) else {}
+                        )
+                        s2a_settings["api_base"] = api_base
+                        s2a_settings["admin_key"] = admin_key
+                        s2a_settings["admin_token"] = admin_token
+                        next_settings["s2a"] = s2a_settings
+                        return next_settings
+
+                    update_settings(_mutate_s2a_settings)
+                    _log("auto pool s2a settings updated from self_register payload")
+
+                auto_pool_record_id = str(uuid.uuid4())
+                auto_pool_created_at = timezone.now().isoformat()
+                add_task(
+                    {
+                        "id": auto_pool_record_id,
+                        "type": "sub2api_sink",
+                        "mother_id": mother_id,
+                        "s2a_target_key": auto_pool_target_key,
+                        "pool_mode": auto_pool_mode,
+                        "status": "pending",
+                        "progress_current": 0,
+                        "progress_total": 3,
+                        "progress_label": "等待执行",
+                        "created_at": auto_pool_created_at,
+                        "updated_at": auto_pool_created_at,
+                    }
+                )
+                auto_pool_task = sub2api_sink_task.delay(auto_pool_record_id)
+                auto_pool_task_id = str(getattr(auto_pool_task, "id", "") or "")
+                if auto_pool_task_id:
+                    patch_task(
+                        auto_pool_record_id, {"celery_task_id": auto_pool_task_id}
+                    )
+
+                patch_account(
+                    mother_id,
+                    {
+                        "pool_status": "running",
+                        "pool_last_task": auto_pool_record_id,
+                        "pool_updated_at": timezone.now().isoformat(),
+                    },
+                )
+
+                auto_pool_result["record_id"] = auto_pool_record_id
+                auto_pool_result["task_id"] = auto_pool_task_id
+                _log(
+                    f"auto pool task dispatched: record_id={auto_pool_record_id} task_id={auto_pool_task_id} mode={auto_pool_mode}"
+                )
+            except Exception as auto_pool_err:
+                auto_pool_result["error"] = str(auto_pool_err)
+                _log(f"auto pool dispatch failed: {auto_pool_err}")
+                try:
+                    patch_account(
+                        mother_id,
+                        {
+                            "pool_status": "failed",
+                            "pool_updated_at": timezone.now().isoformat(),
+                        },
+                    )
+                except Exception:
+                    pass
+
+            result["auto_pool"] = auto_pool_result
+        elif success:
+            _log("auto pool skipped: auto_pool_enabled=false")
+        else:
+            _log("auto pool skipped: register not successful")
 
         if success:
             _log(

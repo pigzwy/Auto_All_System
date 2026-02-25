@@ -79,14 +79,28 @@ export interface GptBusinessAccountSessionResponse {
   session: Record<string, any> | null
 }
 
+export interface GptBusinessAccountTokenResponse {
+  id: string
+  has_tokens: boolean
+  token_artifact: Record<string, any> | null
+}
+
 export type SelfRegisterCardMode = 'selected' | 'random' | 'manual'
-export type SelfRegisterLaunchType = 'geekez' | 'local'
+export type SelfRegisterLaunchType = 'geekez'
+export type SelfRegisterMode = 'browser' | 'protocol'
 
 export interface SelfRegisterOptions {
+  register_mode?: SelfRegisterMode
   launch_type?: SelfRegisterLaunchType
+  pool_mode?: 's2a_oauth' | 'crs_sync' | 'disabled'
   card_mode?: SelfRegisterCardMode
   selected_card_id?: number
   keep_profile_on_fail?: boolean
+  auto_pool_enabled?: boolean
+  s2a_api_base?: string
+  s2a_admin_key?: string
+  s2a_admin_token?: string
+  target_key?: string
 }
 
 export const gptBusinessApi = {
@@ -215,11 +229,18 @@ export const gptBusinessApi = {
   batchSelfRegister(data: {
     mother_ids: string[]
     concurrency?: number
+    register_mode?: SelfRegisterMode
     open_geekez?: boolean
     launch_type?: SelfRegisterLaunchType
+    pool_mode?: 's2a_oauth' | 'crs_sync' | 'disabled'
     card_mode?: SelfRegisterCardMode
     selected_card_id?: number
     keep_profile_on_fail?: boolean
+    auto_pool_enabled?: boolean
+    s2a_api_base?: string
+    s2a_admin_key?: string
+    s2a_admin_token?: string
+    target_key?: string
   }): Promise<{ message?: string; results?: any[] }> {
     return request.post('/plugins/gpt-business/accounts/batch/self_register/', data)
   },
@@ -274,35 +295,17 @@ export const gptBusinessApi = {
     ws_endpoint?: string
     pid?: number
     saved?: boolean
-    // 无痕模式
-    launch_type?: string
     email?: string
   }> {
     return request.post(`/plugins/gpt-business/accounts/${accountId}/launch_geekez/`)
   },
 
-  /**
-   * 启动 Geek 无痕模式
-   */
-  launchLocal(accountId: string): Promise<{
-    success: boolean
-    launch_type?: string
-    browser_type?: string
-    created_profile?: boolean
-    profile_id?: string
-    debug_port?: number
-    cdp_endpoint?: string
-    ws_endpoint?: string
-    pid?: number
-    email?: string
-  }> {
-    return request.post(`/plugins/gpt-business/accounts/${accountId}/launch_geekez/`, {
-      launch_type: 'local'
-    })
-  },
-
   getAccountSession(accountId: string): Promise<GptBusinessAccountSessionResponse> {
     return request.get(`/plugins/gpt-business/accounts/${accountId}/session/`)
+  },
+
+  getAccountTokens(accountId: string): Promise<GptBusinessAccountTokenResponse> {
+    return request.get(`/plugins/gpt-business/accounts/${accountId}/tokens/`)
   },
 
   testS2aConnection(data: {
