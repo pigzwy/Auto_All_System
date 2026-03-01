@@ -56,6 +56,8 @@
             :model-value="filterEmail"
             placeholder="邮箱模糊搜索"
             class="h-9 w-56"
+            name="gacct-search-filter"
+            autocomplete="nope"
             @update:modelValue="(v) => onFilterEmailChange(v)"
           />
 
@@ -190,51 +192,52 @@
                     @update:modelValue="onToggleAllOnPage"
                   />
                 </TableHead>
-                <TableHead class="w-20">
+                <TableHead class="w-16">
                   <button type="button" class="inline-flex items-center gap-1 text-left" @click="toggleSort('id')">
                     ID
                     <span class="text-xs text-muted-foreground">{{ getSortIndicator('id') }}</span>
                   </button>
                 </TableHead>
-                <TableHead class="min-w-[260px]">
+                <TableHead class="min-w-[180px]">
                   <button type="button" class="inline-flex items-center gap-1 text-left" @click="toggleSort('email')">
                     邮箱
                     <span class="text-xs text-muted-foreground">{{ getSortIndicator('email') }}</span>
                   </button>
                 </TableHead>
-                <TableHead class="min-w-[320px]">
+                <TableHead class="min-w-[240px]">
                   <button type="button" class="inline-flex items-center gap-1 text-left" @click="toggleSort('status')">
                     状态
                     <span class="text-xs text-muted-foreground">{{ getSortIndicator('status') }}</span>
                   </button>
                 </TableHead>
-                <TableHead class="w-24">
+                <TableHead class="w-16">
                   <button type="button" class="inline-flex items-center gap-1 text-left" @click="toggleSort('n2fa')">
                     n-2fa
                     <span class="text-xs text-muted-foreground">{{ getSortIndicator('n2fa') }}</span>
                   </button>
                 </TableHead>
-                <TableHead class="w-28">环境</TableHead>
-                <TableHead class="w-28">
+                <TableHead class="w-20">环境</TableHead>
+                <TableHead class="w-24">
                   <button type="button" class="inline-flex items-center gap-1 text-left" @click="toggleSort('group_name')">
                     分组
                     <span class="text-xs text-muted-foreground">{{ getSortIndicator('group_name') }}</span>
                   </button>
                 </TableHead>
-                <TableHead class="w-44">
+                <TableHead class="w-36">
                   <button type="button" class="inline-flex items-center gap-1 text-left" @click="toggleSort('created_at')">
                     创建时间
                     <span class="text-xs text-muted-foreground">{{ getSortIndicator('created_at') }}</span>
                   </button>
                 </TableHead>
-                <TableHead class="min-w-[220px]">备注</TableHead>
-                <TableHead class="w-28 text-right">操作</TableHead>
+                <TableHead class="min-w-[120px]">备注</TableHead>
+                <TableHead class="w-28">手机号</TableHead>
+                <TableHead class="w-24 text-right">操作</TableHead>
               </TableRow>
             </TableHeader>
 
             <TableBody>
               <TableRow v-if="loading">
-                <TableCell colspan="10" class="py-10">
+                <TableCell colspan="11" class="py-10">
                   <div class="flex items-center justify-center gap-2 text-sm text-muted-foreground">
                     <Loader2Icon class="h-4 w-4 animate-spin" />
                     加载中...
@@ -243,7 +246,7 @@
               </TableRow>
 
               <TableRow v-else-if="accounts.length === 0">
-                <TableCell colspan="10" class="py-10 text-center text-sm text-muted-foreground">
+                <TableCell colspan="11" class="py-10 text-center text-sm text-muted-foreground">
                   暂无数据
                 </TableCell>
               </TableRow>
@@ -274,7 +277,7 @@
                     />
                     <button
                       type="button"
-                      class="max-w-[320px] truncate text-left text-primary hover:underline underline-offset-4"
+                      class="max-w-[240px] truncate text-left text-primary hover:underline underline-offset-4"
                       :title="row.email"
                       @click="viewAccount(row)"
                     >
@@ -338,12 +341,45 @@
                   {{ formatDate(row.created_at) }}
                 </TableCell>
 
-                <TableCell>
+                <TableCell @click.stop>
+                  <Input
+                    v-if="inlineEditCell?.rowId === row.id && inlineEditCell?.field === 'notes'"
+                    v-model="inlineEditValue"
+                    class="h-7 text-xs"
+                    autocomplete="off"
+                    autofocus
+                    @keyup.enter="saveInlineEdit(row)"
+                    @keyup.escape="cancelInlineEdit()"
+                    @blur="saveInlineEdit(row)"
+                  />
                   <span
-                    class="block max-w-[280px] truncate text-xs text-muted-foreground"
-                    :title="row.notes || ''"
+                    v-else
+                    class="block max-w-[180px] truncate text-xs text-muted-foreground cursor-pointer hover:text-foreground"
+                    :title="(row.notes || '-') + ' (点击编辑)'"
+                    @click="startInlineEdit(row, 'notes')"
                   >
                     {{ row.notes || '-' }}
+                  </span>
+                </TableCell>
+
+                <TableCell @click.stop>
+                  <Input
+                    v-if="inlineEditCell?.rowId === row.id && inlineEditCell?.field === 'phone_number'"
+                    v-model="inlineEditValue"
+                    class="h-7 text-xs"
+                    autocomplete="off"
+                    autofocus
+                    @keyup.enter="saveInlineEdit(row)"
+                    @keyup.escape="cancelInlineEdit()"
+                    @blur="saveInlineEdit(row)"
+                  />
+                  <span
+                    v-else
+                    class="text-xs text-muted-foreground cursor-pointer hover:text-foreground"
+                    :title="(row.phone_number || '-') + ' (点击编辑)'"
+                    @click="startInlineEdit(row, 'phone_number')"
+                  >
+                    {{ row.phone_number || '-' }}
                   </span>
                 </TableCell>
 
@@ -502,25 +538,31 @@
           <DialogDescription>仅修改你填写的字段；密码留空则保持不变。</DialogDescription>
         </DialogHeader>
 
+        <form autocomplete="off" @submit.prevent="submitEditAccount">
         <div class="grid gap-4 py-2">
           <div class="grid gap-2">
             <label class="text-sm font-medium">邮箱</label>
-            <Input v-model="editForm.email" disabled />
+            <Input v-model="editForm.email" disabled name="edit-gacct-email" autocomplete="nope" />
           </div>
 
           <div class="grid gap-2">
             <label class="text-sm font-medium">密码</label>
-            <Input v-model="editForm.password" type="password" placeholder="留空则不修改" />
+            <Input v-model="editForm.password" type="password" placeholder="留空则不修改" name="edit-gacct-pw" autocomplete="new-password" />
           </div>
 
           <div class="grid gap-2">
             <label class="text-sm font-medium">恢复邮箱</label>
-            <Input v-model="editForm.recovery_email" placeholder="选填" />
+            <Input v-model="editForm.recovery_email" placeholder="选填" name="edit-gacct-recovery" autocomplete="nope" />
+          </div>
+
+          <div class="grid gap-2">
+            <label class="text-sm font-medium">手机号</label>
+            <Input v-model="editForm.phone_number" placeholder="选填" name="edit-gacct-phone" autocomplete="nope" />
           </div>
 
           <div class="grid gap-2">
             <label class="text-sm font-medium">2FA 密钥</label>
-            <Input v-model="editForm.secret_key" placeholder="选填" />
+            <Input v-model="editForm.secret_key" placeholder="选填" name="edit-gacct-2fa" autocomplete="nope" />
           </div>
 
           <div class="grid gap-2">
@@ -529,41 +571,91 @@
               v-model="editForm.notes"
               rows="2"
               placeholder="选填"
+              autocomplete="nope"
               class="min-h-[80px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
             />
           </div>
         </div>
 
         <DialogFooter class="gap-2">
-          <Button variant="outline" @click="showEditDialog = false">取消</Button>
-          <Button :disabled="submitting" class="gap-2" @click="submitEditAccount">
+          <Button variant="outline" type="button" @click="showEditDialog = false">取消</Button>
+          <Button :disabled="submitting" class="gap-2" type="submit">
             <Loader2Icon v-if="submitting" class="h-4 w-4 animate-spin" />
             保存
           </Button>
         </DialogFooter>
+        </form>
       </DialogContent>
     </Dialog>
 
     <!-- 查看账号详情对话框 -->
     <Dialog v-model:open="showViewDialog">
-      <DialogContent class="sm:max-w-[860px]">
+      <DialogContent class="sm:max-w-[560px]">
         <DialogHeader>
           <DialogTitle>账号详情</DialogTitle>
-          <DialogDescription>查看账号关键字段与状态信息</DialogDescription>
+          <DialogDescription>{{ selectedAccount?.email }}</DialogDescription>
         </DialogHeader>
 
-        <div v-if="selectedAccount" class="grid gap-4 py-2 sm:grid-cols-2">
-          <div class="space-y-1">
+        <div v-if="selectedAccount" class="grid gap-3 py-2 sm:grid-cols-3">
+          <div class="space-y-0.5">
             <div class="text-xs text-muted-foreground">ID</div>
             <div class="font-mono text-sm">#{{ selectedAccount.id }}</div>
           </div>
 
-          <div class="space-y-1">
-            <div class="text-xs text-muted-foreground">邮箱</div>
-            <div class="text-sm break-all">{{ selectedAccount.email }}</div>
+          <div class="space-y-0.5">
+            <div class="text-xs text-muted-foreground">状态</div>
+            <Badge variant="secondary" class="rounded-full">
+              {{ selectedAccount.status_display || selectedAccount.status }}
+            </Badge>
           </div>
 
-          <div class="space-y-1">
+          <div class="space-y-0.5">
+            <div class="text-xs text-muted-foreground">分类</div>
+            <Badge variant="secondary" class="rounded-full">
+              {{ selectedAccount.type_display || selectedAccount.type_tag || '-' }}
+            </Badge>
+          </div>
+
+          <div class="space-y-0.5">
+            <div class="text-xs text-muted-foreground">手机号</div>
+            <div class="text-sm">{{ selectedAccount.phone_number || '无' }}</div>
+          </div>
+
+          <div class="space-y-0.5">
+            <div class="text-xs text-muted-foreground">分组</div>
+            <div>
+              <Badge v-if="selectedAccount.group_name" variant="outline" class="rounded-full">{{ selectedAccount.group_name }}</Badge>
+              <span v-else class="text-sm text-muted-foreground">未分组</span>
+            </div>
+          </div>
+
+          <div class="space-y-0.5">
+            <div class="text-xs text-muted-foreground">是否绑卡</div>
+            <Badge :variant="selectedAccount.card_bound ? 'default' : 'secondary'" class="rounded-full">
+              {{ selectedAccount.card_bound ? '已绑卡' : '未绑卡' }}
+            </Badge>
+          </div>
+
+          <div class="space-y-0.5">
+            <div class="text-xs text-muted-foreground">SheerID</div>
+            <Badge :variant="selectedAccount.sheerid_verified ? 'default' : 'secondary'" class="rounded-full">
+              {{ selectedAccount.sheerid_verified ? '已验证' : '未验证' }}
+            </Badge>
+          </div>
+
+          <div class="space-y-0.5">
+            <div class="text-xs text-muted-foreground">Gemini</div>
+            <Badge variant="outline" class="rounded-full">
+              {{ getGeminiStatusText(selectedAccount.gemini_status || 'not_subscribed') }}
+            </Badge>
+          </div>
+
+          <div class="space-y-0.5">
+            <div class="text-xs text-muted-foreground">最后登录</div>
+            <div class="text-sm">{{ selectedAccount.last_login_at ? formatDate(selectedAccount.last_login_at) : '从未' }}</div>
+          </div>
+
+          <div class="space-y-1 sm:col-span-3">
             <div class="text-xs text-muted-foreground">密码</div>
             <div class="flex items-center gap-2">
               <code v-if="selectedAccount.password" class="flex-1 rounded bg-muted px-2 py-1 font-mono text-sm break-all">
@@ -592,7 +684,7 @@
             </div>
           </div>
 
-          <div class="space-y-1 sm:col-span-2">
+          <div class="space-y-1 sm:col-span-3">
             <div class="text-xs text-muted-foreground">2FA 密钥</div>
             <div class="flex items-center gap-2">
               <template v-if="selectedAccount.two_fa || selectedAccount.new_2fa_display || selectedAccount.new_2fa">
@@ -615,106 +707,39 @@
             </div>
           </div>
 
-          <div class="space-y-1">
-            <div class="text-xs text-muted-foreground">分组</div>
-            <div>
-              <Badge v-if="selectedAccount.group_name" variant="outline" class="rounded-full">{{ selectedAccount.group_name }}</Badge>
-              <span v-else class="text-sm text-muted-foreground">未分组</span>
+          <div class="space-y-1 sm:col-span-3">
+            <div class="text-xs text-muted-foreground">主线进度</div>
+            <div class="flex items-center gap-2">
+              <span
+                v-for="(step, index) in getMainFlowProgress(selectedAccount)"
+                :key="`detail-${index}`"
+                class="h-3 w-3 rounded-full"
+                :class="step.state === 'success'
+                  ? 'bg-emerald-500'
+                  : (step.state === 'failed' ? 'bg-rose-500' : 'bg-muted-foreground/30')"
+                :title="`${index + 1}. ${step.label}`"
+              />
             </div>
           </div>
 
-          <div class="space-y-1">
-            <div class="text-xs text-muted-foreground">分类</div>
-            <div>
-              <Badge variant="secondary" class="rounded-full">
-                {{ selectedAccount.type_display || selectedAccount.type_tag || '-' }}
-              </Badge>
-            </div>
-          </div>
-
-          <div class="space-y-1">
-            <div class="text-xs text-muted-foreground">状态</div>
-            <div>
-              <Badge variant="secondary" class="rounded-full">
-                {{ selectedAccount.status_display || selectedAccount.status }}
-              </Badge>
-            </div>
-          </div>
-
-            <div class="space-y-2 sm:col-span-2">
-              <div class="text-xs text-muted-foreground">主线进度</div>
-              <div class="flex items-center gap-2">
-                <span
-                  v-for="(step, index) in getMainFlowProgress(selectedAccount)"
-                  :key="`detail-${index}`"
-                  class="h-3 w-3 rounded-full"
-                  :class="step.state === 'success'
-                    ? 'bg-emerald-500'
-                    : (step.state === 'failed' ? 'bg-rose-500' : 'bg-muted-foreground/30')"
-                  :title="`${index + 1}. ${step.label}`"
-                />
-              </div>
-            </div>
-
-          <div class="space-y-1">
-            <div class="text-xs text-muted-foreground">SheerID 状态</div>
-            <div>
-              <Badge :variant="selectedAccount.sheerid_verified ? 'default' : 'secondary'" class="rounded-full">
-                {{ selectedAccount.sheerid_verified ? '已验证' : '未验证' }}
-              </Badge>
-            </div>
-          </div>
-
-          <div class="space-y-1">
-            <div class="text-xs text-muted-foreground">Gemini 状态</div>
-            <div>
-              <Badge variant="outline" class="rounded-full">
-                {{ getGeminiStatusText(selectedAccount.gemini_status || 'not_subscribed') }}
-              </Badge>
-            </div>
-          </div>
-
-          <div class="space-y-1">
-            <div class="text-xs text-muted-foreground">是否绑卡</div>
-            <div>
-              <Badge :variant="selectedAccount.card_bound ? 'default' : 'secondary'" class="rounded-full">
-                {{ selectedAccount.card_bound ? '已绑卡' : '未绑卡' }}
-              </Badge>
-            </div>
-          </div>
-
-          <div class="space-y-1 sm:col-span-2">
+          <div class="space-y-0.5 sm:col-span-3">
             <div class="text-xs text-muted-foreground">恢复邮箱</div>
             <div class="text-sm break-all">{{ selectedAccount.recovery_email || '无' }}</div>
           </div>
 
-          <div class="space-y-1 sm:col-span-2">
+          <div v-if="selectedAccount.sheerid_link" class="space-y-0.5 sm:col-span-3">
             <div class="text-xs text-muted-foreground">SheerID 链接</div>
-            <div>
-              <a
-                v-if="selectedAccount.sheerid_link"
-                :href="selectedAccount.sheerid_link"
-                target="_blank"
-                rel="noreferrer"
-                class="text-sm text-primary hover:underline underline-offset-4 break-all"
-              >
-                {{ selectedAccount.sheerid_link }}
-              </a>
-              <span v-else class="text-sm text-muted-foreground">无</span>
-            </div>
+            <a
+              :href="selectedAccount.sheerid_link"
+              target="_blank"
+              rel="noreferrer"
+              class="text-sm text-primary hover:underline underline-offset-4 break-all"
+            >
+              {{ selectedAccount.sheerid_link }}
+            </a>
           </div>
 
-          <div class="space-y-1 sm:col-span-2">
-            <div class="text-xs text-muted-foreground">最后登录</div>
-            <div class="text-sm">{{ selectedAccount.last_login_at ? formatDate(selectedAccount.last_login_at) : '从未登录' }}</div>
-          </div>
-
-          <div class="space-y-1 sm:col-span-2">
-            <div class="text-xs text-muted-foreground">创建时间</div>
-            <div class="text-sm">{{ formatDate(selectedAccount.created_at) }}</div>
-          </div>
-
-          <div class="space-y-1 sm:col-span-2">
+          <div class="space-y-0.5 sm:col-span-3">
             <div class="text-xs text-muted-foreground">备注</div>
             <div class="text-sm whitespace-pre-wrap">{{ selectedAccount.notes || '无' }}</div>
           </div>
@@ -1550,6 +1575,34 @@ const showEditDialog = ref(false)
 const showViewDialog = ref(false)
 const showDetailPassword = ref(false)
 const selectedAccount = ref<GoogleAccount | null>(null)
+
+// 行内编辑
+const inlineEditCell = ref<{ rowId: number; field: string } | null>(null)
+const inlineEditValue = ref('')
+
+const startInlineEdit = (row: GoogleAccount, field: 'notes' | 'phone_number') => {
+  inlineEditCell.value = { rowId: row.id, field }
+  inlineEditValue.value = (row as any)[field] || ''
+}
+
+const saveInlineEdit = async (row: GoogleAccount) => {
+  if (!inlineEditCell.value) return
+  const { field } = inlineEditCell.value
+  const newVal = inlineEditValue.value
+  const oldVal = (row as any)[field] || ''
+  inlineEditCell.value = null
+  if (newVal === oldVal) return
+  try {
+    await googleAccountsApi.editAccount(row.id, { [field]: newVal })
+    ;(row as any)[field] = newVal
+  } catch (e: any) {
+    ElMessage.error('保存失败: ' + (e.message || '未知错误'))
+  }
+}
+
+const cancelInlineEdit = () => {
+  inlineEditCell.value = null
+}
 const importText = ref('')
 const filterType = ref('all')
 const filterStudentQualification = ref('all')
@@ -1975,6 +2028,7 @@ const editAccount = (account: GoogleAccount) => {
   editForm.email = account.email || ''
   editForm.password = ''
   editForm.recovery_email = account.recovery_email || ''
+  editForm.phone_number = account.phone_number || ''
   editForm.secret_key = account.two_fa || ''
   editForm.notes = account.notes || ''
   showEditDialog.value = true
@@ -2439,6 +2493,7 @@ const editForm = reactive({
   email: '',
   password: '',
   recovery_email: '',
+  phone_number: '',
   secret_key: '',
   notes: ''
 })
@@ -3355,6 +3410,7 @@ const openEditDialog = (row: GoogleAccount) => {
     editForm.email = row.email
     editForm.password = '' // Don't show password
     editForm.recovery_email = row.recovery_email || ''
+    editForm.phone_number = row.phone_number || ''
     editForm.secret_key = '' // 2FA Secret usually not returned or hidden
     editForm.notes = row.notes || ''
     showEditDialog.value = true
@@ -3365,6 +3421,7 @@ const submitEditAccount = async () => {
     try {
         const payload: any = {
             recovery_email: editForm.recovery_email,
+            phone_number: editForm.phone_number,
             notes: editForm.notes
         }
         if (editForm.password) payload.password = editForm.password

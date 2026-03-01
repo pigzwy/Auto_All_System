@@ -41,6 +41,7 @@ class GoogleAccountSerializer(serializers.ModelSerializer):
             "email",
             "password",
             "recovery_email",
+            "phone_number",
             "status",
             "status_display",
             "google_one_status",
@@ -283,6 +284,7 @@ class GoogleAccountEditSerializer(serializers.Serializer):
     email = serializers.EmailField(required=False)
     password = serializers.CharField(required=False, allow_blank=True, write_only=True)
     recovery_email = serializers.CharField(required=False, allow_blank=True)
+    phone_number = serializers.CharField(required=False, allow_blank=True)
     secret_key = serializers.CharField(
         required=False, allow_blank=True, write_only=True
     )

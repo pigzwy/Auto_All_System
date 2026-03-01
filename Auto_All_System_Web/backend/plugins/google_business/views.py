@@ -844,6 +844,11 @@ class GoogleAccountViewSet(viewsets.ModelViewSet):
             account.recovery_email = str(data.get("recovery_email") or "")
             update_fields.append("recovery_email")
 
+        # phone_number
+        if "phone_number" in data:
+            account.phone_number = str(data.get("phone_number") or "")
+            update_fields.append("phone_number")
+
         # 2FA secret
         if "secret_key" in data and data["secret_key"] is not None:
             secret = str(data.get("secret_key") or "")

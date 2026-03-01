@@ -181,6 +181,7 @@ export interface GoogleAccount {
   email: string
   password?: string
   recovery_email?: string
+  phone_number?: string
   status: string
   status_display?: string
   google_one_status?: string | null
