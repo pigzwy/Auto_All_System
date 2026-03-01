@@ -327,7 +327,7 @@ class SheerIDVerifyService(BaseBrowserService):
             
             try:
                 return resp.json()
-            except:
+            except Exception:
                 return {"status": "error", "message": f"Invalid JSON: {resp.text}"}
         
         except Exception as e:

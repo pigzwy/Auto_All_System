@@ -2,8 +2,6 @@
 Google Business业务服务层
 """
 
-from .sheerid import SheerIDService
-from .gemini import GeminiService
 from .account_manager import GoogleAccountManager
 from .browser_pool import BrowserPool, browser_pool
 from .login_service import GoogleLoginService
@@ -14,8 +12,6 @@ from .security_service import GoogleSecurityService
 from .subscription_service import SubscriptionVerifyService
 
 __all__ = [
-    "SheerIDService",
-    "GeminiService",
     "GoogleAccountManager",
     "BrowserPool",
     "browser_pool",

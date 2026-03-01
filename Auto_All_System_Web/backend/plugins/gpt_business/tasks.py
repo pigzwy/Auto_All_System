@@ -1026,7 +1026,6 @@ def self_register_task(self, record_id: str):
 
                 # 调用注册函数
                 _log("calling register_openai_account...")
-                print("[DEBUG] calling register_openai_account...", flush=True)
 
                 try:
                     register_ok = register_openai_account(
@@ -1038,17 +1037,10 @@ def self_register_task(self, record_id: str):
                         screenshot_callback=shot_callback,
                     )
                 except Exception as reg_err:
-                    print(
-                        f"[DEBUG] register_openai_account exception: {reg_err}",
-                        flush=True,
-                    )
+                    logger.debug("register_openai_account exception: %s", reg_err)
                     _log(f"register exception: {reg_err}")
                     register_ok = False
 
-                print(
-                    f"[DEBUG] register_openai_account returned: {register_ok}",
-                    flush=True,
-                )
                 _log(f"register_openai_account returned: {register_ok}")
 
                 # Team 开通逻辑
@@ -1056,14 +1048,9 @@ def self_register_task(self, record_id: str):
                 session_data = {}
                 used_card_id: int | None = None
 
-                print(
-                    f"[DEBUG] register_ok={register_ok}, starting card check mode={card_mode}...",
-                    flush=True,
-                )
                 _log(f"register_ok={register_ok}, starting team onboarding check...")
 
                 if register_ok:
-                    print("[DEBUG] starting onboarding...", flush=True)
 
                     try:
                         _log("start team onboarding flow")
@@ -1092,10 +1079,6 @@ def self_register_task(self, record_id: str):
 
                         skip_checkout = card_mode == "manual"
 
-                        print(
-                            f"[DEBUG] calling run_onboarding_flow mode={card_mode}...",
-                            flush=True,
-                        )
                         success, session_data = run_onboarding_flow(
                             page=page,
                             email=email,
@@ -1104,10 +1087,6 @@ def self_register_task(self, record_id: str):
                             if skip_checkout
                             else get_checkout_card,
                             card_wait_timeout=300,
-                        )
-                        print(
-                            f"[DEBUG] run_onboarding_flow returned: {success}",
-                            flush=True,
                         )
 
                         checkout_ok = success
@@ -1120,7 +1099,6 @@ def self_register_task(self, record_id: str):
                         shot_callback("checkout_done.png")
 
                     except Exception as e:
-                        print(f"[DEBUG] checkout exception: {e}", flush=True)
                         checkout_err = str(e)
                         _log(f"checkout error: {e}")
                         shot_callback("checkout_error.png")

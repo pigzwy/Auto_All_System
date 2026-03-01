@@ -5,13 +5,10 @@ Google One绑卡订阅服务
 import asyncio
 import logging
 from typing import Dict, Any, Optional, Tuple
-from django.utils import timezone
 from playwright.async_api import Page
 
 from .base import BaseBrowserService
 from .login_service import GoogleLoginService
-from apps.integrations.google_accounts.models import GoogleAccount
-from ..models import GoogleTask, GoogleCardInfo
 from ..utils import TaskLogger
 
 logger = logging.getLogger(__name__)
@@ -219,7 +216,7 @@ class GoogleOneBindCardService(BaseBrowserService):
                     await element.click()
                     self.logger.info(f"Clicked 'Get student offer' (selector: {selector})")
                     return True
-            except:
+            except Exception:
                 continue
         
         self.logger.warning("'Get student offer' button not found")
@@ -253,7 +250,7 @@ class GoogleOneBindCardService(BaseBrowserService):
                         if task_logger:
                             task_logger.info("检测到已绑卡")
                         return True, element
-                except:
+                except Exception:
                     continue
             
             return False, None
@@ -289,7 +286,7 @@ class GoogleOneBindCardService(BaseBrowserService):
                         self.logger.info("Clicked 'Got it'")
                         await asyncio.sleep(3)
                         break
-                except:
+                except Exception:
                     continue
             
             # 2. 重新点击"Get student offer"
@@ -312,7 +309,7 @@ class GoogleOneBindCardService(BaseBrowserService):
                         self.logger.info(f"Clicked expired card (selector: {selector})")
                         await asyncio.sleep(5)
                         return True
-                except:
+                except Exception:
                     continue
             
             return False
@@ -370,7 +367,7 @@ class GoogleOneBindCardService(BaseBrowserService):
                         if task_logger:
                             task_logger.info("已点击 'Add card'")
                         return True
-                except:
+                except Exception:
                     continue
             
             self.logger.warning("'Add card' not found in iframe")
@@ -402,7 +399,7 @@ class GoogleOneBindCardService(BaseBrowserService):
                     if await test_locator.count() >= 0:
                         self.logger.info(f"Found inner iframe (selector: {selector})")
                         return temp_iframe
-                except:
+                except Exception:
                     continue
             
             self.logger.info("No inner iframe found, continuing with current level")
@@ -491,7 +488,7 @@ class GoogleOneBindCardService(BaseBrowserService):
                         if task_logger:
                             task_logger.info("已点击 'Save card'")
                         return True
-                except:
+                except Exception:
                     continue
             
             self.logger.error("'Save card' button not found")
@@ -531,9 +528,9 @@ class GoogleOneBindCardService(BaseBrowserService):
                             if task_logger:
                                 task_logger.info("已点击订阅按钮")
                             return True
-                    except:
+                    except Exception:
                         continue
-            except:
+            except Exception:
                 pass
             
             # 在主页面查找
@@ -547,7 +544,7 @@ class GoogleOneBindCardService(BaseBrowserService):
                         if task_logger:
                             task_logger.info("已点击订阅按钮")
                         return True
-                except:
+                except Exception:
                     continue
             
             self.logger.warning("Subscribe button not found")
@@ -580,7 +577,7 @@ class GoogleOneBindCardService(BaseBrowserService):
                         if task_logger:
                             task_logger.info("✅ 检测到'Subscribed'，订阅确认成功")
                         return True
-                except:
+                except Exception:
                     continue
             
             self.logger.warning("'Subscribed' not detected")
@@ -626,7 +623,7 @@ class GoogleOneBindCardService(BaseBrowserService):
                         if task_logger:
                             task_logger.warning(f"检测到支付错误: {error_text}")
                         return error_text.strip()[:100]
-                except:
+                except Exception:
                     continue
 
             return None

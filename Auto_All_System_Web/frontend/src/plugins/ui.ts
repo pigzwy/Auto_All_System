@@ -84,17 +84,14 @@ import ElButtonGroup from '@/components/app/ElButtonGroup.vue'
 import ElCard from '@/components/app/ElCard.vue'
 import ElCollapse from '@/components/app/ElCollapse.vue'
 import ElCollapseItem from '@/components/app/ElCollapseItem.vue'
-import ElDatePicker from '@/components/app/ElDatePicker.vue'
 import ElDescriptions from '@/components/app/ElDescriptions.vue'
 import ElDescriptionsItem from '@/components/app/ElDescriptionsItem.vue'
 import ElDialog from '@/components/app/ElDialog.vue'
-import ElDivider from '@/components/app/ElDivider.vue'
 import ElForm from '@/components/app/ElForm.vue'
 import ElFormItem from '@/components/app/ElFormItem.vue'
 import ElIcon from '@/components/app/ElIcon.vue'
 import ElInput from '@/components/app/ElInput.vue'
 import ElInputNumber from '@/components/app/ElInputNumber.vue'
-import ElLink from '@/components/app/ElLink.vue'
 import ElOption from '@/components/app/ElOption.vue'
 import ElPageHeader from '@/components/app/ElPageHeader.vue'
 import ElPagination from '@/components/app/ElPagination.vue'
@@ -195,17 +192,14 @@ export const UiPlugin: Plugin = {
     app.component('Panel', ElCard)
     app.component('Collapse', ElCollapse)
     app.component('CollapseItem', ElCollapseItem)
-    app.component('DatePicker', ElDatePicker)
     app.component('Descriptions', ElDescriptions)
     app.component('DescriptionsItem', ElDescriptionsItem)
     app.component('Modal', ElDialog)
-    app.component('Divider', ElDivider)
     app.component('SimpleForm', ElForm)
     app.component('SimpleFormItem', ElFormItem)
     app.component('Icon', ElIcon)
     app.component('TextInput', ElInput)
     app.component('NumberInput', ElInputNumber)
-    app.component('Link', ElLink)
     app.component('SelectOption', ElOption)
     app.component('PageHeader', ElPageHeader)
     app.component('Paginator', ElPagination)

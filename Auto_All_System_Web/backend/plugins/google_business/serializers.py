@@ -362,7 +362,7 @@ class GoogleCardInfoSerializer(serializers.ModelSerializer):
 
             decrypted_number = EncryptionUtil.decrypt(obj.card_number)
             return mask_card_number(decrypted_number)
-        except:
+        except Exception:
             return "****-****-****-****"
 
 
@@ -531,7 +531,7 @@ class GoogleTaskAccountSerializer(serializers.ModelSerializer):
 
                 decrypted_number = EncryptionUtil.decrypt(obj.card_used.card_number)
                 return mask_card_number(decrypted_number)
-            except:
+            except Exception:
                 return None
         return None
 

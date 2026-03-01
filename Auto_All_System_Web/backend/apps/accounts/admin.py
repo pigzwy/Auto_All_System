@@ -95,7 +95,7 @@ class UserAdmin(BaseUserAdmin):
                 color,
                 balance.balance
             )
-        except:
+        except Exception:
             return '未创建'
     balance_display.short_description = '账户余额'
     

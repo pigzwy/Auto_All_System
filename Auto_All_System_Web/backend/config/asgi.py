@@ -9,14 +9,13 @@ from channels.auth import AuthMiddlewareStack
 
 os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'config.settings')
 
-# 导入WebSocket路由（后续实现）
-# from apps.tasks import routing as task_routing
+# WebSocket 路由占位，待实际 consumers 实现后再导入
 
 application = ProtocolTypeRouter({
     "http": get_asgi_application(),
     "websocket": AuthMiddlewareStack(
         URLRouter(
-            # task_routing.websocket_urlpatterns
+            # 待实现: 添加 WebSocket URL patterns
             []
         )
     ),

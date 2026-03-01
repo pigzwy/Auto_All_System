@@ -143,8 +143,6 @@ class UserAPIKey(models.Model):
         key = base64.urlsafe_b64encode(hashlib.sha256(encryption_key).digest())
         cipher = Fernet(key)
         return cipher.decrypt(self.api_key_encrypted.encode()).decode()
-        cipher = Fernet(settings.SECRET_KEY[:44].encode() if hasattr(settings, 'SECRET_KEY') else Fernet.generate_key())
-        return cipher.decrypt(self.api_key_encrypted.encode()).decode()
     
     @property
     def masked_api_key(self):
@@ -154,7 +152,7 @@ class UserAPIKey(models.Model):
             if len(key) <= 8:
                 return "****"
             return f"{key[:4]}...{key[-4:]}"
-        except:
+        except Exception:
             return "****"
     
     @property

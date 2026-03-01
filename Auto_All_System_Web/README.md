@@ -19,72 +19,81 @@
 
 ```
 Auto_All_System_Web/
+├── README.md                          # 本文件
+├── docker-compose.yml                 # Docker 主编排（db/redis/backend/celery/frontend）
+├── docker-compose.linux.yml           # Linux bridge 模式 override
+├── docker-compose.linux.hostnet.yml   # Linux host network 模式 override
+├── nginx-local.conf                   # Nginx 本地配置
+├── 一键启动.bat / .sh                  # 生产环境启动
+├── 开发模式启动.bat / .sh              # 开发环境启动（支持 --hostnet / --skip-frontend）
+├── scripts/
+│   └── tcp_forward.py                 # Docker TCP 端口转发工具
+├── docs/                              # 系统级文档（17篇，详见 docs/文档索引.md）
+│
 ├── backend/
-│   ├── apps/                          # 核心应用（共享资源层）
-│   │   ├── accounts/                  # 用户 + 余额 + 余额日志
-│   │   ├── cards/                     # 虚拟卡池（Card / CardUsageLog / CardApiConfig）
-│   │   ├── integrations/              # 第三方集成
-│   │   │   ├── google_accounts/       # Google 账号池（GoogleAccount / SheerIDVerification / GeminiSubscription）
-│   │   │   ├── geekez/                # GeekezBrowser API 封装
-│   │   │   ├── bitbrowser/            # BitBrowser API 封装
-│   │   │   ├── proxies/               # 代理管理
-│   │   │   └── email/                 # CloudMail 域名邮箱集成
-│   │   ├── plugins/                   # 插件管理器（发现/加载/生命周期）
-│   │   ├── tasks/                     # 通用任务系统（Task / TaskLog / TaskStatistics）
-│   │   ├── zones/                     # 专区管理（Zone / ZoneConfig / UserZoneAccess）
-│   │   ├── payments/                  # 支付模块
-│   │   └── admin_panel/               # 管理后台
-│   ├── plugins/                       # 业务插件（各专区核心逻辑）
-│   │   ├── google_business/           # Google 专区插件 ★ 主业务
-│   │   │   ├── services/              # 自动化服务
-│   │   │   │   ├── login_service.py          # Google 登录（2FA/验证码处理）
-│   │   │   │   ├── link_service.py           # SheerID 链接提取
-│   │   │   │   ├── verify_service.py         # SheerID API 验证
-│   │   │   │   ├── bind_card_service.py      # 绑卡订阅
-│   │   │   │   ├── security_service.py       # 2FA/辅助邮箱修改
-│   │   │   │   ├── subscription_service.py   # 订阅状态验证
-│   │   │   │   └── robust_google_auth.py     # 鲁棒登录（验证码/人机检测）
-│   │   │   ├── tasks.py               # Celery 异步任务（process_single_account / batch）
-│   │   │   ├── views.py               # API 视图
-│   │   │   ├── models.py              # GoogleTask / GoogleTaskAccount / GoogleCardInfo
-│   │   │   ├── urls.py                # API 路由
-│   │   │   ├── utils.py               # TaskLogger / EncryptionUtil
-│   │   │   └── docs/                  # 插件维护文档
-│   │   │       └── AUTOMATION_MAINTENANCE.md  # ★ Google 专区自动化维护主文档
-│   │   └── gpt_business/             # GPT 专区插件
-│   │       ├── services/              # 自动化服务
-│   │       ├── tasks.py               # Celery 任务
-│   │       └── docs/                  # 插件维护文档
-│   ├── config/
-│   │   └── settings/                  # Django 分环境配置
+│   ├── manage.py                      # Django 入口
+│   ├── Dockerfile                     # 生产镜像构建
+│   ├── docker-entrypoint.sh           # 容器启动脚本
+│   ├── init_system.py                 # 系统初始化（用户/支付/测试数据）
+│   ├── init_plugins.py                # 插件初始化
+│   ├── env_example.txt                # 环境变量模板
+│   ├── config/                        # Django 配置
+│   │   └── settings/                  # 分环境配置
 │   │       ├── base.py                # 基础配置（INSTALLED_APPS / DB / Cache / Celery）
 │   │       ├── development.py         # 开发环境
 │   │       └── production.py          # 生产环境
 │   ├── core/                          # 核心工具（权限/分页/异常处理）
-│   └── requirements/                  # Python 依赖
-│       ├── base.txt                   # 基础依赖
-│       └── development.txt            # 开发依赖
-├── frontend/
-│   └── src/
-│       ├── api/                       # API 接口层（按模块拆分 20+ 文件）
-│       ├── components/
-│       │   ├── ui/                    # shadcn-vue 基础组件
-│       │   ├── app/                   # Element Plus 兼容层封装
-│       │   └── zones/                 # 专区业务组件
-│       ├── composables/               # 组合式函数
-│       ├── layouts/                   # 布局组件
-│       ├── router/modules/            # 模块化路由
-│       ├── stores/                    # Pinia 状态管理
-│       ├── types/                     # TypeScript 类型定义
-│       └── views/                     # 页面视图
-│           ├── admin/                 # 管理后台
-│           ├── auth/                  # 认证页面
-│           ├── cards/                 # 虚拟卡管理
-│           ├── google/                # Google 账号管理
-│           └── zones/                 # 专区页面
-├── docker-compose.yml                 # Docker 编排（db/redis/backend/celery/frontend）
-├── docs/                              # 系统级文档
-└── README.md                          # 本文件
+│   ├── apps/                          # Django 应用（共享资源层）
+│   │   ├── accounts/                  # 用户认证 + 余额 + 余额日志
+│   │   ├── admin_panel/               # 管理后台统计
+│   │   ├── cards/                     # 虚拟卡池（Card / CardUsageLog / CardApiConfig）
+│   │   ├── payments/                  # 支付系统（Order / PaymentConfig / RechargeCard）
+│   │   ├── zones/                     # 专区管理（Zone / ZoneConfig / UserZoneAccess）
+│   │   ├── tasks/                     # 通用任务系统（Task / TaskLog）
+│   │   ├── plugins/                   # 插件管理器（发现/加载/生命周期）
+│   │   └── integrations/              # 第三方集成
+│   │       ├── google_accounts/       # Google 账号池
+│   │       ├── geekez/                # GeekezBrowser API 封装
+│   │       ├── bitbrowser/            # BitBrowser API 封装
+│   │       ├── proxies/               # 代理管理
+│   │       └── email/                 # CloudMail 域名邮箱集成
+│   ├── plugins/                       # 业务插件（各专区核心逻辑）
+│   │   ├── google_business/           # Google 专区插件 ★ 主业务
+│   │   │   ├── services/              # 自动化服务（登录/验证/绑卡/安全设置）
+│   │   │   ├── tasks.py               # Celery 异步任务
+│   │   │   ├── models.py              # GoogleTask / GoogleTaskAccount / GoogleCardInfo
+│   │   │   └── docs/自动化维护指南.md  # ★ 核心维护文档
+│   │   └── gpt_business/             # GPT 专区插件
+│   │       ├── services/              # 自动化服务（注册/邀请/结算）
+│   │       ├── tasks.py               # Celery 任务
+│   │       └── docs/                  # 插件文档
+│   ├── requirements/                  # Python 依赖
+│   │   ├── base.txt                   # 基础依赖
+│   │   └── development.txt            # 开发依赖
+│   ├── scripts/                       # 工具脚本
+│   │   ├── reset_password.py          # 密码重置
+│   │   └── update_env_for_docker.sh   # Docker 环境配置更新
+│   └── logs/                          # 运行时日志
+│
+└── frontend/
+    └── src/
+        ├── api/                       # API 接口层（按模块拆分）
+        ├── components/
+        │   ├── ui/                    # shadcn-vue 基础组件
+        │   ├── app/                   # Element Plus 兼容层封装
+        │   └── zones/                 # 专区业务组件
+        ├── composables/               # 组合式函数
+        ├── layouts/                   # 布局组件
+        ├── router/                    # 路由配置
+        ├── stores/                    # Pinia 状态管理
+        ├── plugins/                   # 插件注册
+        ├── types/                     # TypeScript 类型定义
+        └── views/                     # 页面视图
+            ├── admin/                 # 管理后台
+            ├── auth/                  # 认证页面
+            ├── cards/                 # 虚拟卡管理
+            ├── google/                # Google 账号管理
+            └── zones/                 # 专区页面
 ```
 
 ---
@@ -338,7 +347,7 @@ INSTALLED_APPS = [
 1. **UI 组件**：基于 shadcn-vue (reka-ui) + Tailwind CSS，不直接依赖 Element Plus
 2. **兼容层**：`components/app/` 中有 `ElSwitch` → `Toggle`、`ElTable` → `DataTable` 等映射
 3. **API 调用**：`src/api/` 按模块拆分，使用 axios 实例 + JWT 拦截器
-4. **路由**：模块化路由在 `src/router/modules/` 中注册
+4. **路由**：路由配置集中在 `src/router/index.ts` 中管理
 5. **日志清理**：`src/lib/log-utils.ts` 提供统一的日志文本清理（过滤 JSON 重复行、去冗余前缀、简化时间戳），Google/GPT 专区共用
 
 ### 常见开发陷阱
@@ -490,8 +499,8 @@ POST /api/v1/cards/batch_import/      # 批量导入卡片
 
 | 文档 | 说明 |
 |------|------|
-| [Google 专区自动化维护](backend/plugins/google_business/docs/AUTOMATION_MAINTENANCE.md) | **核心参考** — 任务流、数据模型、日志/产物、故障排查 |
-| [GPT 专区自动化流程](backend/plugins/gpt_business/docs/AUTOMATION_FLOW.md) | GPT 邀请自动化维护 |
+| [Google 专区自动化维护](backend/plugins/google_business/docs/自动化维护指南.md) | **核心参考** — 任务流、数据模型、日志/产物、故障排查 |
+| [GPT 专区自动化流程](backend/plugins/gpt_business/docs/自动化流程文档.md) | GPT 邀请自动化维护 |
 | [BitBrowser 模块](backend/apps/integrations/bitbrowser/README.md) | API 封装说明 |
 | [Email 模块](backend/apps/integrations/email/README.md) | CloudMail 域名邮箱集成 |
 

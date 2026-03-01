@@ -189,7 +189,7 @@ class GoogleLoginService(BaseBrowserService):
                 # 等待页面稳定
                 try:
                     await page.wait_for_load_state("networkidle", timeout=3000)
-                except:
+                except Exception:
                     pass
 
                 # A. 检测是否已登录成功 (头像检测)
@@ -298,7 +298,7 @@ class GoogleLoginService(BaseBrowserService):
                     locator = page.locator(selector).first
                     if await locator.count() > 0 and await locator.is_visible():
                         return True
-                except:
+                except Exception:
                     continue
 
             return False
@@ -330,7 +330,7 @@ class GoogleLoginService(BaseBrowserService):
                 if await page.locator(indicator).count() > 0:
                     return True
             return False
-        except:
+        except Exception:
             return False
 
     # ==================== 错误消息检测 ====================
@@ -355,7 +355,7 @@ class GoogleLoginService(BaseBrowserService):
                 if await locator.count() > 0 and await locator.first.is_visible():
                     return await locator.first.inner_text()
             return None
-        except:
+        except Exception:
             return None
 
     # ==================== 等待密码输入框 ====================
@@ -629,7 +629,7 @@ class GoogleLoginService(BaseBrowserService):
                     await btn.click()
                     await asyncio.sleep(1)
                     break
-            except:
+            except Exception:
                 pass
 
     # ==================== 登录状态检查 ====================

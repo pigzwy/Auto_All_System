@@ -227,7 +227,7 @@ class GoogleOneLinkService(BaseBrowserService):
                                 if await parent.count() > 0 and await parent.evaluate("el => el.tagName === 'A'"):
                                     href = await parent.get_attribute("href")
                                     return ('verified', href)
-                        except:
+                        except Exception:
                             pass
                         return ('verified', None)
                 
@@ -251,7 +251,7 @@ class GoogleOneLinkService(BaseBrowserService):
                                 if "student offer" in translated_text or "get offer" in translated_text:
                                     self.logger.info("Detected VERIFIED UNBOUND via translation")
                                     return ('verified', href)
-                        except:
+                        except Exception:
                             pass
                     
                     self.logger.info(f"Found SheerID link: {href}")

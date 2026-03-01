@@ -39,7 +39,7 @@ def verify_totp_code(secret: str, code: str, window: int = 1) -> bool:
     try:
         totp = pyotp.TOTP(secret)
         return totp.verify(code, valid_window=window)
-    except:
+    except Exception:
         return False
 
 

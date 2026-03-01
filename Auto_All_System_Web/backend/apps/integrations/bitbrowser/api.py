@@ -6,6 +6,7 @@ Date: 2026-01-18
 完整封装比特浏览器 Local API
 所有接口使用 POST + JSON Body 传参方式
 """
+import logging
 import requests
 from typing import Dict, Any, List, Optional, Union
 from enum import Enum
@@ -16,6 +17,8 @@ try:
 except ImportError:
     DJANGO_AVAILABLE = False
     settings = None
+
+logger = logging.getLogger(__name__)
 
 
 class ProxyType(str, Enum):
@@ -1028,7 +1031,7 @@ class BitBrowserManager:
                     browser_ids.append(browser_id)
                     
             except BitBrowserAPIError as e:
-                print(f"创建失败: {account.get('email')} - {e}")
+                logger.error("创建失败: %s - %s", account.get('email'), e)
                 continue
         
         return browser_ids
@@ -1048,7 +1051,7 @@ class BitBrowserManager:
             time.sleep(wait_seconds)
             self.api.delete_browser(browser_id)
         except BitBrowserAPIError as e:
-            print(f"关闭删除失败: {browser_id} - {e}")
+            logger.error("关闭删除失败: %s - %s", browser_id, e)
     
     def cleanup(self, profile_id: str, delete_profile: bool = False):
         """

@@ -36,6 +36,7 @@ OpenAI 协议注册机 (Protocol Keygen) v5 — 全流程纯 HTTP 实现
 """
 
 import json
+import logging
 import os
 import re
 import sys
@@ -58,6 +59,8 @@ from urllib3.util.retry import Retry
 import urllib3
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
+logger = logging.getLogger(__name__)
 
 
 # =================== 配置加载 ===================
@@ -521,11 +524,11 @@ class SentinelTokenGenerator:
             result = self._run_check(start_time, seed, difficulty, config, i)
             if result:
                 elapsed = time.time() - start_time
-                print(f"  ✅ PoW 完成: {i + 1} 次迭代, 耗时 {elapsed:.2f}s")
+                logger.info("PoW 完成: %d 次迭代, 耗时 %.2fs", i + 1, elapsed)
                 return "gAAAAAB" + result
 
         # PoW 失败（超过最大尝试次数），返回错误 token
-        print(f"  ⚠️ PoW 超过最大尝试次数 ({self.MAX_ATTEMPTS})")
+        logger.warning("PoW 超过最大尝试次数 (%d)", self.MAX_ATTEMPTS)
         return "gAAAAAB" + self.ERROR_PREFIX + self._base64_encode(str(None))
 
     def generate_requirements_token(self):
@@ -563,7 +566,7 @@ def _resolve_mail_auth_token(mail_auth):
 
 def _create_temp_email_cf_worker(session):
     """通过 Cloudflare Worker 创建临时邮箱。"""
-    print("📧 创建临时邮箱（cf_worker）...")
+    logger.info("创建临时邮箱（cf_worker）...")
     name_len = random.randint(10, 14)
     name_chars = list(random.choices(string.ascii_lowercase, k=name_len))
     for _ in range(random.choice([1, 2])):
@@ -587,28 +590,28 @@ def _create_temp_email_cf_worker(session):
             email = data.get("address")
             token = data.get("jwt")
             if email:
-                print(f"  ✅ 邮箱: {email}")
+                logger.info("邮箱: %s", email)
                 return email, _normalize_mail_auth("cf_worker", token)
-        print(f"  ❌ 创建失败: {res.status_code}")
+        logger.error("创建失败: %s", res.status_code)
     except Exception as e:
-        print(f"  ❌ 异常: {e}")
+        logger.error("异常: %s", e)
     return None, None
 
 
 def _create_temp_email_mailtm(session):
     """通过 Mail.tm 创建临时邮箱。"""
-    print("📧 创建临时邮箱（mailtm）...")
+    logger.info("创建临时邮箱（mailtm）...")
     try:
         domain_resp = session.get(
             f"{MAILTM_BASE_URL}/domains", timeout=15, verify=False
         )
         if domain_resp.status_code != 200:
-            print(f"  ❌ 获取 Mail.tm 域名失败: {domain_resp.status_code}")
+            logger.error("获取 Mail.tm 域名失败: %s", domain_resp.status_code)
             return None, None
 
         domains = domain_resp.json().get("hydra:member", [])
         if not domains:
-            print("  ❌ Mail.tm 未返回可用域名")
+            logger.error("Mail.tm 未返回可用域名")
             return None, None
 
         domain = MAILTM_DOMAIN
@@ -616,12 +619,12 @@ def _create_temp_email_mailtm(session):
             if not any(
                 d.get("domain") == domain for d in domains if isinstance(d, dict)
             ):
-                print(f"  ⚠️ 配置域名 {domain} 不可用，改用默认域名")
+                logger.warning("配置域名 %s 不可用，改用默认域名", domain)
                 domain = ""
         if not domain:
             domain = (domains[0] or {}).get("domain", "")
         if not domain:
-            print("  ❌ Mail.tm 域名为空")
+            logger.error("Mail.tm 域名为空")
             return None, None
 
         local_part = "".join(
@@ -639,8 +642,8 @@ def _create_temp_email_mailtm(session):
             verify=False,
         )
         if create_resp.status_code not in (200, 201):
-            print(
-                f"  ❌ Mail.tm 创建账号失败: {create_resp.status_code} - {create_resp.text[:200]}"
+            logger.error(
+                "Mail.tm 创建账号失败: %s - %s", create_resp.status_code, create_resp.text[:200]
             )
             return None, None
 
@@ -651,20 +654,20 @@ def _create_temp_email_mailtm(session):
             verify=False,
         )
         if token_resp.status_code != 200:
-            print(
-                f"  ❌ Mail.tm 获取 token 失败: {token_resp.status_code} - {token_resp.text[:200]}"
+            logger.error(
+                "Mail.tm 获取 token 失败: %s - %s", token_resp.status_code, token_resp.text[:200]
             )
             return None, None
 
         token = token_resp.json().get("token")
         if not token:
-            print("  ❌ Mail.tm token 为空")
+            logger.error("Mail.tm token 为空")
             return None, None
 
-        print(f"  ✅ 邮箱: {email}")
+        logger.info("邮箱: %s", email)
         return email, _normalize_mail_auth("mailtm", token)
     except Exception as e:
-        print(f"  ❌ Mail.tm 异常: {e}")
+        logger.error("Mail.tm 异常: %s", e)
         return None, None
 
 
