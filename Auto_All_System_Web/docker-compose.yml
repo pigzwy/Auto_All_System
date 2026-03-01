@@ -51,8 +51,6 @@ services:
     volumes:
       - ./backend:/app
       - "${GEEKEZ_BROWSER_PROFILES_PATH:-./data/geekez-profiles}:/geekez-browser/BrowserProfiles"
-    env_file:
-      - ./backend/.env
     environment:
       # Docker环境标识
       - DJANGO_ENVIRONMENT=docker
@@ -90,8 +88,6 @@ services:
     volumes:
       - ./backend:/app
       - "${GEEKEZ_BROWSER_PROFILES_PATH:-./data/geekez-profiles}:/geekez-browser/BrowserProfiles"
-    env_file:
-      - ./backend/.env
     environment:
       # Docker环境标识
       - DJANGO_ENVIRONMENT=docker
@@ -126,8 +122,6 @@ services:
     volumes:
       - ./backend:/app
       - "${GEEKEZ_BROWSER_PROFILES_PATH:-./data/geekez-profiles}:/geekez-browser/BrowserProfiles"
-    env_file:
-      - ./backend/.env
     environment:
       - DJANGO_ENVIRONMENT=docker
       - DB_HOST=db
