@@ -1,7 +1,0 @@
-# Google账号辅助邮箱列表
-# 每行一个邮箱地址
-# 示例:
-# recovery01@yourdomain.com
-# recovery02@yourdomain.com
-# backup01@yourdomain.com
-
